@@ -30,6 +30,9 @@ if set -q _flag_release
     set cargo_flags --release
 end
 
+# `build.rs` rebuilds the frontend automatically when frontend/** changed and
+# node_modules is present -- nothing to do here. Run `npm run watch` in another
+# pane for sub-second rebuilds while iterating on the UI.
 echo "==> building (cargo build $cargo_flags)"
 cargo build $cargo_flags
 or exit 1

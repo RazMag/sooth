@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # The built assets are committed; fail if they're stale.
+      - run: git diff --exit-code -- static/style.css static/app.js
+
+  rust:
+    runs-on: ubuntu-latest
+    # No Node here: build.rs falls back to the committed static/ assets, which
+    # the `frontend` job has already verified are fresh.
+    env:
+      SOOTH_SKIP_FRONTEND_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test

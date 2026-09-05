@@ -16,6 +16,18 @@ live status.
   them is out of scope for now, use the CLI.
 - `.d/` drop-in directories are not managed or merged into what's shown.
 
+## Sections
+
+The UI is organized as a sidebar with **Services** (the landing page —
+Containers + Pods combined, with a total/running/failed stat bar),
+**Volumes**, **Networks**, **Images** (Image + Build units), and **Ports**
+(every declared `PublishPort=` across Containers/Pods, with conflicting host
+ports flagged). Create and edit for every kind use a raw INI editor
+(CodeMirror, syntax-highlighted, live-validated against the same check the
+write path runs). `.kube` units have no dedicated section and are only
+reachable via the generic `/units` listing (unlinked from the sidebar, also
+usable as a full cross-kind fallback view).
+
 ## Running
 
 ```sh
@@ -26,9 +38,8 @@ cargo run -- --hash-password
 SOOTH_AUTH_PASSWORD_HASH='<hash from above>' cargo run
 ```
 
-By default it binds `127.0.0.1:8420` and serves `static/` relative to the
-current working directory — run it from the repo root, or set
-`WorkingDirectory=` if deployed as a systemd unit (see below).
+By default it binds `127.0.0.1:8420`. Static assets (CSS/JS) are embedded in
+the binary, so it can run from any directory.
 
 ## Configuration
 
@@ -56,7 +67,6 @@ everyone out.
 Description=sooth dashboard
 
 [Service]
-WorkingDirectory=%h/path/to/sooth
 EnvironmentFile=%h/.config/sooth/sooth.env
 ExecStart=%h/path/to/sooth/target/release/sooth
 
@@ -71,24 +81,53 @@ since systemd captures unit stdout by default.
 ## Manual verification checklist
 
 1. `cargo run -- --hash-password`, set `SOOTH_AUTH_PASSWORD_HASH`, `cargo run`.
-2. Log in at `/login`; confirm the dashboard lists whatever's already in the
-   quadlet directory with correct status.
-3. Create a test quadlet via "New unit"; confirm it lands on disk and
-   `systemctl --user list-unit-files` shows the generated `.service`.
-4. Start it; confirm the status badge flips to `active/running` live
-   (within ~1s, no page refresh), cross-checked with `systemctl --user status`.
-5. Enable it; confirm `UnitFileState` matches `systemctl --user is-enabled`.
+2. Log in; confirm Services shows correct total/running/failed counts and each
+   sidebar section lists whatever's already in the quadlet directory.
+3. Create a container via the Services page's "+ Container" editor; confirm
+   live validation (`✓ / ✗`), that it lands on disk with the INI you typed,
+   and `systemctl --user list-unit-files` shows the generated `.service`.
+   Repeat for a pod, then use its "Add container to this pod" link to
+   confirm `Pod=` prefills correctly on the container form.
+4. Start it from the list page's kebab menu; confirm the status badge flips
+   to `Running` live (within ~1s, no page refresh) both there and in the
+   Services stat bar, cross-checked with `systemctl --user status`.
+5. Enable it; confirm the `enabled` chip matches `systemctl --user is-enabled`.
 6. Open the log viewer; compare against `journalctl --user -u <name>.service`.
-7. Stop, disable, delete; confirm the file and generated unit are gone.
-8. Restart `sooth` while a unit is running; confirm status is correctly
+7. Check the Ports section shows the container's published port(s); create a
+   second unit on the same host port and confirm both are flagged as
+   conflicting.
+8. Stop, disable, delete; confirm the file and generated unit are gone, and
+   the Services counts update without a page reload.
+9. Restart `sooth` while a unit is running; confirm status is correctly
    re-derived from systemd, not stale (there's no cache to go stale).
-9. Submit an intentionally invalid unit file; confirm a clear validation
-   error with no partial write, and check the error id shows up in
-   `journalctl --user -u sooth` if deployed as a service.
+10. Submit an intentionally invalid file (e.g. missing `[Container]`); confirm
+    a clear validation error with entered content preserved and no partial write.
+11. Create a `.kube` file directly in the quadlet directory; confirm it's
+    manageable at `/units/<file>` even though it has no sidebar section.
+12. Toggle the theme (sidebar footer) and shrink the window below ~960px;
+    confirm no flash on reload and the sidebar collapses to a drawer.
 
 ## Development
 
+`static/style.css` and `static/app.js` are committed build artifacts
+(Tailwind v4 + esbuild, from `frontend/**`). `cargo build` embeds them, so a
+build with no Node toolchain still produces a working binary from whatever is
+checked in.
+
+When Node *is* set up (`npm ci` once), `build.rs` re-runs the frontend build
+on `cargo build` / `cargo run`, but only when something under `frontend/**`
+(or `package.json` / the build script) changed since the last build.
+
 ```sh
-cargo test      # parser/naming/writer unit tests
+npm ci            # once
+cargo run         # a cold start rebuilds static/ from frontend/** if needed, then serves
+
+cargo test        # parser/naming/writer/ports unit tests
 cargo clippy --all-targets
 ```
+
+Iterating on the UI: run `npm run watch` in a second pane — it rewrites
+`static/` on save and a debug build re-reads it per request, so you don't
+restart the server. Without watch, restart `cargo run` to pick up a
+`frontend/**` edit. `SOOTH_SKIP_FRONTEND_BUILD=1` skips the frontend build
+entirely (e.g. a read-only checkout).
