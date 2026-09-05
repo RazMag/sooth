@@ -12,7 +12,10 @@ pub fn generate() -> String {
 }
 
 pub async fn store(session: &Session, token: &str) -> Result<(), super::AuthError> {
-    session.insert(CSRF_KEY, token).await.map_err(|e| super::AuthError::Session(e.to_string()))
+    session
+        .insert(CSRF_KEY, token)
+        .await
+        .map_err(|e| super::AuthError::Session(e.to_string()))
 }
 
 pub async fn current(session: &Session) -> Option<String> {

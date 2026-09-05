@@ -2,8 +2,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use figment::providers::{Env, Format, Serialized, Toml};
 use figment::Figment;
+use figment::providers::{Env, Format, Serialized, Toml};
 use serde::{Deserialize, Serialize};
 
 use crate::events::EventSender;
@@ -80,14 +80,18 @@ impl Config {
                  (generate one with: sooth --hash-password)"
             );
         }
-        argon2::PasswordHash::new(&self.auth_password_hash)
-            .map_err(|e| anyhow::anyhow!("SOOTH_AUTH_PASSWORD_HASH is not a valid argon2 hash: {e}"))?;
+        argon2::PasswordHash::new(&self.auth_password_hash).map_err(|e| {
+            anyhow::anyhow!("SOOTH_AUTH_PASSWORD_HASH is not a valid argon2 hash: {e}")
+        })?;
         Ok(())
     }
 }
 
-fn default_config_path() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("sooth").join("config.toml")
+pub fn default_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("sooth")
+        .join("config.toml")
 }
 
 /// Shared application state handed to every Axum handler.
@@ -97,6 +101,11 @@ pub struct AppState {
     pub quadlet_dir: Arc<PathBuf>,
     pub systemd: Arc<Client>,
     pub events: EventSender,
+    /// The TOML file `Config::load` actually resolved and read (whether or
+    /// not it existed yet) -- kept around so the Settings page can write
+    /// back to the exact same file, rather than re-deriving the path (and
+    /// potentially disagreeing with it) at request time.
+    pub config_path: Arc<PathBuf>,
     /// Flips to `true` when a shutdown signal arrives. SSE handlers
     /// (`/events`, `/units/:file/logs/stream`) are otherwise infinite
     /// streams -- axum's graceful shutdown waits for in-flight requests to

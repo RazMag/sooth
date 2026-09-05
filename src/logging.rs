@@ -1,6 +1,6 @@
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 /// Initializes structured logging to stdout. When `sooth` runs as a systemd
 /// user service, systemd captures unit stdout into the journal natively, so

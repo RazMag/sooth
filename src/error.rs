@@ -54,7 +54,9 @@ impl AppError {
     fn log(&self) -> Uuid {
         let id = Uuid::new_v4();
         match self {
-            AppError::NotFound(_) | AppError::Quadlet(QuadletError::Validation(_) | QuadletError::GeneratorRejected(_)) => {
+            AppError::NotFound(_)
+            | AppError::Quadlet(QuadletError::Validation(_) | QuadletError::GeneratorRejected(_)) =>
+            {
                 warn!(error_id = %id, error = %self, "request failed");
             }
             _ => {
@@ -67,13 +69,19 @@ impl AppError {
     fn user_message(&self) -> String {
         match self {
             AppError::NotFound(what) => format!("Not found: {what}"),
-            AppError::Csrf => "Your session expired or the form was resubmitted. Please try again.".into(),
+            AppError::Csrf => {
+                "Your session expired or the form was resubmitted. Please try again.".into()
+            }
             AppError::Auth(_) => "You need to sign in to do that.".into(),
-            AppError::Quadlet(QuadletError::Validation(msg) | QuadletError::GeneratorRejected(msg)) => {
+            AppError::Quadlet(
+                QuadletError::Validation(msg) | QuadletError::GeneratorRejected(msg),
+            ) => {
                 format!("That quadlet file is not valid:\n{msg}")
             }
             AppError::Quadlet(QuadletError::NotFound(what)) => format!("Not found: {what}"),
-            AppError::Quadlet(QuadletError::Io(_)) => "Could not read or write the quadlet directory.".into(),
+            AppError::Quadlet(QuadletError::Io(_)) => {
+                "Could not read or write the quadlet directory.".into()
+            }
             AppError::Systemd(_) => "systemd did not accept that action.".into(),
             AppError::Internal(_) => "Something went wrong.".into(),
         }
@@ -104,7 +112,11 @@ impl IntoResponse for PageError {
     fn into_response(self) -> Response {
         let id = self.0.log();
         let status = self.0.status();
-        (status, templates::error_page(status, &self.0.user_message(), id)).into_response()
+        (
+            status,
+            templates::error_page(status, &self.0.user_message(), id),
+        )
+            .into_response()
     }
 }
 
@@ -112,6 +124,10 @@ impl IntoResponse for FragmentError {
     fn into_response(self) -> Response {
         let id = self.0.log();
         let status = self.0.status();
-        (status, templates::error_fragment(&self.0.user_message(), id)).into_response()
+        (
+            status,
+            templates::error_fragment(&self.0.user_message(), id),
+        )
+            .into_response()
     }
 }

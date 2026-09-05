@@ -4,7 +4,7 @@ use std::process::Command;
 
 use tracing::debug;
 
-use super::{naming, parser, QuadletError};
+use super::{QuadletError, naming, parser};
 
 /// Structural + best-effort generator validation for a candidate quadlet
 /// file's contents, run before any write hits disk.
@@ -12,11 +12,15 @@ pub fn validate(file_name: &str, contents: &str) -> Result<(), QuadletError> {
     if contents.trim().is_empty() {
         return Err(QuadletError::Validation("file is empty".into()));
     }
-    let kind = naming::kind_of(file_name)
-        .ok_or_else(|| QuadletError::Validation(format!("unrecognized quadlet extension: {file_name}")))?;
+    let kind = naming::kind_of(file_name).ok_or_else(|| {
+        QuadletError::Validation(format!("unrecognized quadlet extension: {file_name}"))
+    })?;
     let sections = parser::parse(contents)?;
     let required = kind.primary_section();
-    if !sections.iter().any(|s| s.name.eq_ignore_ascii_case(required)) {
+    if !sections
+        .iter()
+        .any(|s| s.name.eq_ignore_ascii_case(required))
+    {
         return Err(QuadletError::Validation(format!(
             "missing required [{required}] section for a .{} file",
             kind.extension()
@@ -102,7 +106,8 @@ mod tests {
     #[test]
     fn rejects_missing_primary_section() {
         let dir = tempfile::tempdir().unwrap();
-        let err = write_atomic(dir.path(), "test.container", "[Unit]\nDescription=x\n").unwrap_err();
+        let err =
+            write_atomic(dir.path(), "test.container", "[Unit]\nDescription=x\n").unwrap_err();
         assert!(matches!(err, QuadletError::Validation(_)));
     }
 
@@ -115,6 +120,9 @@ mod tests {
     #[test]
     fn delete_missing_file_errors() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(matches!(delete(dir.path(), "nope.container"), Err(QuadletError::NotFound(_))));
+        assert!(matches!(
+            delete(dir.path(), "nope.container"),
+            Err(QuadletError::NotFound(_))
+        ));
     }
 }

@@ -11,7 +11,10 @@ pub fn service_name(file_name: &str) -> String {
 }
 
 pub fn stem(file_name: &str) -> &str {
-    file_name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(file_name)
+    file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name)
 }
 
 pub fn extension(file_name: &str) -> Option<&str> {

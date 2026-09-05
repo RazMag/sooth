@@ -17,7 +17,16 @@ use crate::systemd::SystemdError;
 /// page load.
 pub async fn tail_recent(service: &str, lines: u32) -> Result<String, SystemdError> {
     let output = Command::new("journalctl")
-        .args(["--user", "-u", service, "-n", &lines.to_string(), "--no-pager", "-o", "short-iso"])
+        .args([
+            "--user",
+            "-u",
+            service,
+            "-n",
+            &lines.to_string(),
+            "--no-pager",
+            "-o",
+            "short-iso",
+        ])
         .output()
         .await
         .map_err(|e| SystemdError::action_failed(service, "read logs", e))?;
@@ -34,7 +43,16 @@ pub async fn tail_recent(service: &str, lines: u32) -> Result<String, SystemdErr
 /// SSE connection).
 pub fn follow(service: &str) -> std::io::Result<(Child, BufReader<ChildStdout>)> {
     let mut child = Command::new("journalctl")
-        .args(["--user", "-u", service, "-f", "-o", "short-iso", "--since", "now"])
+        .args([
+            "--user",
+            "-u",
+            service,
+            "-f",
+            "-o",
+            "short-iso",
+            "--since",
+            "now",
+        ])
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn()?;

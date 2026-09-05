@@ -17,7 +17,8 @@ pub async fn require_auth(session: Session, request: Request, next: Next) -> Res
     debug!("rejecting unauthenticated request");
     if request.headers().contains_key("HX-Request") {
         let mut resp = StatusCode::UNAUTHORIZED.into_response();
-        resp.headers_mut().insert("HX-Redirect", HeaderValue::from_static("/login"));
+        resp.headers_mut()
+            .insert("HX-Redirect", HeaderValue::from_static("/login"));
         resp
     } else {
         Redirect::to("/login").into_response()

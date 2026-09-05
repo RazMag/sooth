@@ -14,13 +14,14 @@ maud = { version = "0.27.0", features = ["axum"] }
 notify = "8.2.0"
 rand = "0.10.2"
 rpassword = "7.5.4"
+rust-embed = "8.7.2"
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.20"
 time = "0.3.55"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "fs", "signal", "process", "io-util", "sync"] }
 tokio-stream = { version = "0.1.19", features = ["io-util", "sync"] }
 tower = "0.5.3"
-tower-http = { version = "0.7.1", features = ["trace", "fs", "timeout"] }
+tower-http = { version = "0.7.1", features = ["trace", "timeout"] }
 tower-sessions = { version = "0.15.0", default-features = false, features = ["axum-core", "memory-store"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }

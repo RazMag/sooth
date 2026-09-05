@@ -1,5 +1,5 @@
-use super::model::Section;
 use super::QuadletError;
+use super::model::Section;
 
 /// Parses a quadlet/systemd-unit-style INI file into ordered sections,
 /// preserving duplicate keys. Comments (`#`/`;`) and blank lines are dropped
@@ -24,7 +24,10 @@ pub fn parse(text: &str) -> Result<Vec<Section>, QuadletError> {
             if let Some(section) = current.take() {
                 sections.push(section);
             }
-            current = Some(Section { name: header.trim().to_string(), entries: Vec::new() });
+            current = Some(Section {
+                name: header.trim().to_string(),
+                entries: Vec::new(),
+            });
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
@@ -39,7 +42,9 @@ pub fn parse(text: &str) -> Result<Vec<Section>, QuadletError> {
                 lineno + 1
             )));
         };
-        section.entries.push((key.trim().to_string(), value.trim().to_string()));
+        section
+            .entries
+            .push((key.trim().to_string(), value.trim().to_string()));
     }
     if let Some(section) = current.take() {
         sections.push(section);
@@ -67,8 +72,12 @@ Environment=FOO=bar
         assert_eq!(sections.len(), 2);
         assert_eq!(sections[0].name, "Unit");
         assert_eq!(sections[1].name, "Container");
-        let volumes: Vec<_> =
-            sections[1].entries.iter().filter(|(k, _)| k == "Volume").map(|(_, v)| v.as_str()).collect();
+        let volumes: Vec<_> = sections[1]
+            .entries
+            .iter()
+            .filter(|(k, _)| k == "Volume")
+            .map(|(_, v)| v.as_str())
+            .collect();
         assert_eq!(volumes, vec!["/a:/a", "/b:/b"]);
     }
 

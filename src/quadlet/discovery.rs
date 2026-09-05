@@ -4,9 +4,17 @@ use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use super::model::QuadletUnit;
-use super::{naming, parser, QuadletError};
+use super::{QuadletError, naming, parser};
 
-const EXTENSIONS: &[&str] = &["container", "volume", "network", "pod", "kube", "build", "image"];
+const EXTENSIONS: &[&str] = &[
+    "container",
+    "volume",
+    "network",
+    "pod",
+    "kube",
+    "build",
+    "image",
+];
 
 /// Resolves the rootless quadlet directory: `$XDG_CONFIG_HOME/containers/systemd`,
 /// falling back to `~/.config/containers/systemd` when unset. This is the one
@@ -65,10 +73,17 @@ pub fn load_all(dir: &Path) -> Result<Vec<QuadletUnit>, QuadletError> {
 
 fn load_one(path: &Path, file_name: &str) -> Result<QuadletUnit, QuadletError> {
     let raw = std::fs::read_to_string(path)?;
-    let kind = naming::kind_of(file_name)
-        .ok_or_else(|| QuadletError::Validation(format!("unrecognized quadlet extension: {file_name}")))?;
+    let kind = naming::kind_of(file_name).ok_or_else(|| {
+        QuadletError::Validation(format!("unrecognized quadlet extension: {file_name}"))
+    })?;
     let sections = parser::parse(&raw)?;
-    Ok(QuadletUnit { file_name: file_name.to_string(), path: path.to_path_buf(), kind, sections, raw })
+    Ok(QuadletUnit {
+        file_name: file_name.to_string(),
+        path: path.to_path_buf(),
+        kind,
+        sections,
+        raw,
+    })
 }
 
 pub fn load_by_name(dir: &Path, file_name: &str) -> Result<QuadletUnit, QuadletError> {
@@ -83,7 +98,10 @@ pub fn load_by_name(dir: &Path, file_name: &str) -> Result<QuadletUnit, QuadletE
 /// the dashboard) and notifies `changed` so callers can debounce, re-enumerate,
 /// and trigger a systemd reload. Runs for as long as the returned watcher is
 /// kept alive.
-pub fn watch(dir: &Path, changed: broadcast::Sender<()>) -> notify::Result<notify::RecommendedWatcher> {
+pub fn watch(
+    dir: &Path,
+    changed: broadcast::Sender<()>,
+) -> notify::Result<notify::RecommendedWatcher> {
     use notify::{RecursiveMode, Watcher};
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {

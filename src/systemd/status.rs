@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use zbus::{fdo::PropertiesProxy, names::InterfaceName, zvariant::OwnedValue, Connection};
+use zbus::{Connection, fdo::PropertiesProxy, names::InterfaceName, zvariant::OwnedValue};
 
-use super::client::ManagerProxy;
 use super::SystemdError;
+use super::client::ManagerProxy;
 
 /// A unit's live status as reported by systemd over D-Bus.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,8 +69,10 @@ pub(super) async fn fetch(
     const SERVICE_IFACE: InterfaceName<'static> =
         InterfaceName::from_static_str_unchecked("org.freedesktop.systemd1.Service");
 
-    let unit_props =
-        props.get_all(UNIT_IFACE).await.map_err(|e| SystemdError::action_failed(unit, "status", e))?;
+    let unit_props = props
+        .get_all(UNIT_IFACE)
+        .await
+        .map_err(|e| SystemdError::action_failed(unit, "status", e))?;
     // Not every unit type has a Service interface (e.g. .device, .mount);
     // missing UnitFileState just renders as "unknown".
     let service_props = props.get_all(SERVICE_IFACE).await.unwrap_or_default();
@@ -85,5 +87,7 @@ pub(super) async fn fetch(
 }
 
 fn get_str(map: &HashMap<String, OwnedValue>, key: &str) -> String {
-    map.get(key).and_then(|v| String::try_from(v.clone()).ok()).unwrap_or_default()
+    map.get(key)
+        .and_then(|v| String::try_from(v.clone()).ok())
+        .unwrap_or_default()
 }

@@ -2,12 +2,12 @@ use futures_util::StreamExt;
 use tracing::{debug, warn};
 use zbus::fdo::DBusProxy;
 use zbus::message::Type as MessageType;
-use zbus::{zvariant::ObjectPath, Connection, MatchRule, MessageStream};
+use zbus::{Connection, MatchRule, MessageStream, zvariant::ObjectPath};
 
 use crate::events::{DashboardEvent, EventSender};
 
-use super::client::ManagerProxy;
 use super::Client;
+use super::client::ManagerProxy;
 
 const UNIT_PATH_PREFIX: &str = "/org/freedesktop/systemd1/unit/";
 
@@ -36,7 +36,10 @@ const UNIT_PATH_PREFIX: &str = "/org/freedesktop/systemd1/unit/";
 /// reason to close), and an un-aborted infinite task left running blocks
 /// `tokio::runtime::Runtime`'s `Drop` forever, which otherwise silently
 /// turns "shutdown signal received" into a process that never actually exits.
-pub async fn spawn(client: Client, events: EventSender) -> zbus::Result<tokio::task::JoinHandle<()>> {
+pub async fn spawn(
+    client: Client,
+    events: EventSender,
+) -> zbus::Result<tokio::task::JoinHandle<()>> {
     let connection = Connection::session().await?;
     let manager = ManagerProxy::new(&connection).await?;
     manager.subscribe().await?;
@@ -48,7 +51,10 @@ pub async fn spawn(client: Client, events: EventSender) -> zbus::Result<tokio::t
         .path_namespace(ObjectPath::try_from("/org/freedesktop/systemd1/unit")?)?
         .build();
 
-    DBusProxy::new(&connection).await?.add_match_rule(rule).await?;
+    DBusProxy::new(&connection)
+        .await?
+        .add_match_rule(rule)
+        .await?;
 
     let mut stream = MessageStream::from(connection);
     let handle = tokio::spawn(async move {
@@ -71,7 +77,9 @@ pub async fn spawn(client: Client, events: EventSender) -> zbus::Result<tokio::t
                     debug!(service, ?status, "unit status changed");
                     let _ = events.send(DashboardEvent::Status { service, status });
                 }
-                Err(e) => warn!(service, error = %e, "failed to refresh status after change notification"),
+                Err(e) => {
+                    warn!(service, error = %e, "failed to refresh status after change notification")
+                }
             }
         }
     });

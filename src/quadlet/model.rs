@@ -75,7 +75,10 @@ pub struct Section {
 
 impl Section {
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+        self.entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -108,7 +111,10 @@ impl QuadletUnit {
     }
 
     pub fn description(&self) -> Option<&str> {
-        self.section(self.kind.primary_section())
-            .and_then(|s| s.get("Image").or_else(|| s.get("Network")).or_else(|| s.get("VolumeName")))
+        self.section(self.kind.primary_section()).and_then(|s| {
+            s.get("Image")
+                .or_else(|| s.get("Network"))
+                .or_else(|| s.get("VolumeName"))
+        })
     }
 }

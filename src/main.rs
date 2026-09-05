@@ -54,7 +54,10 @@ fn hash_password_cli() -> anyhow::Result<()> {
 }
 
 async fn run() -> anyhow::Result<()> {
-    let config = Config::load(std::env::var_os("SOOTH_CONFIG").map(Into::into))?;
+    let config_path = std::env::var_os("SOOTH_CONFIG")
+        .map(Into::into)
+        .unwrap_or_else(config::default_config_path);
+    let config = Config::load(Some(config_path.clone()))?;
     logging::init(config.log_filter.as_deref());
     config.validate()?;
 
@@ -103,6 +106,7 @@ async fn run() -> anyhow::Result<()> {
         config: Arc::new(config.clone()),
         quadlet_dir: Arc::new(quadlet_dir),
         systemd: Arc::new(systemd_client),
+        config_path: Arc::new(config_path),
         events: events_tx,
         shutdown: shutdown_rx,
     };
@@ -111,7 +115,9 @@ async fn run() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     info!(addr = %config.bind_addr, "sooth listening");
 
-    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal(shutdown_tx)).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(shutdown_tx))
+        .await?;
 
     // Both of these loop forever on their own (there's nothing that closes
     // their channel/connection), so they must be cancelled explicitly here --

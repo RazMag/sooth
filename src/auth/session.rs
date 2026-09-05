@@ -1,6 +1,6 @@
+use axum::Form;
 use axum::extract::State;
 use axum::response::{IntoResponse, Redirect, Response};
-use axum::Form;
 use serde::Deserialize;
 use time::Duration;
 use tower_sessions::cookie::SameSite;
@@ -24,11 +24,18 @@ pub fn layer(secure: bool, idle_timeout_secs: u64) -> SessionManagerLayer<Memory
         .with_secure(secure)
         .with_http_only(true)
         .with_same_site(SameSite::Strict)
-        .with_expiry(Expiry::OnInactivity(Duration::seconds(idle_timeout_secs as i64)))
+        .with_expiry(Expiry::OnInactivity(Duration::seconds(
+            idle_timeout_secs as i64,
+        )))
 }
 
 pub async fn is_authenticated(session: &Session) -> bool {
-    session.get::<bool>(AUTH_KEY).await.ok().flatten().unwrap_or(false)
+    session
+        .get::<bool>(AUTH_KEY)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false)
 }
 
 #[derive(Deserialize)]
@@ -47,9 +54,12 @@ pub async fn login_submit(
 ) -> Result<Response, PageError> {
     use argon2::password_hash::PasswordVerifier;
 
-    let hash = argon2::PasswordHash::new(&state.config.auth_password_hash)
-        .map_err(|e| anyhow::anyhow!("stored SOOTH_AUTH_PASSWORD_HASH is not a valid argon2 hash: {e}"))?;
-    let valid = argon2::Argon2::default().verify_password(form.password.as_bytes(), &hash).is_ok();
+    let hash = argon2::PasswordHash::new(&state.config.auth_password_hash).map_err(|e| {
+        anyhow::anyhow!("stored SOOTH_AUTH_PASSWORD_HASH is not a valid argon2 hash: {e}")
+    })?;
+    let valid = argon2::Argon2::default()
+        .verify_password(form.password.as_bytes(), &hash)
+        .is_ok();
 
     if !valid {
         warn!("failed login attempt");
@@ -57,8 +67,14 @@ pub async fn login_submit(
     }
 
     // Regenerate the session id on privilege change to prevent session fixation.
-    session.cycle_id().await.map_err(|e| anyhow::anyhow!("session error: {e}"))?;
-    session.insert(AUTH_KEY, true).await.map_err(|e| anyhow::anyhow!("session error: {e}"))?;
+    session
+        .cycle_id()
+        .await
+        .map_err(|e| anyhow::anyhow!("session error: {e}"))?;
+    session
+        .insert(AUTH_KEY, true)
+        .await
+        .map_err(|e| anyhow::anyhow!("session error: {e}"))?;
     crate::auth::csrf::store(&session, &crate::auth::csrf::generate())
         .await
         .map_err(|e| anyhow::anyhow!("session error: {e}"))?;

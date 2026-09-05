@@ -2,6 +2,7 @@ pub mod discovery;
 pub mod model;
 pub mod naming;
 pub mod parser;
+pub mod ports;
 pub mod writer;
 
 pub use model::{QuadletUnit, UnitKind};
@@ -16,4 +17,16 @@ pub enum QuadletError {
     GeneratorRejected(String),
     #[error("filesystem error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl QuadletError {
+    /// True for errors that mean "the content the user submitted was bad" --
+    /// callers redisplay the originating form with the message rather than
+    /// rendering a generic error page.
+    pub fn is_client_error(&self) -> bool {
+        matches!(
+            self,
+            QuadletError::Validation(_) | QuadletError::GeneratorRejected(_)
+        )
+    }
 }

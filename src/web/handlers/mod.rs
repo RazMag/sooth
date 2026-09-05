@@ -1,5 +1,10 @@
-pub mod dashboard;
+pub mod detail;
+pub mod edit_delete;
+pub mod list;
 pub mod logs;
-pub mod unit_actions;
-pub mod unit_detail;
-pub mod unit_edit;
+pub mod ports;
+pub mod raw_create;
+pub mod services;
+pub mod settings;
+pub mod unit_ops;
+pub mod validate;

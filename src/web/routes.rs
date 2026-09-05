@@ -1,53 +1,128 @@
+use axum::Router;
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use axum::Router;
-use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 
 use crate::auth;
 use crate::config::AppState;
 
-use super::handlers::{dashboard, logs, unit_actions, unit_detail, unit_edit};
-use super::sse;
+use super::handlers::{
+    detail, edit_delete, list, logs, ports, raw_create, services, settings, unit_ops, validate,
+};
 
-/// Assembles the whole app: a `protected` sub-router (everything requiring a
-/// signed-in session) merged with a small `public` one (login, static
-/// assets, health check), with the session layer wrapping both -- login
-/// itself needs a session to write "authenticated" into -- and the auth
-/// middleware applied only to `protected`.
+/// Registers the routes every section shares -- detail, status fragment,
+/// actions, edit, delete, logs -- at one URL prefix. Called once per
+/// section (`/containers`, `/pods`, `/volumes`, `/networks`, `/images`,
+/// and `/units` for the generic Kube/fallback section), always pointing at
+/// the exact same handler functions: none of this logic differs by kind, so
+/// there's exactly one implementation, just reachable at six prefixes.
+fn mount_unit_routes(router: Router<AppState>, prefix: &str) -> Router<AppState> {
+    router
+        .route(&format!("{prefix}/{{file_name}}"), get(detail::show))
+        .route(
+            &format!("{prefix}/{{file_name}}/start"),
+            post(unit_ops::start),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/stop"),
+            post(unit_ops::stop),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/restart"),
+            post(unit_ops::restart),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/enable"),
+            post(unit_ops::enable),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/disable"),
+            post(unit_ops::disable),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/edit"),
+            get(edit_delete::edit_form).post(edit_delete::edit_submit),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/delete"),
+            post(edit_delete::delete),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/logs"),
+            get(logs::logs_page),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/logs/stream"),
+            get(logs::logs_stream),
+        )
+}
+
 pub fn build_router(state: AppState) -> Router {
-    let protected = Router::new()
-        .route("/", get(dashboard::dashboard))
-        .route("/units/new", get(unit_edit::new_form))
-        .route("/units", post(unit_edit::create))
-        .route("/units/{file_name}", get(unit_detail::detail))
-        .route("/units/{file_name}/status", get(unit_detail::status_fragment))
-        .route("/units/{file_name}/start", post(unit_actions::start))
-        .route("/units/{file_name}/stop", post(unit_actions::stop))
-        .route("/units/{file_name}/restart", post(unit_actions::restart))
-        .route("/units/{file_name}/enable", post(unit_actions::enable))
-        .route("/units/{file_name}/disable", post(unit_actions::disable))
-        .route("/units/{file_name}/edit", get(unit_edit::edit_form).post(unit_edit::edit_submit))
-        .route("/units/{file_name}/delete", post(unit_edit::delete))
-        .route("/units/{file_name}/logs", get(logs::logs_page))
-        .route("/units/{file_name}/logs/stream", get(logs::logs_stream))
-        .route("/events", get(sse::events_stream))
-        .route("/logout", post(auth::session::logout))
-        .route_layer(middleware::from_fn(auth::middleware::require_auth));
+    let mut protected = Router::new()
+        // Services: the home page, combining Containers + Pods.
+        .route("/", get(services::page))
+        .route("/services/rows", get(services::rows))
+        .route("/services/counts", get(services::counts))
+        // Containers/Pods: no standalone list page (that's Services above),
+        // but they still need a create entry point and POST target.
+        .route("/containers", post(raw_create::create))
+        .route("/containers/new", get(raw_create::containers_new_form))
+        .route("/pods", post(raw_create::create))
+        .route("/pods/new", get(raw_create::pods_new_form))
+        // Volumes/Networks/Images: their own list page + shared raw-textarea create.
+        .route("/volumes", get(list::volumes_page).post(raw_create::create))
+        .route("/volumes/rows", get(list::volumes_rows))
+        .route("/volumes/new", get(raw_create::volumes_new_form))
+        .route(
+            "/networks",
+            get(list::networks_page).post(raw_create::create),
+        )
+        .route("/networks/rows", get(list::networks_rows))
+        .route("/networks/new", get(raw_create::networks_new_form))
+        .route("/images", get(list::images_page).post(raw_create::create))
+        .route("/images/rows", get(list::images_rows))
+        .route("/images/new", get(raw_create::images_new_form))
+        // Generic fallback: all kinds, unlinked from the sidebar, Kube's only home.
+        .route("/units", get(list::all_units_page).post(raw_create::create))
+        .route("/units/rows", get(list::all_units_rows))
+        .route("/units/new", get(raw_create::units_new_form))
+        .route("/ports", get(ports::index))
+        .route("/settings", get(settings::page).post(settings::save))
+        .route("/validate", post(validate::check))
+        .route("/events", get(super::sse::events_stream))
+        .route("/logout", post(auth::session::logout));
+
+    for prefix in [
+        "/containers",
+        "/pods",
+        "/volumes",
+        "/networks",
+        "/images",
+        "/units",
+    ] {
+        protected = mount_unit_routes(protected, prefix);
+    }
+    protected = protected.route_layer(middleware::from_fn(auth::middleware::require_auth));
 
     let public = Router::new()
-        .route("/login", get(auth::session::login_page).post(auth::session::login_submit))
+        .route(
+            "/login",
+            get(auth::session::login_page).post(auth::session::login_submit),
+        )
         .route("/healthz", get(healthz))
-        .nest_service("/static", ServeDir::new("static"));
+        .route("/static/{*path}", get(super::assets::handler));
 
     Router::new()
         .merge(protected)
         .merge(public)
         .fallback(not_found)
         .layer(TraceLayer::new_for_http())
-        .layer(auth::session::layer(state.config.cookie_secure, state.config.session_idle_timeout_secs))
+        .layer(auth::session::layer(
+            state.config.cookie_secure,
+            state.config.session_idle_timeout_secs,
+        ))
         .with_state(state)
 }
 

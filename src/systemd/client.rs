@@ -1,7 +1,7 @@
-use zbus::{proxy, zvariant::OwnedObjectPath, Connection};
+use zbus::{Connection, proxy, zvariant::OwnedObjectPath};
 
-use super::status::{self, UnitStatus};
 use super::SystemdError;
+use super::status::{self, UnitStatus};
 
 /// Thin proxy over `org.freedesktop.systemd1.Manager` on the session bus --
 /// the interface systemd exposes for exactly this dashboard's needs
@@ -24,7 +24,11 @@ pub trait Manager {
         runtime: bool,
         force: bool,
     ) -> zbus::Result<(bool, Vec<(String, String, String)>)>;
-    fn disable_unit_files(&self, files: &[&str], runtime: bool) -> zbus::Result<Vec<(String, String, String)>>;
+    fn disable_unit_files(
+        &self,
+        files: &[&str],
+        runtime: bool,
+    ) -> zbus::Result<Vec<(String, String, String)>>;
     /// Required once at startup for `PropertiesChanged` signals on unit
     /// objects to actually be emitted to this connection.
     fn subscribe(&self) -> zbus::Result<()>;
@@ -43,8 +47,14 @@ impl Client {
     pub async fn connect() -> Result<Self, SystemdError> {
         let connection = Connection::session().await?;
         let manager = ManagerProxy::new(&connection).await?;
-        manager.subscribe().await.map_err(|e| SystemdError::action_failed("(daemon)", "subscribe", e))?;
-        Ok(Self { connection, manager })
+        manager
+            .subscribe()
+            .await
+            .map_err(|e| SystemdError::action_failed("(daemon)", "subscribe", e))?;
+        Ok(Self {
+            connection,
+            manager,
+        })
     }
 
     pub async fn start(&self, unit: &str) -> Result<(), SystemdError> {
@@ -91,7 +101,10 @@ impl Client {
     /// needed after any quadlet file create/edit/delete before the resulting
     /// `.service` unit can be queried or started.
     pub async fn reload(&self) -> Result<(), SystemdError> {
-        self.manager.reload().await.map_err(|e| SystemdError::action_failed("(daemon)", "reload", e))
+        self.manager
+            .reload()
+            .await
+            .map_err(|e| SystemdError::action_failed("(daemon)", "reload", e))
     }
 
     pub async fn status(&self, unit: &str) -> Result<UnitStatus, SystemdError> {
