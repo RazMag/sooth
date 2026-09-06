@@ -14,11 +14,16 @@ use super::templates;
 /// Dashboard-wide live-update stream: forwards `DashboardEvent`s from the
 /// app's broadcast channel as named SSE events. `status-{service}` carries a
 /// freshly rendered status badge fragment (swapped in directly via the
-/// `sse-swap` htmx extension); `units-changed` and `any-status` are bare
-/// pings with no payload -- every list page and the Overview page react to
-/// them by re-fetching their own `/rows` or `/overview/counts` fragment via
-/// a normal htmx GET, rather than the SSE stream trying to push
-/// pre-rendered markup for every possible page shape itself.
+/// `sse-swap` htmx extension); `units-changed` and `any-status` are pings
+/// whose payload is a throwaway `"1"` -- every list page and the detail
+/// page's action row react to them by re-fetching their own `/rows` or
+/// `/actions` fragment via a normal htmx GET, rather than the SSE stream
+/// trying to push pre-rendered markup for every possible page shape itself.
+///
+/// The payload has to be non-empty: an SSE event whose data buffer ends up
+/// empty is, per the spec, never dispatched to `EventSource` listeners, so a
+/// bare `data:` line would make these pings silently do nothing in the
+/// browser.
 pub async fn events_stream(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
@@ -48,9 +53,9 @@ fn render_event(event: DashboardEvent) -> Vec<Result<Event, Infallible>> {
                 Ok(Event::default()
                     .event(format!("status-{service}"))
                     .data(html)),
-                Ok(Event::default().event("any-status").data("")),
+                Ok(Event::default().event("any-status").data("1")),
             ]
         }
-        DashboardEvent::UnitsChanged => vec![Ok(Event::default().event("units-changed").data(""))],
+        DashboardEvent::UnitsChanged => vec![Ok(Event::default().event("units-changed").data("1"))],
     }
 }

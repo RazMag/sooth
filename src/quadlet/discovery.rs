@@ -27,6 +27,25 @@ pub fn default_quadlet_dir() -> Result<PathBuf, QuadletError> {
     Ok(config_dir.join("containers").join("systemd"))
 }
 
+/// Whether `dir` holds a quadlet file whose generated systemd unit is
+/// `service` (`foo.service` <- `foo.{container,pod,...}`), also matching a
+/// template instance against its template file (`foo@bar.service` <-
+/// `foo@.container`). A cheap existence check with no parsing, for the
+/// status-watch hot path -- it fires for *every* user unit on the bus, most
+/// of which sooth doesn't manage.
+pub fn has_quadlet_for_service(dir: &Path, service: &str) -> bool {
+    let stem = service.strip_suffix(".service").unwrap_or(service);
+    let mut bases = vec![stem.to_string()];
+    if let Some((prefix, _)) = stem.split_once('@') {
+        bases.push(format!("{prefix}@"));
+    }
+    bases.iter().any(|base| {
+        EXTENSIONS
+            .iter()
+            .any(|ext| dir.join(format!("{base}.{ext}")).exists())
+    })
+}
+
 /// Ensures the directory exists, creating it if necessary.
 pub fn ensure_dir(dir: &Path) -> Result<(), QuadletError> {
     if !dir.exists() {
@@ -94,6 +113,21 @@ pub fn load_by_name(dir: &Path, file_name: &str) -> Result<QuadletUnit, QuadletE
     load_one(&path, file_name)
 }
 
+/// A notify event that actually changes the *contents* of the quadlet
+/// directory -- a file created, removed, renamed, or written. Crucially this
+/// excludes `Access` (open/read/close-without-write) and metadata-only
+/// events: sooth reads these files constantly (every list/detail render), and
+/// inotify reports each read, so treating reads as changes would have the
+/// dashboard trigger a `daemon-reload` + full UI refresh on its own traffic.
+fn is_content_change(kind: &notify::EventKind) -> bool {
+    use notify::EventKind::{Create, Modify, Remove};
+    use notify::event::ModifyKind;
+    matches!(
+        kind,
+        Create(_) | Remove(_) | Modify(ModifyKind::Data(_) | ModifyKind::Name(_) | ModifyKind::Any)
+    )
+}
+
 /// Watches the quadlet directory for external changes (edits made outside
 /// the dashboard) and notifies `changed` so callers can debounce, re-enumerate,
 /// and trigger a systemd reload. Runs for as long as the returned watcher is
@@ -105,13 +139,68 @@ pub fn watch(
     use notify::{RecursiveMode, Watcher};
 
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Err(e) = res {
-            warn!(error = %e, "quadlet directory watch error");
-            return;
+        let event = match res {
+            Ok(e) => e,
+            Err(e) => {
+                warn!(error = %e, "quadlet directory watch error");
+                return;
+            }
+        };
+        if is_content_change(&event.kind) {
+            // Send-error just means no one is listening right now; not fatal.
+            let _ = changed.send(());
         }
-        // Send-error just means no one is listening right now; not fatal.
-        let _ = changed.send(());
     })?;
     watcher.watch(dir, RecursiveMode::NonRecursive)?;
     Ok(watcher)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn has_quadlet_for_service_matches_only_managed_units() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("web.container"), "[Container]\n").unwrap();
+        std::fs::write(dir.path().join("data.volume"), "[Volume]\n").unwrap();
+        std::fs::write(dir.path().join("tmpl@.container"), "[Container]\n").unwrap();
+
+        assert!(has_quadlet_for_service(dir.path(), "web.service"));
+        assert!(has_quadlet_for_service(dir.path(), "data.service"));
+        // template instance resolves against the template file
+        assert!(has_quadlet_for_service(dir.path(), "tmpl@1.service"));
+        // desktop noise -- nothing sooth manages
+        assert!(!has_quadlet_for_service(
+            dir.path(),
+            "plasma-kwin_wayland.service"
+        ));
+        assert!(!has_quadlet_for_service(dir.path(), "other.service"));
+    }
+
+    #[test]
+    fn watch_only_reacts_to_content_changes() {
+        use notify::EventKind;
+        use notify::event::{AccessKind, ModifyKind, RemoveKind};
+
+        assert!(is_content_change(&EventKind::Create(
+            notify::event::CreateKind::File
+        )));
+        assert!(is_content_change(&EventKind::Remove(RemoveKind::File)));
+        assert!(is_content_change(&EventKind::Modify(ModifyKind::Data(
+            notify::event::DataChange::Content
+        ))));
+        assert!(is_content_change(&EventKind::Modify(ModifyKind::Name(
+            notify::event::RenameMode::Any
+        ))));
+        // reads and metadata churn must NOT count -- sooth reads these files
+        // on every render
+        assert!(!is_content_change(&EventKind::Access(AccessKind::Read)));
+        assert!(!is_content_change(&EventKind::Access(AccessKind::Open(
+            notify::event::AccessMode::Read
+        ))));
+        assert!(!is_content_change(&EventKind::Modify(
+            ModifyKind::Metadata(notify::event::MetadataKind::AccessTime)
+        )));
+    }
 }

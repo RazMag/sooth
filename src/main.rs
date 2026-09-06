@@ -73,7 +73,12 @@ async fn run() -> anyhow::Result<()> {
 
     // Live status updates: forward systemd PropertiesChanged signals onto
     // the dashboard's event channel.
-    let watch_task = systemd::watch::spawn(systemd_client.clone(), events_tx.clone()).await?;
+    let watch_task = systemd::watch::spawn(
+        systemd_client.clone(),
+        events_tx.clone(),
+        quadlet_dir.clone(),
+    )
+    .await?;
 
     // External-edit detection: watch the quadlet directory itself, debounce
     // bursts (editors write-then-rename), then reload systemd and notify the

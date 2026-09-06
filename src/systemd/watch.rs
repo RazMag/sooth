@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use futures_util::StreamExt;
 use tracing::{debug, warn};
 use zbus::fdo::DBusProxy;
@@ -5,17 +7,24 @@ use zbus::message::Type as MessageType;
 use zbus::{Connection, MatchRule, MessageStream, zvariant::ObjectPath};
 
 use crate::events::{DashboardEvent, EventSender};
+use crate::quadlet::discovery;
 
 use super::Client;
 use super::client::ManagerProxy;
 
 const UNIT_PATH_PREFIX: &str = "/org/freedesktop/systemd1/unit/";
 
-/// Subscribes to `PropertiesChanged` signals for every systemd unit object
-/// and, on each one, re-fetches that unit's full status and forwards it as a
-/// `DashboardEvent::Status` -- so the dashboard's SSE stream can push live
-/// updates to open browser tabs within about a second of a real state change,
-/// without polling.
+/// Subscribes to `PropertiesChanged` signals for every systemd unit object,
+/// and for each one that corresponds to a quadlet sooth manages, re-fetches
+/// that unit's full status and forwards it as a `DashboardEvent::Status` --
+/// so the dashboard's SSE stream can push live updates to open browser tabs
+/// within about a second of a real state change, without polling.
+///
+/// The `quadlet_dir` filter matters: this fires for *every* user unit on the
+/// bus (the desktop session's dozens of `plasma-*`, `xdg-*`, portal, and
+/// app-scope units, which churn constantly), and without it the dashboard
+/// would issue a fragment re-fetch on each -- a steady stream of pointless
+/// requests from every open tab.
 ///
 /// Re-fetching a full status rather than trying to reconstruct one from the
 /// (possibly partial) `PropertiesChanged` payload keeps this correct even
@@ -39,6 +48,7 @@ const UNIT_PATH_PREFIX: &str = "/org/freedesktop/systemd1/unit/";
 pub async fn spawn(
     client: Client,
     events: EventSender,
+    quadlet_dir: PathBuf,
 ) -> zbus::Result<tokio::task::JoinHandle<()>> {
     let connection = Connection::session().await?;
     let manager = ManagerProxy::new(&connection).await?;
@@ -72,6 +82,11 @@ pub async fn spawn(
             let Some(service) = unescape_unit_path(&path) else {
                 continue;
             };
+            // Ignore the desktop session's own unit churn -- only units sooth
+            // has a quadlet file for are worth a status broadcast.
+            if !discovery::has_quadlet_for_service(&quadlet_dir, &service) {
+                continue;
+            }
             match client.status(&service).await {
                 Ok(status) => {
                     debug!(service, ?status, "unit status changed");
