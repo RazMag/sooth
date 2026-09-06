@@ -20,9 +20,15 @@ live status.
 
 The UI is organized as a sidebar with **Services** (the landing page —
 Containers + Pods combined, with a total/running/failed stat bar),
-**Volumes**, **Networks**, **Images** (Image + Build units), and **Ports**
+**Volumes**, **Networks**, **Images** (Image + Build units), **Ports**
 (every declared `PublishPort=` across Containers/Pods, with conflicting host
-ports flagged). Create and edit for every kind use a raw INI editor
+ports flagged), and **Environment** — the host variables a quadlet file can
+interpolate as `${NAME}`. sooth manages its own set through an
+`environment.d` drop-in (`~/.config/environment.d/50-sooth.conf`) and also
+pushes each add/remove to the running user manager over D-Bus so it applies
+without a re-login; variables configured in other `environment.d` files are
+shown read-only, and the inherited base environment is not listed. Create
+and edit for every kind use a raw INI editor
 (CodeMirror, syntax-highlighted, live-validated against the same check the
 write path runs). `.kube` units have no dedicated section and are only
 reachable via the generic `/units` listing (unlinked from the sidebar, also
@@ -106,6 +112,12 @@ since systemd captures unit stdout by default.
     manageable at `/units/<file>` even though it has no sidebar section.
 12. Toggle the theme (sidebar footer) and shrink the window below ~960px;
     confirm no flash on reload and the sidebar collapses to a drawer.
+13. On the Environment page add `app_path=/srv/app`; confirm it appears under
+    "Managed by sooth", lands in `~/.config/environment.d/50-sooth.conf`, and
+    shows up in `systemctl --user show-environment`. Reference `${app_path}`
+    in a `Volume=` line of a new container and confirm the generated unit
+    resolves it. Remove it and confirm it's gone from both the file and the
+    live manager environment.
 
 ## Development
 

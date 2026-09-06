@@ -8,6 +8,7 @@ mod auth;
 mod config;
 mod error;
 mod events;
+mod hostenv;
 mod journal;
 mod logging;
 mod quadlet;

@@ -32,6 +32,24 @@ pub trait Manager {
     /// Required once at startup for `PropertiesChanged` signals on unit
     /// objects to actually be emitted to this connection.
     fn subscribe(&self) -> zbus::Result<()>;
+
+    /// The user manager's environment block -- exactly what `systemctl --user
+    /// show-environment` prints, as `KEY=VALUE` strings. This is the variable
+    /// set the quadlet generator and the units it generates run with, so it's
+    /// what a `${NAME}` reference inside a quadlet file resolves against. Not
+    /// cached: it's mutated out of band (`set-environment`, `import-environment`,
+    /// `environment.d`), never via a `PropertiesChanged` signal.
+    #[zbus(property(emits_changed_signal = "false"))]
+    fn environment(&self) -> zbus::Result<Vec<String>>;
+
+    /// Add/replace `KEY=VALUE` assignments in the running manager's
+    /// environment (the `systemctl --user set-environment` D-Bus call).
+    /// Runtime-only -- persistence is `environment.d`, handled separately.
+    fn set_environment(&self, assignments: &[&str]) -> zbus::Result<()>;
+
+    /// Drop the named variables from the running manager's environment
+    /// (`systemctl --user unset-environment`).
+    fn unset_environment(&self, names: &[&str]) -> zbus::Result<()>;
 }
 
 /// A connected client to the user session's systemd D-Bus manager. Cheap to
@@ -109,5 +127,45 @@ impl Client {
 
     pub async fn status(&self, unit: &str) -> Result<UnitStatus, SystemdError> {
         status::fetch(&self.connection, &self.manager, unit).await
+    }
+
+    /// The user manager's environment as `(name, value)` pairs sorted by
+    /// name. A bare `NAME` with no `=` (systemd permits it) yields an empty
+    /// value.
+    pub async fn environment(&self) -> Result<Vec<(String, String)>, SystemdError> {
+        let raw = self
+            .manager
+            .environment()
+            .await
+            .map_err(|e| SystemdError::action_failed("(daemon)", "show-environment", e))?;
+        let mut pairs: Vec<(String, String)> = raw
+            .iter()
+            .map(|entry| match entry.split_once('=') {
+                Some((k, v)) => (k.to_string(), v.to_string()),
+                None => (entry.clone(), String::new()),
+            })
+            .collect();
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(pairs)
+    }
+
+    /// Applies `NAME=VALUE` assignments to the running user manager so they're
+    /// usable immediately, without waiting for the next login to re-read
+    /// `environment.d`.
+    pub async fn set_environment(&self, assignments: &[String]) -> Result<(), SystemdError> {
+        let refs: Vec<&str> = assignments.iter().map(String::as_str).collect();
+        self.manager
+            .set_environment(&refs)
+            .await
+            .map_err(|e| SystemdError::action_failed("(daemon)", "set-environment", e))
+    }
+
+    /// Removes the named variables from the running user manager's environment.
+    pub async fn unset_environment(&self, names: &[String]) -> Result<(), SystemdError> {
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        self.manager
+            .unset_environment(&refs)
+            .await
+            .map_err(|e| SystemdError::action_failed("(daemon)", "unset-environment", e))
     }
 }

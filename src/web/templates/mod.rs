@@ -4,6 +4,7 @@
 
 pub mod containers;
 pub mod detail;
+pub mod environment;
 pub mod generic;
 pub mod icons;
 pub mod images;
@@ -36,6 +37,7 @@ pub enum NavItem {
     Networks,
     Images,
     Ports,
+    Environment,
     /// Not part of `all()` -- rendered as its own control in the sidebar
     /// footer, not the main nav list.
     Settings,
@@ -49,6 +51,7 @@ impl NavItem {
             NavItem::Networks => "/networks",
             NavItem::Images => "/images",
             NavItem::Ports => "/ports",
+            NavItem::Environment => "/environment",
             NavItem::Settings => "/settings",
         }
     }
@@ -60,6 +63,7 @@ impl NavItem {
             NavItem::Networks => "Networks",
             NavItem::Images => "Images",
             NavItem::Ports => "Ports",
+            NavItem::Environment => "Environment",
             NavItem::Settings => "Settings",
         }
     }
@@ -71,17 +75,19 @@ impl NavItem {
             NavItem::Networks => Icon::Networks,
             NavItem::Images => Icon::Images,
             NavItem::Ports => Icon::Ports,
+            NavItem::Environment => Icon::Environment,
             NavItem::Settings => Icon::Settings,
         }
     }
 
-    fn all() -> [NavItem; 5] {
+    fn all() -> [NavItem; 6] {
         [
             NavItem::Services,
             NavItem::Volumes,
             NavItem::Networks,
             NavItem::Images,
             NavItem::Ports,
+            NavItem::Environment,
         ]
     }
 

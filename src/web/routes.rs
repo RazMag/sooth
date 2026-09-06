@@ -9,7 +9,8 @@ use crate::auth;
 use crate::config::AppState;
 
 use super::handlers::{
-    detail, edit_delete, list, logs, ports, raw_create, services, settings, unit_ops, validate,
+    detail, edit_delete, environment, list, logs, ports, raw_create, services, settings, unit_ops,
+    validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
@@ -89,6 +90,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/units/rows", get(list::all_units_rows))
         .route("/units/new", get(raw_create::units_new_form))
         .route("/ports", get(ports::index))
+        .route(
+            "/environment",
+            get(environment::index).post(environment::add),
+        )
+        .route("/environment/delete", post(environment::remove))
         .route("/settings", get(settings::page).post(settings::save))
         .route("/validate", post(validate::check))
         .route("/events", get(super::sse::events_stream))
