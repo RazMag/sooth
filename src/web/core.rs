@@ -34,6 +34,21 @@ pub fn unit_url(unit: &QuadletUnit) -> String {
     format!("{}/{}", section_path(unit.kind), unit.file_name)
 }
 
+/// The list/overview page to land on after a unit of this kind is deleted.
+/// Differs from [`section_path`] for Containers and Pods: those have no
+/// standalone list route (`/containers` / `/pods` are POST-only create
+/// targets), they live on the combined Services home page, so a bare
+/// redirect to `section_path` there 404s.
+pub fn section_index_path(kind: UnitKind) -> &'static str {
+    match kind {
+        UnitKind::Container | UnitKind::Pod => "/",
+        UnitKind::Volume => "/volumes",
+        UnitKind::Network => "/networks",
+        UnitKind::Image | UnitKind::Build => "/images",
+        UnitKind::Kube => "/units",
+    }
+}
+
 /// Loads every quadlet file matching one of `kinds` along with its live
 /// systemd status, for a section's list/overview page.
 pub async fn load_units_for_kinds(
@@ -164,4 +179,22 @@ pub async fn delete_unit(
     let _ = state.events.send(DashboardEvent::UnitsChanged);
     tracing::info!(file = file_name, "quadlet deleted");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn section_index_path_avoids_the_post_only_routes() {
+        // Containers/Pods have no GET list page -- they live on `/`.
+        assert_eq!(section_index_path(UnitKind::Container), "/");
+        assert_eq!(section_index_path(UnitKind::Pod), "/");
+        // The rest have real list pages.
+        assert_eq!(section_index_path(UnitKind::Volume), "/volumes");
+        assert_eq!(section_index_path(UnitKind::Network), "/networks");
+        assert_eq!(section_index_path(UnitKind::Image), "/images");
+        assert_eq!(section_index_path(UnitKind::Build), "/images");
+        assert_eq!(section_index_path(UnitKind::Kube), "/units");
+    }
 }

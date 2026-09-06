@@ -179,7 +179,7 @@ pub async fn delete(
         tracing::warn!(file = file_name, error = %e, "failed to remove the env sidecar");
     }
     let redirect = match naming::kind_of(&file_name) {
-        Some(kind) => core::section_path(kind),
+        Some(kind) => core::section_index_path(kind),
         None => "/units",
     };
     Ok(Redirect::to(redirect))
