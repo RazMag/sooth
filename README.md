@@ -30,9 +30,17 @@ without a re-login; variables configured in other `environment.d` files are
 shown read-only, and the inherited base environment is not listed. Create
 and edit for every kind use a raw INI editor
 (CodeMirror, syntax-highlighted, live-validated against the same check the
-write path runs). `.kube` units have no dedicated section and are only
-reachable via the generic `/units` listing (unlinked from the sidebar, also
-usable as a full cross-kind fallback view).
+write path runs); its file-name field takes just a stem and the extension
+comes from the section (`/units/new` offers a kind picker), and a
+collapsible panel beside it lists the host `${NAME}` variables for one-click
+insertion. `.container` / `.build` create and edit also carry a Name/Value
+environment editor: sooth writes the variables to a sidecar
+`<quadlet_dir>/env/<name>.env` and keeps a managed `EnvironmentFile=` line
+pointing at it in the unit's primary section (added when there are variables,
+removed when there are none; other `EnvironmentFile=` lines are left alone).
+`.kube` units have no dedicated section and are only reachable via the
+generic `/units` listing (unlinked from the sidebar, also usable as a full
+cross-kind fallback view).
 
 ## Running
 
@@ -118,6 +126,18 @@ since systemd captures unit stdout by default.
     in a `Volume=` line of a new container and confirm the generated unit
     resolves it. Remove it and confirm it's gone from both the file and the
     live manager environment.
+14. On `/containers/new` the name field is a stem plus a fixed `.container`
+    suffix; type `webapp`, add env rows `FOO=bar` and `BAZ=${FOO}`, submit.
+    Confirm `webapp.container` gains `EnvironmentFile=%h/.config/containers/systemd/env/webapp.env`
+    in `[Container]`, the sidecar holds both lines, and
+    `systemctl --user show webapp.service -p Environment` resolves them. Edit
+    it, delete every env row, save → the sidecar and the `EnvironmentFile=`
+    line are gone and nothing else changed; add a row back → the line
+    reappears at the end of `[Container]`. Delete the unit → the sidecar goes
+    too. On `/units/new` the kind picker drives the suffix, and `.build` is
+    the way to reach a build unit's env editor. A bad name (`../evil`) or a
+    bad variable (`1BAD=x`) redisplays the form with the text preserved and
+    nothing written.
 
 ## Development
 

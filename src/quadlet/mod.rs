@@ -1,4 +1,5 @@
 pub mod discovery;
+pub mod envfile;
 pub mod model;
 pub mod naming;
 pub mod parser;

@@ -507,9 +507,92 @@
     border: 1px solid var(--color-line-strong);
     border-radius: 0.5rem;
     overflow: hidden;
-    max-width: 60rem;
   }
   .cm-host .cm-editor { max-height: 65vh; }
+
+  /* Editor layout: the INI editor and the env-var editor sit side by side
+     when there is room and stack (each full width) when there is not. */
+  .editor-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem 1.25rem;
+    max-width: 72rem;
+  }
+  .editor-col {
+    flex: 1 1 30rem;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .editor-col > label,
+  .editor-col .field > label {
+    font-size: 0.82rem;
+    color: var(--color-muted);
+    font-weight: 500;
+  }
+  .editor-col .field { margin-bottom: 0; }
+
+  /* Quadlet "New" file-name field ---------------- */
+  .stem-row { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+  .stem-row > .input:not(select) { max-width: 22rem; }
+  .stem-row select.input { width: auto; }
+  .stem-suffix { font-family: var(--font-mono); color: var(--color-muted); font-size: 0.88rem; }
+
+  /* Host-variable reference panel ---------------- */
+  .host-vars {
+    margin: 0.9rem 0;
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    max-width: 72rem;
+  }
+  .host-vars > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-muted);
+  }
+  .host-vars > summary::-webkit-details-marker { display: none; }
+  .host-vars > summary::marker { content: ""; }
+  .host-vars[open] > summary { border-bottom: 1px solid var(--color-line); }
+  .host-vars-body { padding: 0.6rem 0.7rem; }
+  .host-vars-body > .field-hint { margin: 0 0 0.5rem; }
+  .host-vars-grid {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 0.3rem 0.9rem;
+    align-items: baseline;
+  }
+  .host-vars-grid .chip {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+    cursor: pointer;
+    border: 1px solid var(--color-line-strong);
+    background: var(--color-surface);
+    color: var(--color-ink);
+    border-radius: 0.4rem;
+    padding: 0.15rem 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+  .host-vars-grid .chip:hover { background: var(--color-raised); border-color: var(--color-accent); }
+  .host-vars-val {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--color-ink);
+    word-break: break-all;
+  }
+
+  /* Env-var editor rows -------------------------- */
+  .envvar-rows { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.4rem; }
+  .envvar-row { display: flex; gap: 0.4rem; }
+  .envvar-row .input { flex: 1; min-width: 0; }
+  .envvar-row .input[data-k] { flex: 0 1 12rem; }
+  .envvar-row [data-remove] { flex: none; }
 
   /* Login --------------------------------------- */
   .login-body {

@@ -1,11 +1,15 @@
 //! The one create implementation for every section. Nobody hand-builds a
 //! quadlet field-by-field -- they write the INI -- so every "New" page is a
-//! file name plus a live-validated code editor (see `handlers::validate`
+//! file-name stem plus a live-validated code editor (see `handlers::validate`
 //! and `static/app.js`), pre-filled with a starter skeleton for whichever
-//! section it was reached from. `create` itself doesn't need to know which
-//! entry point it was reached from: the created unit's kind comes from the
-//! file extension actually typed, and the post-create redirect is built
-//! from that kind via `core::section_path`.
+//! section it was reached from. The section fixes the unit's *kind*: its
+//! extension is applied server-side (`naming::compose_file_name`), so the
+//! stem field never needs `.container` typed into it. `/units/new` offers a
+//! `<select>` of every kind instead.
+//!
+//! For `.container` / `.build` the form also carries a Name/Value environment
+//! editor; on submit sooth writes `<quadlet_dir>/env/<stem>.env` and wires a
+//! managed `EnvironmentFile=` line into the unit's primary section.
 
 use axum::Form;
 use axum::extract::{Query, State};
@@ -16,19 +20,33 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{AppError, PageError};
+use crate::quadlet::{UnitKind, envfile, naming};
 use crate::web::templates::NavItem;
+use crate::web::templates::generic::{KindChoice, NewUnitPage};
 use crate::web::{core, templates};
 
 async fn new_form(
     session: Session,
     active: Option<NavItem>,
     action: &str,
+    kind: KindChoice,
     skeleton: &str,
 ) -> maud::Markup {
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    templates::generic::new_unit_page(&csrf, active, action, skeleton, None)
+    let host_vars = crate::hostenv::load().unwrap_or_default();
+    templates::generic::new_unit_page(NewUnitPage {
+        csrf: &csrf,
+        active,
+        action,
+        kind,
+        editor_body: skeleton,
+        stem_prefill: "",
+        env_vars_body: "",
+        host_vars: &host_vars,
+        error: None,
+    })
 }
 
 pub async fn containers_new_form(
@@ -39,7 +57,14 @@ pub async fn containers_new_form(
         Some(pod) => format!("[Container]\nImage=\nPod={pod}\n"),
         None => "[Container]\nImage=\n".to_string(),
     };
-    new_form(session, Some(NavItem::Services), "/containers", &skeleton).await
+    new_form(
+        session,
+        Some(NavItem::Services),
+        "/containers",
+        KindChoice::Fixed(UnitKind::Container),
+        &skeleton,
+    )
+    .await
 }
 
 #[derive(Deserialize)]
@@ -48,48 +73,91 @@ pub struct PodQuery {
 }
 
 pub async fn pods_new_form(session: Session) -> impl IntoResponse {
-    new_form(session, Some(NavItem::Services), "/pods", "[Pod]\n").await
+    new_form(
+        session,
+        Some(NavItem::Services),
+        "/pods",
+        KindChoice::Fixed(UnitKind::Pod),
+        "[Pod]\n",
+    )
+    .await
 }
 pub async fn volumes_new_form(session: Session) -> impl IntoResponse {
-    new_form(session, Some(NavItem::Volumes), "/volumes", "[Volume]\n").await
+    new_form(
+        session,
+        Some(NavItem::Volumes),
+        "/volumes",
+        KindChoice::Fixed(UnitKind::Volume),
+        "[Volume]\n",
+    )
+    .await
 }
 pub async fn networks_new_form(session: Session) -> impl IntoResponse {
-    new_form(session, Some(NavItem::Networks), "/networks", "[Network]\n").await
+    new_form(
+        session,
+        Some(NavItem::Networks),
+        "/networks",
+        KindChoice::Fixed(UnitKind::Network),
+        "[Network]\n",
+    )
+    .await
 }
 pub async fn images_new_form(session: Session) -> impl IntoResponse {
     new_form(
         session,
         Some(NavItem::Images),
         "/images",
+        KindChoice::Fixed(UnitKind::Image),
         "[Image]\nImage=\n",
     )
     .await
 }
 pub async fn units_new_form(session: Session) -> impl IntoResponse {
-    new_form(session, None, "/units", "").await
+    new_form(
+        session,
+        None,
+        "/units",
+        KindChoice::Choose {
+            selected: UnitKind::Container,
+        },
+        "",
+    )
+    .await
 }
 
-/// Which sidebar item and POST target to redisplay a rejected "New" form
-/// with -- derived from the file name's extension, since a validation
-/// failure means we don't have a successfully parsed unit to derive it
-/// from otherwise.
-fn redisplay_target(file_name: &str) -> (Option<NavItem>, &'static str) {
-    use crate::quadlet::{UnitKind, naming};
-    match naming::kind_of(file_name) {
-        Some(UnitKind::Container) => (Some(NavItem::Services), "/containers"),
-        Some(UnitKind::Pod) => (Some(NavItem::Services), "/pods"),
-        Some(UnitKind::Volume) => (Some(NavItem::Volumes), "/volumes"),
-        Some(UnitKind::Network) => (Some(NavItem::Networks), "/networks"),
-        Some(UnitKind::Image | UnitKind::Build) => (Some(NavItem::Images), "/images"),
-        _ => (None, "/units"),
+/// Which sidebar item, POST target, and file-name-field shape to redisplay a
+/// rejected "New" form with. `origin` (a hidden field on the form) says which
+/// entry point it came from -- a `<select>`-driven `/units/new` form must not
+/// collapse to a fixed suffix, and vice versa.
+fn redisplay_target(
+    origin: Option<&str>,
+    kind: UnitKind,
+) -> (Option<NavItem>, &'static str, KindChoice) {
+    match origin {
+        Some("units") => (None, "/units", KindChoice::Choose { selected: kind }),
+        _ => (
+            NavItem::for_kind(kind),
+            core::section_path(kind),
+            KindChoice::Fixed(kind),
+        ),
     }
 }
 
 #[derive(Deserialize)]
 pub struct CreateForm {
     csrf_token: String,
+    /// The file-name *stem* only -- the extension comes from `kind`.
     file_name: String,
+    /// The unit kind's extension (`container` .. `image`), from the hidden
+    /// input or the `<select>`.
+    kind: String,
+    /// `section` | `units` -- which "New" form shape to redisplay on a 422.
+    #[serde(default)]
+    origin: Option<String>,
     contents: String,
+    /// `KEY=VALUE` lines from the env editor; only used for Container/Build.
+    #[serde(default)]
+    env_vars: Option<String>,
 }
 
 pub async fn create(
@@ -97,34 +165,143 @@ pub async fn create(
     session: Session,
     Form(form): Form<CreateForm>,
 ) -> Result<Response, PageError> {
-    match core::create_unit(
-        &state,
-        &session,
-        &form.csrf_token,
-        &form.file_name,
-        &form.contents,
-    )
-    .await
-    {
+    // Verified here as well as in `core::create_unit`: we now touch the disk
+    // (the env sidecar) before that call, so the CSRF gate has to come first.
+    if !crate::auth::csrf::verify(&session, &form.csrf_token).await {
+        return Err(AppError::Csrf.into());
+    }
+
+    let stem = form.file_name.trim().to_string();
+    let origin = form.origin.as_deref();
+    let env_text = form.env_vars.as_deref().unwrap_or("");
+
+    let Some(kind) = UnitKind::from_extension(form.kind.trim()) else {
+        return Ok(reject_new(
+            &session,
+            origin,
+            UnitKind::Container,
+            &stem,
+            &form.contents,
+            env_text,
+            "Pick a unit type.",
+        )
+        .await);
+    };
+
+    let file_name = match naming::compose_file_name(&stem, kind) {
+        Ok(f) => f,
+        Err(e) => {
+            return Ok(reject_new(
+                &session,
+                origin,
+                kind,
+                &stem,
+                &form.contents,
+                env_text,
+                &e.to_string(),
+            )
+            .await);
+        }
+    };
+
+    let wants_env = matches!(kind, UnitKind::Container | UnitKind::Build);
+
+    let pairs = if wants_env {
+        match envfile::parse_editor_lines(env_text) {
+            Ok(p) => p,
+            Err(msg) => {
+                return Ok(reject_new(
+                    &session,
+                    origin,
+                    kind,
+                    &stem,
+                    &form.contents,
+                    env_text,
+                    &msg,
+                )
+                .await);
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
+    let contents = if wants_env {
+        let refval = envfile::reference_value(&state.quadlet_dir, &stem);
+        envfile::patch_environment_file(
+            &form.contents,
+            kind.primary_section(),
+            &refval,
+            !pairs.is_empty(),
+        )
+    } else {
+        form.contents.clone()
+    };
+
+    // Sidecar first: `writer::validate` runs the podman generator dry-run,
+    // which could flag a unit whose `EnvironmentFile=` target doesn't exist.
+    let sidecar_existed = envfile::path_for(&state.quadlet_dir, &stem).exists();
+    if wants_env {
+        envfile::save(&state.quadlet_dir, &stem, &pairs)
+            .map_err(|e| AppError::Internal(e.into()))?;
+    }
+
+    match core::create_unit(&state, &session, &form.csrf_token, &file_name, &contents).await {
         Ok(unit) => Ok(Redirect::to(&core::unit_url(&unit)).into_response()),
         Err(AppError::Quadlet(e)) if e.is_client_error() => {
-            tracing::warn!(file = form.file_name, error = %e, "rejected new quadlet file");
-            let csrf = crate::auth::csrf::current(&session)
-                .await
-                .unwrap_or_default();
-            let (active, action) = redisplay_target(&form.file_name);
-            Ok((
-                StatusCode::UNPROCESSABLE_ENTITY,
-                templates::generic::new_unit_page(
-                    &csrf,
-                    active,
-                    action,
-                    &form.contents,
-                    Some(&e.to_string()),
-                ),
+            tracing::warn!(file = file_name, error = %e, "rejected new quadlet file");
+            if wants_env && !sidecar_existed {
+                let _ = envfile::delete(&state.quadlet_dir, &stem);
+            }
+            Ok(reject_new(
+                &session,
+                origin,
+                kind,
+                &stem,
+                &form.contents,
+                env_text,
+                &e.to_string(),
             )
-                .into_response())
+            .await)
         }
-        Err(e) => Err(e.into()),
+        Err(e) => {
+            if wants_env && !sidecar_existed {
+                let _ = envfile::delete(&state.quadlet_dir, &stem);
+            }
+            Err(e.into())
+        }
     }
+}
+
+/// Renders the "New" form again with a 422, preserving the stem, the editor
+/// body as typed, and the env-var text.
+async fn reject_new(
+    session: &Session,
+    origin: Option<&str>,
+    kind: UnitKind,
+    stem: &str,
+    editor_body: &str,
+    env_vars_body: &str,
+    error: &str,
+) -> Response {
+    let csrf = crate::auth::csrf::current(session)
+        .await
+        .unwrap_or_default();
+    let (active, action, choice) = redisplay_target(origin, kind);
+    let host_vars = crate::hostenv::load().unwrap_or_default();
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        templates::generic::new_unit_page(NewUnitPage {
+            csrf: &csrf,
+            active,
+            action,
+            kind: choice,
+            editor_body,
+            stem_prefill: stem,
+            env_vars_body,
+            host_vars: &host_vars,
+            error: Some(error),
+        }),
+    )
+        .into_response()
 }

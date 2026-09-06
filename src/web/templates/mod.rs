@@ -21,6 +21,7 @@ use axum::http::StatusCode;
 use maud::{DOCTYPE, Markup, html};
 use uuid::Uuid;
 
+use crate::hostenv::EnvVar;
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -437,23 +438,97 @@ pub fn section_table(unit: &QuadletUnit) -> Markup {
     }
 }
 
+/// How the editor works out the full quadlet file name to live-validate
+/// against `/validate`.
+pub enum EditorFileName<'a> {
+    /// Edit page: the name is fixed and not shown as an input.
+    Fixed(&'a str),
+    /// Section "New" page: `input` is the CSS selector of the stem field,
+    /// `suffix` the fixed extension shown beside it (e.g. `.container`).
+    StemSuffix { input: &'a str, suffix: &'a str },
+    /// `/units/new`: `input` is the stem field, `select` the CSS selector of
+    /// the `<select>` whose value is the extension.
+    StemSelect { input: &'a str, select: &'a str },
+}
+
 /// The quadlet-content editor: a plain `<textarea>` progressively enhanced
 /// into a syntax-highlighted, live-validated CodeMirror editor by the bundle.
-pub fn code_editor(
-    contents: &str,
-    file_name_input_selector: Option<&str>,
-    fixed_file_name: Option<&str>,
-) -> Markup {
+pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
+    let (fixed, stem_input, suffix, kind_select) = match file_name {
+        EditorFileName::Fixed(n) => (Some(n), None, None, None),
+        EditorFileName::StemSuffix { input, suffix } => (None, Some(input), Some(suffix), None),
+        EditorFileName::StemSelect { input, select } => (None, Some(input), None, Some(select)),
+    };
     html! {
         textarea.input
             name="contents"
             rows="18"
             data-code-editor
-            data-file-input=[file_name_input_selector]
-            data-file-name=[fixed_file_name]
+            data-file-name=[fixed]
+            data-stem-input=[stem_input]
+            data-suffix=[suffix]
+            data-kind-select=[kind_select]
             required
             { (contents) }
         div id="validate-status" class="validate-status" {}
+    }
+}
+
+/// The Name/Value environment-variable editor for `.container` / `.build`
+/// units. `body` is the current `KEY=VALUE` lines (one per variable); it
+/// renders as a plain `<textarea>` that `frontend/envvars.js` progressively
+/// enhances into add/remove rows. Submitted as one `env_vars` field and
+/// written to a sidecar `env/<name>.env` referenced by a managed
+/// `EnvironmentFile=` line.
+pub fn env_var_editor(body: &str) -> Markup {
+    html! {
+        div.field data-envvars {
+            label { "Environment variables" }
+            p.field-hint {
+                "Saved to a sidecar " code { "env/<name>.env" }
+                " and wired into the unit with " code { "EnvironmentFile=" } "."
+            }
+            textarea.input name="env_vars" rows="4" data-envvars-source { (body) }
+        }
+    }
+}
+
+/// A collapsible reference panel, shown near the editor, listing the host
+/// `${NAME}` variables the systemd user manager passes to the quadlet
+/// generator (see the Environment page). Each name is a button that inserts
+/// its `${NAME}` reference at the editor's cursor; the current value is shown
+/// beside it for context.
+pub fn host_vars_panel(vars: &[EnvVar]) -> Markup {
+    html! {
+        details.host-vars {
+            summary {
+                "Host variables"
+                @if !vars.is_empty() { span.muted { " · " (vars.len()) } }
+            }
+            div.host-vars-body {
+                @if vars.is_empty() {
+                    p.field-hint {
+                        "None set. "
+                        a href="/environment" { "Add host variables" }
+                        " to reference them here as " code { "${NAME}" } "."
+                    }
+                } @else {
+                    p.field-hint {
+                        "Click a name to insert its " code { "${NAME}" } " reference at the cursor."
+                    }
+                    div.host-vars-grid {
+                        @for v in vars {
+                            button.chip type="button" data-insert-ref={"${" (v.name) "}"} {
+                                "${" (v.name) "}"
+                            }
+                            span.host-vars-val {
+                                @if v.value.is_empty() { span.muted { "—" } } @else { (v.value) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

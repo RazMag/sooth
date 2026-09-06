@@ -10,6 +10,7 @@ import { initNav } from "./nav.js";
 import { initMenus } from "./menu.js";
 import { initLogs } from "./logs.js";
 import { initEditors } from "./editor.js";
+import { initEnvVars } from "./envvars.js";
 
 window.htmx = htmx;
 
@@ -23,6 +24,7 @@ function boot() {
   initMenus();
   initLogs();
   initEditors();
+  initEnvVars();
 }
 
 if (document.readyState === "loading") {
@@ -34,4 +36,5 @@ if (document.readyState === "loading") {
 document.addEventListener("htmx:afterSwap", () => {
   initLogs();
   initEditors();
+  initEnvVars();
 });

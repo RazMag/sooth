@@ -26,19 +26,37 @@ const theme = EditorView.theme({
   },
 });
 
+// The most recently mounted editor view (one editor per page). The host-var
+// reference panel's insert buttons dispatch into this.
+let currentView = null;
+
 // Progressively enhances every `<textarea data-code-editor>` into a
 // CodeMirror 6 editor and wires a debounced live-validate against POST
-// /validate (same wire protocol the pre-CM5 version used: the response HTML
-// replaces #validate-status). The textarea stays in the DOM (hidden) and is
-// kept in sync so the normal form submit still carries `contents`.
+// /validate (the response HTML replaces #validate-status). The textarea stays
+// in the DOM (hidden) and is kept in sync so the normal form submit still
+// carries `contents`.
+//
+// The file name to validate against is either fixed (Edit page) or composed
+// from a stem field plus either a static extension suffix (section "New"
+// pages) or a `<select>` of kinds (`/units/new`).
 export function initEditors() {
+  wireInsertButtons();
+
   document.querySelectorAll("textarea[data-code-editor]").forEach((textarea) => {
     if (textarea.dataset.codeEditorInit) return;
     textarea.dataset.codeEditorInit = "1";
 
-    const fileInputSel = textarea.dataset.fileInput;
-    const fileInput = fileInputSel ? document.querySelector(fileInputSel) : null;
-    const fixedFileName = textarea.dataset.fileName || "";
+    const fixedName = textarea.dataset.fileName || "";
+    const stemEl = textarea.dataset.stemInput ? document.querySelector(textarea.dataset.stemInput) : null;
+    const suffix = textarea.dataset.suffix || "";
+    const kindEl = textarea.dataset.kindSelect ? document.querySelector(textarea.dataset.kindSelect) : null;
+
+    const currentFileName = () => {
+      if (fixedName) return fixedName;
+      const stem = stemEl ? stemEl.value.trim() : "";
+      if (!stem) return "";
+      return stem + (kindEl ? "." + kindEl.value : suffix);
+    };
 
     let timer = null;
     const scheduleValidate = () => {
@@ -46,9 +64,8 @@ export function initEditors() {
       timer = setTimeout(runValidate, 500);
     };
     const runValidate = () => {
-      // Looked up fresh: each response replaces this element's outerHTML.
       const statusEl = document.getElementById("validate-status");
-      const fileName = fixedFileName || (fileInput ? fileInput.value.trim() : "");
+      const fileName = currentFileName();
       if (!fileName || !statusEl) return;
       const body = new URLSearchParams({ file_name: fileName, contents: textarea.value });
       fetch("/validate", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body })
@@ -90,11 +107,33 @@ export function initEditors() {
     });
     view.dom.classList.add("cm-host");
     view.dom.setAttribute("data-code-editor-host", "1");
+    currentView = view;
 
     textarea.hidden = true;
     textarea.after(view.dom);
 
-    if (fileInput) fileInput.addEventListener("input", scheduleValidate);
+    if (stemEl) stemEl.addEventListener("input", scheduleValidate);
+    if (kindEl) kindEl.addEventListener("change", scheduleValidate);
     scheduleValidate();
+  });
+}
+
+// One delegated listener for the whole document; the buttons live in the
+// host-var panel and insert a `${NAME}` reference at the editor's cursor.
+function wireInsertButtons() {
+  if (window.__soothInsertRefWired) return;
+  window.__soothInsertRefWired = true;
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-insert-ref]");
+    if (!btn || !currentView) return;
+    e.preventDefault();
+    const ref = btn.getAttribute("data-insert-ref");
+    const sel = currentView.state.selection.main;
+    currentView.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: ref },
+      selection: { anchor: sel.from + ref.length },
+      scrollIntoView: true,
+    });
+    currentView.focus();
   });
 }
