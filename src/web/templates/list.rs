@@ -94,6 +94,11 @@ pub fn list_table(
                         th {}
                     }
                 }
+                // Only a create/edit/delete rebuilds the whole row set. A
+                // status change updates each row's badge (its own `sse-swap`)
+                // and the kebab's action forms (a scoped swap inside the
+                // menu) in place -- swapping the whole `<tbody>` here would
+                // slam shut any menu the user has open.
                 tbody id=(ROWS_ID) hx-get=(rows_route) hx-trigger="sse:units-changed" hx-swap="innerHTML" {
                     (list_rows(spec, units, csrf))
                 }

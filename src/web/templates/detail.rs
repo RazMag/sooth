@@ -28,10 +28,15 @@ pub fn detail_page(
         (page_header(&unit.file_name, status_badge(&service, status)))
         p.page-meta { code { (unit.path.display().to_string()) } " · " (unit.kind.primary_section()) }
 
-        @if unit.is_template() {
-            (banner(BannerKind::Info, "Template unit — managed read-only. Use the CLI to instantiate it."))
-        } @else {
-            (action_row(unit, status, csrf))
+        // Which buttons to show depends on live state, so re-fetch this slot
+        // whenever *this* unit's status changes -- the same SSE event the
+        // badge listens to. The `/actions` fragment renders the same markup.
+        div hx-get={(base) "/actions"} hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
+            @if unit.is_template() {
+                (banner(BannerKind::Info, "Template unit — managed read-only. Use the CLI to instantiate it."))
+            } @else {
+                (action_row(unit, status, csrf))
+            }
         }
 
         (detail_links(&base, csrf))

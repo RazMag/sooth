@@ -400,7 +400,8 @@
   .menu-panel button:hover { background: var(--color-raised); text-decoration: none; }
   .menu-panel button.danger { color: var(--color-danger); }
   .menu-panel svg { width: 0.95rem; height: 0.95rem; flex: none; color: var(--color-muted); }
-  .menu-panel form { display: contents; }
+  .menu-panel form,
+  .menu-panel .menu-actions { display: contents; }
 
   /* App shell / sidebar ------------------------------- */
   .app-shell { display: flex; min-height: 100vh; }

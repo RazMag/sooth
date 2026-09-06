@@ -23,6 +23,10 @@ fn mount_unit_routes(router: Router<AppState>, prefix: &str) -> Router<AppState>
     router
         .route(&format!("{prefix}/{{file_name}}"), get(detail::show))
         .route(
+            &format!("{prefix}/{{file_name}}/actions"),
+            get(unit_ops::actions),
+        )
+        .route(
             &format!("{prefix}/{{file_name}}/start"),
             post(unit_ops::start),
         )

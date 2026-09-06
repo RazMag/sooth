@@ -302,9 +302,54 @@ fn delete_form(base_url: &str, csrf: &str, btn_class: &str) -> Markup {
     }
 }
 
+/// The status-dependent action forms (start-or-stop+restart, then
+/// enable-or-disable) -- shared by the kebab menu and the detail-page action
+/// row. `start_class` / `other_class` style the buttons: empty inside the
+/// kebab (styled by `.menu-panel button`), `.btn` combos on the detail page.
+fn unit_action_forms(
+    base: &str,
+    service: &str,
+    status: &UnitStatus,
+    csrf: &str,
+    start_class: &str,
+    other_class: &str,
+) -> Markup {
+    html! {
+        @if status.is_active() {
+            (action_form(base, service, "stop", "Stop", Icon::Stop, csrf, other_class))
+            (action_form(base, service, "restart", "Restart", Icon::Restart, csrf, other_class))
+        } @else {
+            (action_form(base, service, "start", "Start", Icon::Play, csrf, start_class))
+        }
+        @if status.is_enabled() {
+            (action_form(base, service, "disable", "Disable", Icon::Power, csrf, other_class))
+        } @else {
+            (action_form(base, service, "enable", "Enable", Icon::Power, csrf, other_class))
+        }
+    }
+}
+
+/// Just the kebab's status-dependent forms, no wrapper -- the payload of
+/// `GET {unit}/actions?style=menu`. Swapped into `.menu-actions` on a status
+/// change so the Start/Stop choice tracks live state *without* re-rendering
+/// (and thereby closing) the whole `<details>` menu.
+pub fn kebab_action_forms(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
+    unit_action_forms(
+        &core::unit_url(unit),
+        &unit.service_name(),
+        status,
+        csrf,
+        "",
+        "",
+    )
+}
+
 /// The per-row quick-actions menu: a native `<details>` disclosure, no JS
 /// needed. Every URL is built from `core::unit_url`, so this works
-/// identically regardless of which section the unit belongs to.
+/// identically regardless of which section the unit belongs to. Only the
+/// status-dependent forms live in a live-refreshing `.menu-actions` slot;
+/// the `<details>` and the Edit/Logs/Delete links are never replaced, so an
+/// open menu stays open through a status change.
 pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
     let base = core::unit_url(unit);
     let service = unit.service_name();
@@ -313,16 +358,9 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
             summary aria-label="Actions" { (icon(Icon::More)) }
             div.menu-panel {
                 @if !unit.is_template() {
-                    @if status.is_active() {
-                        (action_form(&base, &service, "stop", "Stop", Icon::Stop, csrf, ""))
-                        (action_form(&base, &service, "restart", "Restart", Icon::Restart, csrf, ""))
-                    } @else {
-                        (action_form(&base, &service, "start", "Start", Icon::Play, csrf, ""))
-                    }
-                    @if status.is_enabled() {
-                        (action_form(&base, &service, "disable", "Disable", Icon::Power, csrf, ""))
-                    } @else {
-                        (action_form(&base, &service, "enable", "Enable", Icon::Power, csrf, ""))
+                    div.menu-actions hx-get={(base) "/actions?style=menu"}
+                        hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
+                        (unit_action_forms(&base, &service, status, csrf, "", ""))
                     }
                 }
                 a href={(base) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
@@ -336,22 +374,16 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
 /// The same actions as `kebab_menu`, laid out as plain buttons -- used on
 /// detail pages where there's room and the extra visibility is welcome.
 pub fn action_row(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
-    let base = core::unit_url(unit);
-    let service = unit.service_name();
-    let ghost = "btn btn-ghost btn-sm";
     html! {
         div.action-row {
-            @if status.is_active() {
-                (action_form(&base, &service, "stop", "Stop", Icon::Stop, csrf, ghost))
-                (action_form(&base, &service, "restart", "Restart", Icon::Restart, csrf, ghost))
-            } @else {
-                (action_form(&base, &service, "start", "Start", Icon::Play, csrf, "btn btn-primary btn-sm"))
-            }
-            @if status.is_enabled() {
-                (action_form(&base, &service, "disable", "Disable", Icon::Power, csrf, ghost))
-            } @else {
-                (action_form(&base, &service, "enable", "Enable", Icon::Power, csrf, ghost))
-            }
+            (unit_action_forms(
+                &core::unit_url(unit),
+                &unit.service_name(),
+                status,
+                csrf,
+                "btn btn-primary btn-sm",
+                "btn btn-ghost btn-sm",
+            ))
         }
     }
 }

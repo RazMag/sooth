@@ -69,7 +69,7 @@ pub fn services_page(units: &[(QuadletUnit, UnitStatus)], stats: &Stats, csrf: &
             a.btn href="/pods/new" { (icon(Icon::Plus)) span { "Pod" } }
         }))
         div id="services-counts" hx-get="/services/counts"
-            hx-trigger="sse:units-changed, sse:any-status" hx-swap="innerHTML" {
+            hx-trigger="sse:units-changed, sse:any-status delay:300ms" hx-swap="innerHTML" {
             (stats_bar(stats))
         }
         (super::list::list_table(&SPEC, units, csrf, "/services/rows"))
