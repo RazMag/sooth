@@ -33,9 +33,14 @@ pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Marku
         .section("Network")
         .and_then(|s| s.get("Subnet"))
         .unwrap_or("—");
-    let summary = detail::summary_rows(&[
-        ("Driver", html! { (driver) }),
-        ("Subnet", html! { code { (subnet) } }),
-    ]);
-    detail::detail_page(unit, status, csrf, Some(summary), None)
+    detail::detail_page(
+        unit,
+        status,
+        csrf,
+        &[
+            ("Driver", html! { (driver) }),
+            ("Subnet", html! { code { (subnet) } }),
+        ],
+        None,
+    )
 }

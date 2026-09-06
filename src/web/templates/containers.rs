@@ -9,6 +9,11 @@ pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Marku
         .section("Container")
         .and_then(|s| s.get("Image"))
         .unwrap_or("—");
-    let summary = detail::summary_rows(&[("Image", html! { code { (image) } })]);
-    detail::detail_page(unit, status, csrf, Some(summary), None)
+    detail::detail_page(
+        unit,
+        status,
+        csrf,
+        &[("Image", html! { code { (image) } })],
+        None,
+    )
 }

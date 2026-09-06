@@ -315,8 +315,7 @@
     color: var(--color-muted);
     padding: 0.75rem 0 0.3rem;
   }
-  .kv-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--color-line); vertical-align: top; }
-  .kv-table tr:last-child td { border-bottom: 0; }
+  .kv-table td { padding: 0.3rem 0.5rem; vertical-align: top; }
   .kv-table td:first-child { color: var(--color-muted); width: 1%; white-space: nowrap; padding-right: 2rem; }
   .kv-table td:last-child { font-family: var(--font-mono); word-break: break-word; width: 100%; }
   .card > .kv-table:only-child { margin: -0.25rem 0; }
@@ -496,6 +495,54 @@
   .detail-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.75rem 0 0.5rem; }
   .inline-form { display: inline; }
 
+  /* Unit detail: one action toolbar + two-column layout w/ facts rail */
+  .detail-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.6rem;
+    margin: 1rem 0 0;
+  }
+  .detail-actions-live { display: contents; } /* htmx SSE-refresh wrapper */
+  .detail-toolbar .action-row { margin: 0; }
+  /* Edit/Logs sit next to the lifecycle actions; Delete is pushed to the
+     far edge so the destructive action stands apart. */
+  .detail-toolbar .detail-links { flex: 1 1 auto; margin: 0; }
+  .detail-toolbar .detail-links > .inline-form { margin-left: auto; }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 18rem minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+    margin-top: 1.25rem;
+  }
+  .detail-main { min-width: 0; }
+  .detail-main h2 { margin-top: 0; }
+  .detail-aside {
+    position: sticky;
+    top: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .card-title { margin: 0 0 0.6rem; font-size: 0.95rem; font-weight: 620; }
+
+  .config-block {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+    padding: 0.35rem 1.15rem 0.7rem;
+  }
+  .config-block + .config-block { margin-top: 0.85rem; }
+  .config-block-name {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-muted);
+    padding: 0.6rem 0 0.35rem;
+  }
+
   .muted { color: var(--color-muted); }
   .empty { color: var(--color-muted); padding: 1.5rem 0; }
 
@@ -646,5 +693,11 @@
     background: rgb(0 0 0 / 0.4);
   }
   .content-inner { padding: 1.1rem 1.1rem 3rem; }
+
+  /* Unit detail: stack the two columns, Overview rail first. */
+  .detail-grid { grid-template-columns: 1fr; gap: 1.25rem; }
+  .detail-aside { position: static; }
+  .detail-toolbar .detail-links { flex: 0 1 auto; }
+  .detail-toolbar .detail-links > .inline-form { margin-left: 0; }
 }
 

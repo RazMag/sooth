@@ -1,8 +1,8 @@
 //! The one detail-page skeleton, shared by every kind. Each kind's own
-//! module supplies just its `summary` (a small key/value card) and, for
-//! pods, an `extra` block; the header, status, action row, Edit/Logs/Delete
-//! links, and the verbatim "Parsed contents" section tables are identical
-//! everywhere and live here.
+//! module supplies just its `facts` (extra key/value rows for the Overview
+//! rail) and, for pods, an `extra` block; the header, status, action
+//! toolbar, two-column layout, and the verbatim `[Section]` config cards are
+//! identical everywhere and live here.
 
 use maud::{Markup, html};
 
@@ -18,7 +18,7 @@ pub fn detail_page(
     unit: &QuadletUnit,
     status: &UnitStatus,
     csrf: &str,
-    summary: Option<Markup>,
+    facts: &[(&str, Markup)],
     extra: Option<Markup>,
 ) -> Markup {
     let service = unit.service_name();
@@ -28,39 +28,42 @@ pub fn detail_page(
     let body = html! {
         (back_link(back_href, back_label))
         (page_header(&unit.file_name, status_badge(&service, status)))
-        p.page-meta { code { (unit.path.display().to_string()) } " · " (unit.kind.primary_section()) }
 
-        // Which buttons to show depends on live state, so re-fetch this slot
-        // whenever *this* unit's status changes -- the same SSE event the
-        // badge listens to. The `/actions` fragment renders the same markup.
-        div hx-get={(base) "/actions"} hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
-            @if unit.is_template() {
-                (banner(BannerKind::Info, "Template unit — managed read-only. Use the CLI to instantiate it."))
-            } @else {
-                (action_row(unit, status, csrf))
+        div.detail-toolbar {
+            // Which buttons to show depends on live state, so re-fetch this
+            // slot whenever *this* unit's status changes -- the same SSE
+            // event the badge listens to. The `/actions` fragment renders
+            // the same markup.
+            div.detail-actions-live hx-get={(base) "/actions"} hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
+                @if unit.is_template() {
+                    (banner(BannerKind::Info, "Template unit — managed read-only. Use the CLI to instantiate it."))
+                } @else {
+                    (action_row(unit, status, csrf))
+                }
+            }
+            (detail_links(&base, csrf))
+        }
+
+        div.detail-grid {
+            aside.detail-aside {
+                div.card {
+                    h2.card-title { "Overview" }
+                    table.kv-table {
+                        tr { td { "Kind" } td { (unit.kind.primary_section()) } }
+                        tr { td { "Service" } td { code { (service) } } }
+                        tr { td { "File" } td { code { (unit.path.display().to_string()) } } }
+                        @for (key, value) in facts {
+                            tr { td { (key) } td { (value) } }
+                        }
+                    }
+                }
+                @if let Some(e) = extra { (e) }
+            }
+            div.detail-main {
+                h2 { "Configuration" }
+                (section_table(unit))
             }
         }
-
-        (detail_links(&base, csrf))
-
-        @if let Some(s) = summary {
-            div.card { (s) }
-        }
-        @if let Some(e) = extra { (e) }
-
-        h2 { "Parsed contents" }
-        (section_table(unit))
     };
     shell(&unit.file_name, active, body)
-}
-
-/// A one-column key/value card body, the common shape of a kind's `summary`.
-pub fn summary_rows(rows: &[(&str, Markup)]) -> Markup {
-    html! {
-        table.kv-table {
-            @for (key, value) in rows {
-                tr { td { (key) } td { (value) } }
-            }
-        }
-    }
 }

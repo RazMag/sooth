@@ -477,15 +477,17 @@ pub fn error_page(status: StatusCode, message: &str, id: Uuid) -> Markup {
     shell("Error", None, body)
 }
 
-/// A unit's parsed `[Section]` blocks, rendered verbatim as key/value
-/// tables. Shared by the detail skeleton and the generic fallback.
+/// A unit's parsed `[Section]` blocks, one card each, rendered verbatim as
+/// key/value tables. Used by the detail skeleton.
 pub fn section_table(unit: &QuadletUnit) -> Markup {
     html! {
         @for section in &unit.sections {
-            table.kv-table {
-                caption { "[" (section.name) "]" }
-                @for (k, v) in &section.entries {
-                    tr { td { (k) } td { (v) } }
+            div.config-block {
+                div.config-block-name { "[" (section.name) "]" }
+                table.kv-table {
+                    @for (k, v) in &section.entries {
+                        tr { td { (k) } td { (v) } }
+                    }
                 }
             }
         }
@@ -623,5 +625,35 @@ mod tests {
         assert_eq!(section_back_target(UnitKind::Build), ("/images", "Images"));
         // Kube has no sidebar section -- falls back to the generic list.
         assert_eq!(section_back_target(UnitKind::Kube), ("/units", "All units"));
+    }
+
+    #[test]
+    fn detail_page_renders_overview_and_config_cards() {
+        use crate::quadlet::model::Section;
+
+        let unit = QuadletUnit {
+            file_name: "web.container".into(),
+            path: "/tmp/web.container".into(),
+            kind: UnitKind::Container,
+            sections: vec![Section {
+                name: "Container".into(),
+                entries: vec![("Image".into(), "docker.io/library/nginx".into())],
+            }],
+            raw: String::new(),
+        };
+        let markup = detail::detail_page(
+            &unit,
+            &UnitStatus::not_found(),
+            "csrf",
+            &[("Image", html! { code { "docker.io/library/nginx" } })],
+            None,
+        )
+        .into_string();
+
+        assert!(markup.contains("Overview"));
+        assert!(markup.contains("Configuration"));
+        assert!(markup.contains("config-block-name"));
+        assert!(markup.contains("web.service"));
+        assert!(markup.contains("detail-grid"));
     }
 }

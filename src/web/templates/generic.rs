@@ -17,7 +17,7 @@ use crate::systemd::UnitStatus;
 /// A plain, kind-branch-free detail page -- used for any kind without a
 /// dedicated section template (today, just Kube).
 pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
-    detail::detail_page(unit, status, csrf, None, None)
+    detail::detail_page(unit, status, csrf, &[], None)
 }
 
 /// How the "New" page's file-name field behaves: a stem plus a fixed

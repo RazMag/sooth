@@ -10,7 +10,6 @@ pub fn detail_page(
     csrf: &str,
     member_count: usize,
 ) -> Markup {
-    let summary = detail::summary_rows(&[("Members", html! { (member_count) })]);
     let extra = html! {
         p.detail-links {
             a.btn.btn-ghost.btn-sm href={"/containers/new?pod=" (unit.file_name)} {
@@ -18,5 +17,11 @@ pub fn detail_page(
             }
         }
     };
-    detail::detail_page(unit, status, csrf, Some(summary), Some(extra))
+    detail::detail_page(
+        unit,
+        status,
+        csrf,
+        &[("Members", html! { (member_count) })],
+        Some(extra),
+    )
 }

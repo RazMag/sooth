@@ -39,9 +39,12 @@ pub const COLUMNS: &[Column] = &[
 ];
 
 pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
-    let summary = detail::summary_rows(&[
-        ("Type", html! { (unit.kind.primary_section()) }),
-        ("Source", html! { code { (image_source(unit)) } }),
-    ]);
-    detail::detail_page(unit, status, csrf, Some(summary), None)
+    // "Type" would duplicate the Overview's "Kind" row -- just Source here.
+    detail::detail_page(
+        unit,
+        status,
+        csrf,
+        &[("Source", html! { code { (image_source(unit)) } })],
+        None,
+    )
 }
