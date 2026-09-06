@@ -45,7 +45,7 @@ pub enum NavItem {
 }
 
 impl NavItem {
-    fn href(self) -> &'static str {
+    pub fn href(self) -> &'static str {
         match self {
             NavItem::Services => "/",
             NavItem::Volumes => "/volumes",
@@ -57,7 +57,7 @@ impl NavItem {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             NavItem::Services => "Services",
             NavItem::Volumes => "Volumes",
@@ -103,6 +103,16 @@ impl NavItem {
             UnitKind::Image | UnitKind::Build => Some(NavItem::Images),
             UnitKind::Kube => None,
         }
+    }
+}
+
+/// The list page a unit of this kind belongs under, as `(href, label)` -- the
+/// target of the "Back" link on that unit's detail/logs/edit pages. Kube has
+/// no sidebar section, so it points at the generic `/units` list.
+pub fn section_back_target(kind: UnitKind) -> (&'static str, &'static str) {
+    match NavItem::for_kind(kind) {
+        Some(nav) => (nav.href(), nav.label()),
+        None => ("/units", "All units"),
     }
 }
 
@@ -184,6 +194,18 @@ pub fn shell(title: &str, active: Option<NavItem>, body: Markup) -> Markup {
 
 pub fn csrf_input(csrf: &str) -> Markup {
     html! { input type="hidden" name="csrf_token" value=(csrf); }
+}
+
+/// A small "← Back to X" button, shown at the very top of a page that sits
+/// below a section list in the nav tree (a unit's detail/logs/edit pages and
+/// the "New" pages). The target is structural -- the page's natural parent,
+/// not wherever the user actually came from.
+pub fn back_link(href: &str, label: &str) -> Markup {
+    html! {
+        a.back-link.btn.btn-sm href=(href) {
+            (icon(Icon::ArrowLeft)) span { "Back to " (label) }
+        }
+    }
 }
 
 /// A page's title bar: `<h1>` plus a right-aligned slot for actions (a
@@ -578,5 +600,28 @@ pub fn error_fragment(message: &str, id: Uuid) -> Markup {
             (message)
             span.muted { " (id: " (id.to_string()) ")" }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn section_back_target_covers_every_kind() {
+        assert_eq!(section_back_target(UnitKind::Container), ("/", "Services"));
+        assert_eq!(section_back_target(UnitKind::Pod), ("/", "Services"));
+        assert_eq!(
+            section_back_target(UnitKind::Volume),
+            ("/volumes", "Volumes")
+        );
+        assert_eq!(
+            section_back_target(UnitKind::Network),
+            ("/networks", "Networks")
+        );
+        assert_eq!(section_back_target(UnitKind::Image), ("/images", "Images"));
+        assert_eq!(section_back_target(UnitKind::Build), ("/images", "Images"));
+        // Kube has no sidebar section -- falls back to the generic list.
+        assert_eq!(section_back_target(UnitKind::Kube), ("/units", "All units"));
     }
 }

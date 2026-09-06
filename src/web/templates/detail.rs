@@ -7,8 +7,8 @@
 use maud::{Markup, html};
 
 use super::{
-    BannerKind, NavItem, action_row, banner, detail_links, page_header, section_table, shell,
-    status_badge,
+    BannerKind, NavItem, action_row, back_link, banner, detail_links, page_header,
+    section_back_target, section_table, shell, status_badge,
 };
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
@@ -24,7 +24,9 @@ pub fn detail_page(
     let service = unit.service_name();
     let base = core::unit_url(unit);
     let active = NavItem::for_kind(unit.kind);
+    let (back_href, back_label) = section_back_target(unit.kind);
     let body = html! {
+        (back_link(back_href, back_label))
         (page_header(&unit.file_name, status_badge(&service, status)))
         p.page-meta { code { (unit.path.display().to_string()) } " · " (unit.kind.primary_section()) }
 

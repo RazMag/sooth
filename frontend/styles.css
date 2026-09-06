@@ -191,6 +191,15 @@
 
   .btn-block { width: 100%; justify-content: center; }
 
+  /* "Back to X" button at the top of a unit sub-page / New page --- */
+  .back-link {
+    margin-bottom: 0.9rem;
+    color: var(--color-muted);
+    font-weight: 500;
+  }
+  .back-link:hover { color: var(--color-ink); text-decoration: none; }
+  .back-link svg { width: 0.95rem; height: 0.95rem; }
+
   /* Theme toggle: show the icon for the mode you'd switch *to*. */
   .theme-toggle .i-sun,
   .theme-toggle .i-moon { display: inline-flex; }

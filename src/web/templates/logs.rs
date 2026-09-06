@@ -5,7 +5,7 @@
 
 use maud::{Markup, html};
 
-use super::{NavItem, page_header, shell};
+use super::{NavItem, back_link, page_header, shell};
 use crate::quadlet::QuadletUnit;
 use crate::web::core;
 
@@ -13,6 +13,7 @@ pub fn logs_page(unit: &QuadletUnit, initial: &str) -> Markup {
     let service = unit.service_name();
     let stream_url = format!("{}/logs/stream", core::unit_url(unit));
     let body = html! {
+        (back_link(&core::unit_url(unit), &unit.file_name))
         (page_header(&format!("Logs: {}", unit.file_name), html! {}))
         p.page-meta { code { (service) } }
         pre id="log-output" data-log-stream data-stream-url=(stream_url) { (initial) }

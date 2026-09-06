@@ -6,6 +6,7 @@ use maud::{Markup, PreEscaped};
 
 #[derive(Clone, Copy)]
 pub enum Icon {
+    ArrowLeft,
     Menu,
     More,
     Settings,
@@ -32,6 +33,7 @@ pub enum Icon {
 
 pub fn icon(which: Icon) -> Markup {
     let body = match which {
+        Icon::ArrowLeft => r#"<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>"#,
         Icon::Menu => r#"<path d="M4 6h16M4 12h16M4 18h16"/>"#,
         Icon::More => {
             r#"<circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/>"#

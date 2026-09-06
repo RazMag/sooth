@@ -7,8 +7,8 @@ use maud::{Markup, html};
 
 use super::detail;
 use super::{
-    BannerKind, EditorFileName, NavItem, banner, code_editor, csrf_input, env_var_editor,
-    host_vars_panel, page_header, shell,
+    BannerKind, EditorFileName, NavItem, back_link, banner, code_editor, csrf_input,
+    env_var_editor, host_vars_panel, page_header, shell,
 };
 use crate::hostenv::EnvVar;
 use crate::quadlet::{QuadletUnit, UnitKind};
@@ -78,7 +78,13 @@ pub fn new_unit_page(p: NewUnitPage<'_>) -> Markup {
         },
     };
 
+    let (back_href, back_label) = match p.active {
+        Some(nav) => (nav.href(), nav.label()),
+        None => ("/units", "All units"),
+    };
+
     let body = html! {
+        (back_link(back_href, back_label))
         (page_header("New quadlet", html! {}))
         @if let Some(msg) = p.error { (banner(BannerKind::Error, msg)) }
         form method="post" action=(p.action) {
@@ -137,6 +143,7 @@ pub fn edit_unit_page(
     let base = crate::web::core::unit_url(unit);
     let wants_env = matches!(unit.kind, UnitKind::Container | UnitKind::Build);
     let body = html! {
+        (back_link(&base, &unit.file_name))
         (page_header(&format!("Edit {}", unit.file_name), html! {}))
         @if let Some(msg) = error { (banner(BannerKind::Error, msg)) }
         form method="post" action=(base + "/edit") {
