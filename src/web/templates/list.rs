@@ -53,6 +53,7 @@ fn row(
     columns: &[Column],
     csrf: &str,
     all_units: &[QuadletUnit],
+    known_groups: &[String],
     group_member: Option<&str>,
 ) -> Markup {
     let service = unit.service_name();
@@ -94,7 +95,7 @@ fn row(
                 (autostart_pill(status.is_autostart_enabled()))
                 (autoupdate_pill(unit))
             }
-            td { (kebab_menu(unit, status, csrf)) }
+            td { (kebab_menu(unit, status, csrf, known_groups)) }
         }
     }
 }
@@ -191,7 +192,7 @@ pub fn list_rows(
     html! {
         // Root (ungrouped) units first, bare.
         @for (unit, status) in units.iter().filter(|(u, _)| u.group.is_empty()) {
-            (row(unit, status, spec.columns, csrf, all_units, None))
+            (row(unit, status, spec.columns, csrf, all_units, known_groups, None))
         }
         // Then one collapsible section per group directory.
         @for grp in groups {
@@ -210,7 +211,7 @@ pub fn list_rows(
                 }
             } @else {
                 @for (unit, status) in members {
-                    (row(unit, status, spec.columns, csrf, all_units, Some(grp)))
+                    (row(unit, status, spec.columns, csrf, all_units, known_groups, Some(grp)))
                 }
             }
         }

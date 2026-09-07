@@ -370,8 +370,10 @@ fn action_form(
     }
 }
 
-/// A `<datalist>` of the group paths currently in use, referenced by every
-/// "move to group" input (`list="known-groups"`). Rendered once per page.
+/// A `<datalist>` of the group paths currently in use, referenced by the
+/// free-text group fields (`list="known-groups"`) -- the toolbar's "Add
+/// group", the New/Edit pages' group field, and the group kebab's "new
+/// parent". Rendered once per page.
 pub fn known_groups_datalist(groups: &[String]) -> Markup {
     html! {
         datalist id="known-groups" {
@@ -382,43 +384,59 @@ pub fn known_groups_datalist(groups: &[String]) -> Markup {
     }
 }
 
-/// The row-menu "move this quadlet into a group directory" form. Submits over
-/// htmx with `hx-swap="none"` so it does *not* navigate to the detail page --
-/// `core::move_unit` broadcasts `UnitsChanged` and the table's
-/// `sse:units-changed` trigger redraws the rows in place. Relies on a
-/// `known-groups` `<datalist>` being present on the page.
-pub fn move_form(base_url: &str, current_group: &str, csrf: &str) -> Markup {
-    html! {
-        form.inline-form.move-form hx-post={(base_url) "/move"} hx-swap="none" {
-            (csrf_input(csrf))
-            (icon(Icon::Folder))
-            input.input.move-input type="text" name="group" value=(current_group)
-                list="known-groups" placeholder="group…" aria-label="Move to group"
-                autocomplete="off" autocapitalize="off" spellcheck="false";
-            button type="submit" { "Move" }
-        }
-    }
-}
-
-/// The detail-page group control: a disclosure showing the unit's current
-/// group with a panel that lists every existing group (one click = move) plus
-/// a field to file it under a brand-new group. Each choice is its own submit
-/// button in a plain POST form, so `core::move_unit` redirects back to the
-/// (unchanged) detail URL, now rendered under the new group.
-pub fn group_picker(base_url: &str, current_group: &str, csrf: &str, known: &[String]) -> Markup {
+/// The group-move control: a disclosure whose summary shows the unit's
+/// current group, opening a panel that lists every other group (one click
+/// moves) plus a field to file it under a brand-new one. Shared by the
+/// detail page and the list-row kebab -- `live` is the only difference:
+///
+/// * `false` (detail page): the choices are plain POST forms, so
+///   `core::move_unit` redirects back to the (unchanged) detail URL, now
+///   rendered under the new group.
+/// * `true` (row kebab): the choices post over htmx with `hx-swap="none"`,
+///   so nothing navigates -- `move_group` returns `204`, `UnitsChanged` is
+///   broadcast, and the table's `sse:units-changed` trigger redraws the row
+///   in place. The `.group-picker` panel styling is reused verbatim; extra
+///   rules scope its summary to look like the other kebab rows.
+fn group_move_menu(
+    base_url: &str,
+    current_group: &str,
+    csrf: &str,
+    known: &[String],
+    live: bool,
+) -> Markup {
     let label = if current_group.is_empty() {
         "root"
     } else {
         current_group
     };
     let action = format!("{base_url}/move");
+    // Each `<form>` gets either `method`/`action` (plain POST) or
+    // `hx-post`/`hx-swap` (htmx), never both.
+    let form_attrs = |markup: Markup| {
+        html! {
+            @if live {
+                form.group-picker-list hx-post=(action) hx-swap="none" { (markup) }
+            } @else {
+                form.group-picker-list method="post" action=(action) { (markup) }
+            }
+        }
+    };
+    let new_form_attrs = |markup: Markup| {
+        html! {
+            @if live {
+                form.group-picker-new hx-post=(action) hx-swap="none" { (markup) }
+            } @else {
+                form.group-picker-new method="post" action=(action) { (markup) }
+            }
+        }
+    };
     html! {
         details.group-picker {
             summary.btn.btn-ghost.btn-sm {
                 (icon(Icon::Folder)) span { (label) } (icon(Icon::ChevronDown))
             }
             div.group-picker-panel {
-                form.group-picker-list method="post" action=(action) {
+                (form_attrs(html! {
                     (csrf_input(csrf))
                     @if !current_group.is_empty() {
                         button.group-opt type="submit" name="group" value="" { "root" }
@@ -428,17 +446,22 @@ pub fn group_picker(base_url: &str, current_group: &str, csrf: &str, known: &[St
                             button.group-opt type="submit" name="group" value=(g) { (g) }
                         }
                     }
-                }
-                form.group-picker-new method="post" action=(action) {
+                }))
+                (new_form_attrs(html! {
                     (csrf_input(csrf))
                     input.input.input-sm type="text" name="group" placeholder="new group…"
                         aria-label="New group" autocomplete="off" autocapitalize="off"
                         spellcheck="false" required;
                     button.btn.btn-sm type="submit" { "Add" }
-                }
+                }))
             }
         }
     }
+}
+
+/// The detail-page group control -- see `group_move_menu`.
+pub fn group_picker(base_url: &str, current_group: &str, csrf: &str, known: &[String]) -> Markup {
+    group_move_menu(base_url, current_group, csrf, known, false)
 }
 
 fn delete_form(base_url: &str, csrf: &str, btn_class: &str) -> Markup {
@@ -491,7 +514,12 @@ pub fn kebab_action_forms(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -
 /// status-dependent forms live in a live-refreshing `.menu-actions` slot;
 /// the `<details>` and the Edit/Logs/Delete links are never replaced, so an
 /// open menu stays open through a status change.
-pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
+pub fn kebab_menu(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    csrf: &str,
+    known_groups: &[String],
+) -> Markup {
     let base = core::unit_url(unit);
     let service = unit.service_name();
     html! {
@@ -507,7 +535,7 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
                 a href={(base) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
                 a href={(base) "/logs"} { (icon(Icon::Logs)) span { "Logs" } }
                 @if !unit.is_template() {
-                    (move_form(&base, &unit.group, csrf))
+                    (group_move_menu(&base, &unit.group, csrf, known_groups, true))
                 }
                 (delete_form(&base, csrf, "danger"))
             }

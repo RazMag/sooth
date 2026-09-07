@@ -649,24 +649,6 @@
 
   .input-sm { padding: 0.3rem 0.5rem; font-size: 0.82rem; border-radius: 0.4rem; }
 
-  /* Row-menu "move to group": a compact icon + datalist field + submit.
-     Overrides `.menu-panel form { display: contents }` so it stays one row. */
-  .menu-panel .move-form { display: flex; align-items: center; padding: 0.25rem 0.4rem; gap: 0.3rem; }
-  .menu-panel .move-form .move-input {
-    flex: 1;
-    min-width: 0;
-    width: auto;
-    padding: 0.25rem 0.4rem;
-    font-size: 0.8rem;
-  }
-  .menu-panel .move-form button {
-    width: auto;
-    flex: none;
-    padding: 0.25rem 0.5rem;
-    font-size: 0.78rem;
-    background: var(--color-raised);
-  }
-
   /* Detail-page group control: current group + a dropdown of the rest. */
   .group-picker { position: relative; display: inline-block; }
   .group-picker > summary { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; list-style: none; }
@@ -799,6 +781,39 @@
     font-size: 0.8rem;
   }
   .menu-panel .group-menu-form button {
+    width: auto;
+    flex: none;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.78rem;
+    background: var(--color-raised);
+  }
+
+  /* The unit kebab's "move to group" row is the detail-page `.group-picker`
+     dropdown (same panel, list and new-group field), only its summary is
+     re-skinned to sit flush with the plain menu rows above it. */
+  .menu-panel .group-picker { width: 100%; }
+  .menu-panel .group-picker > summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: none;
+    color: var(--color-ink);
+    font-size: 0.83rem;
+  }
+  .menu-panel .group-picker > summary:hover,
+  .menu-panel .group-picker[open] > summary { background: var(--color-raised); }
+  .menu-panel .group-picker > summary > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-panel .group-picker > summary svg:first-child { width: 0.95rem; height: 0.95rem; color: var(--color-muted); }
+  .menu-panel .group-picker > summary svg:last-child { width: 0.8rem; height: 0.8rem; color: var(--color-muted); }
+  .menu-panel .group-picker-panel { left: 0; }
+  /* `.menu-panel form { display: contents }` would collapse these two rows --
+     restore the layout `.group-picker-list` / `.group-picker-new` expect. */
+  .menu-panel .group-picker-list { display: flex; flex-direction: column; }
+  .menu-panel .group-picker-new { display: flex; }
+  .menu-panel .group-picker-new button {
     width: auto;
     flex: none;
     padding: 0.25rem 0.5rem;
