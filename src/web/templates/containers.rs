@@ -20,7 +20,7 @@ pub fn detail_page(
         csrf,
         &[
             ("Image", html! { code { (image) } }),
-            ("Ports", super::ports_summary(unit, status.is_active())),
+            ("Ports", super::ports_cell_live(unit, status)),
         ],
         None,
         known_groups,

@@ -6,12 +6,12 @@
 use maud::{Markup, html};
 
 use super::list::{Column, ListSpec, RowCtx, kind_cell};
-use super::{Icon, NavItem, icon, ports_summary, shell};
+use super::{Icon, NavItem, icon, ports_cell_live, shell};
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 
 fn ports_cell(ctx: &RowCtx) -> Markup {
-    ports_summary(ctx.unit, ctx.status.is_active())
+    ports_cell_live(ctx.unit, ctx.status)
 }
 
 pub const COLUMNS: &[Column] = &[

@@ -654,6 +654,23 @@ pub fn ports_summary(unit: &QuadletUnit, active: bool) -> Markup {
     }
 }
 
+/// `ports_summary` in a slot that re-fetches itself on this unit's status
+/// change. The `status-{service}` SSE event only swaps the badge, so a
+/// stopped -> running transition would otherwise leave the Ports cell's
+/// greyed `.port-static` pills untouched until a full reload; re-rendering
+/// here emits the `data-host-port` span that `frontend/ports.js` upgrades
+/// into a live link on the following `htmx:afterSwap`.
+pub fn ports_cell_live(unit: &QuadletUnit, status: &UnitStatus) -> Markup {
+    let base = core::unit_url(unit);
+    let service = unit.service_name();
+    html! {
+        span.ports-live hx-get={(base) "/ports"}
+            hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
+            (ports_summary(unit, status.is_active()))
+        }
+    }
+}
+
 /// A comma-separated list of links to quadlet units named by `file_names`,
 /// resolved against `all_units` for the correct section URL. A muted dash
 /// when the list is empty. Used by the Volumes/Networks "Used by" column and

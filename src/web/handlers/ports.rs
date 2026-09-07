@@ -4,15 +4,23 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 
 use crate::config::AppState;
-use crate::error::PageError;
+use crate::error::{AppError, FragmentError, PageError};
 use crate::quadlet::UnitKind;
 use crate::quadlet::ports;
 use crate::web::core;
 use crate::web::templates::ports::PortRow;
 use crate::web::templates::{self};
 
-pub async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, PageError> {
-    let units = core::load_units_for_kinds(&state, &[UnitKind::Container, UnitKind::Pod]).await?;
+/// Builds every declared `PublishPort=` mapping across Containers and Pods
+/// into `PortRow`s (owner URL, live status, collision flag) and hands the
+/// slice to `render`. `PortRow` borrows from the loaded units and the sorted
+/// mappings, so both have to stay on this stack frame -- the closure keeps
+/// the borrow scoped without leaking those types into a return signature.
+async fn with_rows<T>(
+    state: &AppState,
+    render: impl FnOnce(&[PortRow]) -> T,
+) -> Result<T, AppError> {
+    let units = core::load_units_for_kinds(state, &[UnitKind::Container, UnitKind::Pod]).await?;
     let unit_refs: Vec<_> = units.iter().map(|(u, _)| u.clone()).collect();
 
     let mut mappings = ports::extract(&unit_refs);
@@ -37,5 +45,16 @@ pub async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, P
         })
         .collect();
 
-    Ok(templates::ports::ports_page(&rows))
+    Ok(render(&rows))
+}
+
+pub async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, PageError> {
+    Ok(with_rows(&state, templates::ports::ports_page).await?)
+}
+
+/// The `<tbody>` rows only -- re-fetched by the Ports table on
+/// `sse:any-status` / `sse:units-changed` so a unit starting or stopping
+/// flips its Host Port cell between a greyed pill and a live link.
+pub async fn rows(State(state): State<AppState>) -> Result<maud::Markup, FragmentError> {
+    Ok(with_rows(&state, templates::ports::ports_rows).await?)
 }

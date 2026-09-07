@@ -24,7 +24,7 @@ pub fn detail_page(
         csrf,
         &[
             ("Members", html! { (member_count) }),
-            ("Ports", super::ports_summary(unit, status.is_active())),
+            ("Ports", super::ports_cell_live(unit, status)),
         ],
         Some(extra),
         known_groups,

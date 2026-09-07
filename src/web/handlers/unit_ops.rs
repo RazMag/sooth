@@ -89,6 +89,21 @@ pub async fn config(
     Ok(templates::section_table(&unit))
 }
 
+/// A unit's published-port summary, re-rendered against its current status.
+/// Each list row's Ports cell and the detail page's Overview "Ports" fact wrap
+/// their pills in an element that `hx-get`s this on the unit's
+/// `sse:status-{service}` event, so a stopped -> running transition upgrades
+/// the greyed pills into live links (via `ports.js` on `htmx:afterSwap`)
+/// without a reload -- the badge's SSE swap alone never touches this cell.
+pub async fn ports_cell(
+    State(state): State<AppState>,
+    Path(file_name): Path<String>,
+) -> Result<maud::Markup, FragmentError> {
+    let unit = discovery::load_by_name(&state.quadlet_dir, &file_name)?;
+    let status = state.systemd.status(&unit.service_name()).await?;
+    Ok(templates::ports_summary(&unit, status.is_active()))
+}
+
 #[derive(Deserialize)]
 pub struct ActionsQuery {
     /// `?style=menu` -> just the kebab's status forms (for `.menu-actions`);

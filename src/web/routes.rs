@@ -31,6 +31,10 @@ fn mount_unit_routes(router: Router<AppState>, prefix: &str) -> Router<AppState>
             get(unit_ops::config),
         )
         .route(
+            &format!("{prefix}/{{file_name}}/ports"),
+            get(unit_ops::ports_cell),
+        )
+        .route(
             &format!("{prefix}/{{file_name}}/start"),
             post(unit_ops::start),
         )
@@ -110,6 +114,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/groups/rename", post(groups::rename))
         .route("/groups/delete", post(groups::delete))
         .route("/ports", get(ports::index))
+        .route("/ports/rows", get(ports::rows))
         .route(
             "/environment",
             get(environment::index).post(environment::add),
