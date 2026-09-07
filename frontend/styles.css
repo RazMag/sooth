@@ -179,8 +179,12 @@
   .btn-sm { padding: 0.3rem 0.55rem; font-size: 0.8rem; border-radius: 0.4rem; }
 
   .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     padding: 0.4rem;
-    border-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
     background: transparent;
     color: var(--color-muted);
   }
