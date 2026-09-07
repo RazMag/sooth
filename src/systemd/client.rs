@@ -5,8 +5,13 @@ use super::status::{self, UnitStatus};
 
 /// Thin proxy over `org.freedesktop.systemd1.Manager` on the session bus --
 /// the interface systemd exposes for exactly this dashboard's needs
-/// (start/stop/restart/enable/disable/reload/status), confirmed present via
+/// (start/stop/restart/reload/status), confirmed present via
 /// `busctl --user introspect org.freedesktop.systemd1 /org/freedesktop/systemd1`.
+///
+/// Note there is no enable/disable here: podman's generated `.service` units
+/// live under a systemd generator directory, which `EnableUnitFiles` rejects
+/// ("transient or generated"). Autostart is toggled by patching the quadlet
+/// file's `[Install]` section instead -- see `quadlet::install`.
 #[proxy(
     interface = "org.freedesktop.systemd1.Manager",
     default_service = "org.freedesktop.systemd1",
@@ -18,17 +23,6 @@ pub trait Manager {
     fn restart_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
     fn reload(&self) -> zbus::Result<()>;
     fn get_unit(&self, name: &str) -> zbus::Result<OwnedObjectPath>;
-    fn enable_unit_files(
-        &self,
-        files: &[&str],
-        runtime: bool,
-        force: bool,
-    ) -> zbus::Result<(bool, Vec<(String, String, String)>)>;
-    fn disable_unit_files(
-        &self,
-        files: &[&str],
-        runtime: bool,
-    ) -> zbus::Result<Vec<(String, String, String)>>;
     /// Required once at startup for `PropertiesChanged` signals on unit
     /// objects to actually be emitted to this connection.
     fn subscribe(&self) -> zbus::Result<()>;
@@ -97,22 +91,6 @@ impl Client {
             .await
             .map(|_| ())
             .map_err(|e| SystemdError::action_failed(unit, "restart", e))
-    }
-
-    pub async fn enable(&self, unit: &str) -> Result<(), SystemdError> {
-        self.manager
-            .enable_unit_files(&[unit], false, true)
-            .await
-            .map(|_| ())
-            .map_err(|e| SystemdError::action_failed(unit, "enable", e))
-    }
-
-    pub async fn disable(&self, unit: &str) -> Result<(), SystemdError> {
-        self.manager
-            .disable_unit_files(&[unit], false)
-            .await
-            .map(|_| ())
-            .map_err(|e| SystemdError::action_failed(unit, "disable", e))
     }
 
     /// Re-runs the quadlet generator (systemd's `daemon-reload` equivalent),

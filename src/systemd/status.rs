@@ -11,7 +11,6 @@ pub struct UnitStatus {
     pub load_state: String,
     pub active_state: String,
     pub sub_state: String,
-    pub unit_file_state: String,
     pub description: String,
 }
 
@@ -25,7 +24,6 @@ impl UnitStatus {
             load_state: "not-found".into(),
             active_state: "inactive".into(),
             sub_state: "dead".into(),
-            unit_file_state: "unknown".into(),
             description: String::new(),
         }
     }
@@ -36,10 +34,6 @@ impl UnitStatus {
 
     pub fn is_failed(&self) -> bool {
         self.active_state == "failed"
-    }
-
-    pub fn is_enabled(&self) -> bool {
-        self.unit_file_state == "enabled"
     }
 }
 
@@ -66,23 +60,17 @@ pub(super) async fn fetch(
 
     const UNIT_IFACE: InterfaceName<'static> =
         InterfaceName::from_static_str_unchecked("org.freedesktop.systemd1.Unit");
-    const SERVICE_IFACE: InterfaceName<'static> =
-        InterfaceName::from_static_str_unchecked("org.freedesktop.systemd1.Service");
 
     let unit_props = props
         .get_all(UNIT_IFACE)
         .await
         .map_err(|e| SystemdError::action_failed(unit, "status", e))?;
-    // Not every unit type has a Service interface (e.g. .device, .mount);
-    // missing UnitFileState just renders as "unknown".
-    let service_props = props.get_all(SERVICE_IFACE).await.unwrap_or_default();
 
     Ok(UnitStatus {
         load_state: get_str(&unit_props, "LoadState"),
         active_state: get_str(&unit_props, "ActiveState"),
         sub_state: get_str(&unit_props, "SubState"),
         description: get_str(&unit_props, "Description"),
-        unit_file_state: get_str(&service_props, "UnitFileState"),
     })
 }
 

@@ -11,7 +11,7 @@ use crate::auth;
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
-use crate::quadlet::{QuadletUnit, UnitKind, discovery, writer};
+use crate::quadlet::{QuadletUnit, UnitKind, discovery, install, writer};
 use crate::systemd::UnitStatus;
 
 /// The section a unit belongs to, and therefore the URL prefix all of its
@@ -87,23 +87,35 @@ pub async fn execute_action(
     if !auth::csrf::verify(session, csrf_token).await {
         return Err(FragmentError(AppError::Csrf));
     }
-    let unit = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?;
+    let mut unit = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?;
     let service = unit.service_name();
+    let is_autostart = matches!(action, "enable" | "disable");
 
     let span = tracing::info_span!("unit_action", unit = %service, action);
     async {
-        let result = match action {
-            "start" => state.systemd.start(&service).await,
-            "stop" => state.systemd.stop(&service).await,
-            "restart" => state.systemd.restart(&service).await,
-            "enable" => state.systemd.enable(&service).await,
-            "disable" => state.systemd.disable(&service).await,
+        match action {
+            "start" => state.systemd.start(&service).await?,
+            "stop" => state.systemd.stop(&service).await?,
+            "restart" => state.systemd.restart(&service).await?,
+            // Podman's generated `.service` units live under a systemd
+            // generator dir, which `EnableUnitFiles` refuses outright -- so
+            // "enable"/"disable" is a patch of the quadlet's `[Install]`
+            // section plus a reload, not a D-Bus enable call.
+            "enable" => set_autostart(state, &unit, true).await?,
+            "disable" => set_autostart(state, &unit, false).await?,
             _ => unreachable!("action is one of the fixed route names in handlers/unit_ops.rs"),
-        };
-        result.map_err(FragmentError::from)
+        }
+        Ok::<(), FragmentError>(())
     }
     .instrument(span)
     .await?;
+
+    if is_autostart {
+        // The file on disk just changed; re-read it so the re-rendered
+        // action row shows the opposite button, and tell every open list.
+        unit = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?;
+        let _ = state.events.send(DashboardEvent::UnitsChanged);
+    }
 
     let status = state.systemd.status(&service).await?;
     let _ = state.events.send(DashboardEvent::Status {
@@ -111,6 +123,25 @@ pub async fn execute_action(
         status: status.clone(),
     });
     Ok(ActionOutcome { unit, status })
+}
+
+/// The rootless "enable"/"disable": add or remove a managed `[Install]` /
+/// `WantedBy=default.target` in the quadlet file (validated + written
+/// atomically, same as any edit) and reload so the generator picks it up. A
+/// no-op when the file is already in the requested state.
+async fn set_autostart(
+    state: &AppState,
+    unit: &QuadletUnit,
+    enabled: bool,
+) -> Result<(), FragmentError> {
+    let patched = install::set_enabled(&unit.raw, enabled);
+    if patched == unit.raw {
+        return Ok(());
+    }
+    writer::write_atomic(&state.quadlet_dir, &unit.file_name, &patched)?;
+    state.systemd.reload().await?;
+    tracing::info!(file = %unit.file_name, enabled, "autostart toggled via [Install]");
+    Ok(())
 }
 
 /// Verifies CSRF, atomically writes a brand-new quadlet file (rejecting if

@@ -22,7 +22,7 @@ use maud::{DOCTYPE, Markup, html};
 use uuid::Uuid;
 
 use crate::hostenv::EnvVar;
-use crate::quadlet::{QuadletUnit, UnitKind};
+use crate::quadlet::{QuadletUnit, UnitKind, install};
 use crate::systemd::UnitStatus;
 use crate::web::core;
 
@@ -283,7 +283,17 @@ pub fn status_badge(service: &str, status: &UnitStatus) -> Markup {
         span id=(dom_id(service)) class={"badge " (variant)} title=(raw)
             sse-swap={"status-" (service)} hx-swap="outerHTML" {
             (label)
-            @if status.is_enabled() { span.chip { "enabled" } }
+        }
+    }
+}
+
+/// A small "Autostart" pill shown next to a unit's actions when its quadlet
+/// file carries an `[Install]` / `WantedBy=` -- the rootless stand-in for
+/// `systemctl is-enabled` (which always reports `generated` for these).
+pub fn autostart_pill(enabled: bool) -> Markup {
+    html! {
+        @if enabled {
+            span.chip title="Starts on login (has an [Install] section)" { "Autostart" }
         }
     }
 }
@@ -332,6 +342,7 @@ fn unit_action_forms(
     base: &str,
     service: &str,
     status: &UnitStatus,
+    autostart: bool,
     csrf: &str,
     start_class: &str,
     other_class: &str,
@@ -343,7 +354,7 @@ fn unit_action_forms(
         } @else {
             (action_form(base, service, "start", "Start", Icon::Play, csrf, start_class))
         }
-        @if status.is_enabled() {
+        @if autostart {
             (action_form(base, service, "disable", "Disable", Icon::Power, csrf, other_class))
         } @else {
             (action_form(base, service, "enable", "Enable", Icon::Power, csrf, other_class))
@@ -360,6 +371,7 @@ pub fn kebab_action_forms(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -
         &core::unit_url(unit),
         &unit.service_name(),
         status,
+        install::is_enabled(&unit.sections),
         csrf,
         "",
         "",
@@ -382,7 +394,7 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
                 @if !unit.is_template() {
                     div.menu-actions hx-get={(base) "/actions?style=menu"}
                         hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
-                        (unit_action_forms(&base, &service, status, csrf, "", ""))
+                        (unit_action_forms(&base, &service, status, install::is_enabled(&unit.sections), csrf, "", ""))
                     }
                 }
                 a href={(base) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
@@ -396,16 +408,19 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
 /// The same actions as `kebab_menu`, laid out as plain buttons -- used on
 /// detail pages where there's room and the extra visibility is welcome.
 pub fn action_row(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
+    let autostart = install::is_enabled(&unit.sections);
     html! {
         div.action-row {
             (unit_action_forms(
                 &core::unit_url(unit),
                 &unit.service_name(),
                 status,
+                autostart,
                 csrf,
                 "btn btn-primary btn-sm",
                 "btn btn-ghost btn-sm",
             ))
+            (autostart_pill(autostart))
         }
     }
 }
