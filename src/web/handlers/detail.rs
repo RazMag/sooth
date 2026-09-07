@@ -23,11 +23,17 @@ pub async fn show(
         .await
         .unwrap_or_default();
 
+    // One enumeration, reused for cross-unit references; every group directory
+    // (incl. empty ones) feeds the group picker.
+    let all = discovery::load_all(&state.quadlet_dir)?;
+    let known_groups = discovery::list_groups(&state.quadlet_dir);
+
     Ok(match unit.kind {
-        UnitKind::Container => templates::containers::detail_page(&unit, &status, &csrf),
+        UnitKind::Container => {
+            templates::containers::detail_page(&unit, &status, &csrf, &known_groups)
+        }
         UnitKind::Pod => {
-            let containers = discovery::load_all(&state.quadlet_dir)?;
-            let member_count = containers
+            let member_count = all
                 .iter()
                 .filter(|c| c.kind == UnitKind::Container)
                 .filter(|c| {
@@ -35,19 +41,19 @@ pub async fn show(
                         == Some(unit.file_name.as_str())
                 })
                 .count();
-            templates::pods::detail_page(&unit, &status, &csrf, member_count)
+            templates::pods::detail_page(&unit, &status, &csrf, member_count, &known_groups)
         }
         UnitKind::Volume => {
-            let all = discovery::load_all(&state.quadlet_dir)?;
             let used_by = refs::consumers_of(&unit, &all);
-            templates::volumes::detail_page(&unit, &status, &csrf, &all, &used_by)
+            templates::volumes::detail_page(&unit, &status, &csrf, &all, &used_by, &known_groups)
         }
         UnitKind::Network => {
-            let all = discovery::load_all(&state.quadlet_dir)?;
             let used_by = refs::consumers_of(&unit, &all);
-            templates::networks::detail_page(&unit, &status, &csrf, &all, &used_by)
+            templates::networks::detail_page(&unit, &status, &csrf, &all, &used_by, &known_groups)
         }
-        UnitKind::Image | UnitKind::Build => templates::images::detail_page(&unit, &status, &csrf),
-        UnitKind::Kube => templates::generic::detail_page(&unit, &status, &csrf),
+        UnitKind::Image | UnitKind::Build => {
+            templates::images::detail_page(&unit, &status, &csrf, &known_groups)
+        }
+        UnitKind::Kube => templates::generic::detail_page(&unit, &status, &csrf, &known_groups),
     })
 }

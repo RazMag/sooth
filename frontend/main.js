@@ -6,6 +6,8 @@ import "htmx-ext-sse";
 
 import { initTheme } from "./theme.js";
 import { initFilter } from "./filter.js";
+import { initGroups } from "./groups.js";
+import { initDragDrop } from "./dragdrop.js";
 import { initNav } from "./nav.js";
 import { initMenus } from "./menu.js";
 import { initLogs } from "./logs.js";
@@ -21,6 +23,8 @@ window.htmx = htmx;
 function boot() {
   initTheme();
   initFilter();
+  initGroups();
+  initDragDrop();
   initNav();
   initMenus();
   initLogs();
@@ -36,6 +40,7 @@ if (document.readyState === "loading") {
 }
 
 document.addEventListener("htmx:afterSwap", () => {
+  initGroups();
   initLogs();
   initEditors();
   initEnvVars();

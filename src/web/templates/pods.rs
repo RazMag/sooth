@@ -9,6 +9,7 @@ pub fn detail_page(
     status: &UnitStatus,
     csrf: &str,
     member_count: usize,
+    known_groups: &[String],
 ) -> Markup {
     let extra = html! {
         p.detail-links {
@@ -26,5 +27,6 @@ pub fn detail_page(
             ("Ports", super::ports_summary(unit, status.is_active())),
         ],
         Some(extra),
+        known_groups,
     )
 }

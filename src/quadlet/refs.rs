@@ -76,6 +76,7 @@ mod tests {
     ) -> QuadletUnit {
         QuadletUnit {
             file_name: file_name.into(),
+            group: String::new(),
             path: format!("/tmp/{file_name}").into(),
             kind,
             sections: vec![Section {

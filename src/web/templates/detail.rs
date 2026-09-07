@@ -7,7 +7,7 @@
 use maud::{Markup, html};
 
 use super::{
-    BannerKind, NavItem, action_row, back_link, banner, detail_links, page_header,
+    BannerKind, NavItem, action_row, back_link, banner, detail_links, group_picker, page_header,
     section_back_target, section_table, shell, status_badge,
 };
 use crate::quadlet::QuadletUnit;
@@ -20,6 +20,7 @@ pub fn detail_page(
     csrf: &str,
     facts: &[(&str, Markup)],
     extra: Option<Markup>,
+    known_groups: &[String],
 ) -> Markup {
     let service = unit.service_name();
     let base = core::unit_url(unit);
@@ -52,6 +53,12 @@ pub fn detail_page(
                         tr { td { "Kind" } td { (unit.kind.primary_section()) } }
                         tr { td { "Service" } td { code { (service) } } }
                         tr { td { "File" } td { code { (unit.path.display().to_string()) } } }
+                        @if !unit.is_template() {
+                            tr {
+                                td { "Group" }
+                                td { (group_picker(&base, &unit.group, csrf, known_groups)) }
+                            }
+                        }
                         @for (key, value) in facts {
                             tr { td { (key) } td { (value) } }
                         }

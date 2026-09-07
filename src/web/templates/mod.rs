@@ -349,8 +349,8 @@ pub fn autoupdate_pill(unit: &QuadletUnit) -> Markup {
 }
 
 /// One systemd action, as a small htmx form that swaps the freshly rendered
-/// status badge in place. `btn_class` is empty inside the kebab menu (styled
-/// by `.menu-panel button`) and a `.btn` combo on detail pages.
+/// status badge in place. `btn_class` is the semantic `.btn .btn-sm .btn-*`
+/// combo -- the same on detail pages and in the kebab menu.
 fn action_form(
     base_url: &str,
     service: &str,
@@ -365,6 +365,77 @@ fn action_form(
             (csrf_input(csrf))
             button class=[(!btn_class.is_empty()).then_some(btn_class)] type="submit" {
                 (icon(ic)) span { (label) }
+            }
+        }
+    }
+}
+
+/// A `<datalist>` of the group paths currently in use, referenced by every
+/// "move to group" input (`list="known-groups"`). Rendered once per page.
+pub fn known_groups_datalist(groups: &[String]) -> Markup {
+    html! {
+        datalist id="known-groups" {
+            @for g in groups {
+                option value=(g) {}
+            }
+        }
+    }
+}
+
+/// The row-menu "move this quadlet into a group directory" form. Submits over
+/// htmx with `hx-swap="none"` so it does *not* navigate to the detail page --
+/// `core::move_unit` broadcasts `UnitsChanged` and the table's
+/// `sse:units-changed` trigger redraws the rows in place. Relies on a
+/// `known-groups` `<datalist>` being present on the page.
+pub fn move_form(base_url: &str, current_group: &str, csrf: &str) -> Markup {
+    html! {
+        form.inline-form.move-form hx-post={(base_url) "/move"} hx-swap="none" {
+            (csrf_input(csrf))
+            (icon(Icon::Folder))
+            input.input.move-input type="text" name="group" value=(current_group)
+                list="known-groups" placeholder="group…" aria-label="Move to group"
+                autocomplete="off" autocapitalize="off" spellcheck="false";
+            button type="submit" { "Move" }
+        }
+    }
+}
+
+/// The detail-page group control: a disclosure showing the unit's current
+/// group with a panel that lists every existing group (one click = move) plus
+/// a field to file it under a brand-new group. Each choice is its own submit
+/// button in a plain POST form, so `core::move_unit` redirects back to the
+/// (unchanged) detail URL, now rendered under the new group.
+pub fn group_picker(base_url: &str, current_group: &str, csrf: &str, known: &[String]) -> Markup {
+    let label = if current_group.is_empty() {
+        "root"
+    } else {
+        current_group
+    };
+    let action = format!("{base_url}/move");
+    html! {
+        details.group-picker {
+            summary.btn.btn-ghost.btn-sm {
+                (icon(Icon::Folder)) span { (label) } (icon(Icon::ChevronDown))
+            }
+            div.group-picker-panel {
+                form.group-picker-list method="post" action=(action) {
+                    (csrf_input(csrf))
+                    @if !current_group.is_empty() {
+                        button.group-opt type="submit" name="group" value="" { "root" }
+                    }
+                    @for g in known {
+                        @if g.as_str() != current_group {
+                            button.group-opt type="submit" name="group" value=(g) { (g) }
+                        }
+                    }
+                }
+                form.group-picker-new method="post" action=(action) {
+                    (csrf_input(csrf))
+                    input.input.input-sm type="text" name="group" placeholder="new group…"
+                        aria-label="New group" autocomplete="off" autocapitalize="off"
+                        spellcheck="false" required;
+                    button.btn.btn-sm type="submit" { "Add" }
+                }
             }
         }
     }
@@ -386,24 +457,11 @@ fn delete_form(base_url: &str, csrf: &str, btn_class: &str) -> Markup {
 
 /// The status-dependent action forms (start-or-stop+restart, then
 /// enable-or-disable) -- shared by the kebab menu and the detail-page action
-/// row. When `styled` is set each button carries its semantic `.btn-*`
-/// variant (green Start, red Stop, yellow Restart, blue Enable/Disable) for
-/// the detail page; the kebab passes it unset and lets `.menu-panel button`
-/// style them.
-fn unit_action_forms(
-    base: &str,
-    service: &str,
-    status: &UnitStatus,
-    csrf: &str,
-    styled: bool,
-) -> Markup {
-    let cls = |variant: &str| {
-        if styled {
-            format!("btn btn-sm {variant}")
-        } else {
-            String::new()
-        }
-    };
+/// row. Every button carries its semantic `.btn-*` variant (green Start, red
+/// Stop, yellow Restart, blue Enable/Disable) in both places; the kebab's own
+/// CSS keeps them full-width in the menu panel.
+fn unit_action_forms(base: &str, service: &str, status: &UnitStatus, csrf: &str) -> Markup {
+    let cls = |variant: &str| format!("btn btn-sm {variant}");
     html! {
         @if status.is_active() {
             (action_form(base, service, "stop", "Stop", Icon::Stop, csrf, &cls("btn-stop")))
@@ -424,13 +482,7 @@ fn unit_action_forms(
 /// change so the Start/Stop choice tracks live state *without* re-rendering
 /// (and thereby closing) the whole `<details>` menu.
 pub fn kebab_action_forms(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
-    unit_action_forms(
-        &core::unit_url(unit),
-        &unit.service_name(),
-        status,
-        csrf,
-        false,
-    )
+    unit_action_forms(&core::unit_url(unit), &unit.service_name(), status, csrf)
 }
 
 /// The per-row quick-actions menu: a native `<details>` disclosure, no JS
@@ -449,12 +501,65 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
                 @if !unit.is_template() {
                     div.menu-actions hx-get={(base) "/actions?style=menu"}
                         hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
-                        (unit_action_forms(&base, &service, status, csrf, false))
+                        (unit_action_forms(&base, &service, status, csrf))
                     }
                 }
                 a href={(base) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
                 a href={(base) "/logs"} { (icon(Icon::Logs)) span { "Logs" } }
+                @if !unit.is_template() {
+                    (move_form(&base, &unit.group, csrf))
+                }
                 (delete_form(&base, csrf, "danger"))
+            }
+        }
+    }
+}
+
+/// The per-row actions menu for a *group directory* header: add a subgroup,
+/// rename its leaf, re-parent it, or delete it (empty groups only). Each is a
+/// small htmx form (`hx-swap="none"`) that leans on the `units-changed` SSE
+/// refresh; `hx-on::htmx:response-error` surfaces a rejected change.
+pub fn group_kebab(path: &str, csrf: &str) -> Markup {
+    let leaf = path.rsplit('/').next().unwrap_or(path);
+    html! {
+        details.menu.group-menu {
+            summary aria-label="Group actions" { (icon(Icon::More)) }
+            div.menu-panel
+                hx-on::response-error="alert('That group change was rejected — the name may be taken, invalid, or the group still has units.')" {
+                form.group-menu-form hx-post="/groups" hx-swap="none" {
+                    (csrf_input(csrf))
+                    input type="hidden" name="parent" value=(path);
+                    (icon(Icon::Plus))
+                    input.input type="text" name="group" placeholder="subgroup…"
+                        aria-label="New subgroup name" autocomplete="off" autocapitalize="off"
+                        spellcheck="false" required;
+                    button type="submit" { "Add" }
+                }
+                form.group-menu-form hx-post="/groups/rename" hx-swap="none" {
+                    (csrf_input(csrf))
+                    input type="hidden" name="group" value=(path);
+                    (icon(Icon::Edit))
+                    input.input type="text" name="name" value=(leaf)
+                        aria-label="New group name" autocomplete="off" autocapitalize="off"
+                        spellcheck="false" required;
+                    button type="submit" { "Rename" }
+                }
+                form.group-menu-form hx-post="/groups/move" hx-swap="none" {
+                    (csrf_input(csrf))
+                    input type="hidden" name="group" value=(path);
+                    (icon(Icon::Folder))
+                    input.input type="text" name="parent" list="known-groups"
+                        placeholder="new parent (blank = root)" aria-label="New parent group"
+                        autocomplete="off" autocapitalize="off" spellcheck="false";
+                    button type="submit" { "Move" }
+                }
+                form.inline-form
+                    hx-post="/groups/delete" hx-swap="none"
+                    onsubmit="return confirm('Delete this group directory? It must be empty of units.')" {
+                    (csrf_input(csrf))
+                    input type="hidden" name="group" value=(path);
+                    button.danger type="submit" { (icon(Icon::Trash)) span { "Delete group" } }
+                }
             }
         }
     }
@@ -470,7 +575,6 @@ pub fn action_row(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
                 &unit.service_name(),
                 status,
                 csrf,
-                true,
             ))
             (autostart_pill(status.is_autostart_enabled()))
             @if unit.kind == UnitKind::Container {
@@ -739,6 +843,7 @@ mod tests {
 
         let unit = QuadletUnit {
             file_name: "web.container".into(),
+            group: String::new(),
             path: "/tmp/web.container".into(),
             kind: UnitKind::Container,
             sections: vec![Section {
@@ -753,6 +858,7 @@ mod tests {
             "csrf",
             &[("Image", html! { code { "docker.io/library/nginx" } })],
             None,
+            &[],
         )
         .into_string();
 

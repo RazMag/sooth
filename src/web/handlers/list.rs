@@ -11,7 +11,7 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{FragmentError, PageError};
-use crate::quadlet::UnitKind;
+use crate::quadlet::{UnitKind, discovery};
 use crate::web::core;
 use crate::web::templates::list::{Column, ListSpec, kind_cell};
 use crate::web::templates::{self, NavItem};
@@ -75,7 +75,10 @@ macro_rules! list_handlers {
                 .await
                 .unwrap_or_default();
             let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
-            Ok(templates::list::list_page($spec, &units, &csrf, &all))
+            let groups = discovery::list_groups(&state.quadlet_dir);
+            Ok(templates::list::list_page(
+                $spec, &units, &csrf, &all, &groups,
+            ))
         }
 
         pub async fn $rows_fn(
@@ -86,7 +89,10 @@ macro_rules! list_handlers {
                 .await
                 .unwrap_or_default();
             let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
-            Ok(templates::list::list_rows($spec, &units, &csrf, &all))
+            let groups = discovery::list_groups(&state.quadlet_dir);
+            Ok(templates::list::list_rows(
+                $spec, &units, &csrf, &all, &groups,
+            ))
         }
     };
 }

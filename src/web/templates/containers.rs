@@ -4,7 +4,12 @@ use super::detail;
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 
-pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
+pub fn detail_page(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    csrf: &str,
+    known_groups: &[String],
+) -> Markup {
     let image = unit
         .section("Container")
         .and_then(|s| s.get("Image"))
@@ -18,5 +23,6 @@ pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Marku
             ("Ports", super::ports_summary(unit, status.is_active())),
         ],
         None,
+        known_groups,
     )
 }

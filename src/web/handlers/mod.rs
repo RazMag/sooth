@@ -1,6 +1,7 @@
 pub mod detail;
 pub mod edit_delete;
 pub mod environment;
+pub mod groups;
 pub mod list;
 pub mod logs;
 pub mod ports;

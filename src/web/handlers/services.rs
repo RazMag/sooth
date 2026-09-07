@@ -4,7 +4,7 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{FragmentError, PageError};
-use crate::quadlet::{QuadletUnit, UnitKind};
+use crate::quadlet::{QuadletUnit, UnitKind, discovery};
 use crate::systemd::UnitStatus;
 use crate::web::core;
 use crate::web::templates::services::Stats;
@@ -30,9 +30,10 @@ pub async fn page(
         .await
         .unwrap_or_default();
     let (units, all) = core::load_units_and_siblings(&state, KINDS).await?;
+    let groups = discovery::list_groups(&state.quadlet_dir);
     let stats = compute_stats(&units);
     Ok(templates::services::services_page(
-        &units, &stats, &csrf, &all,
+        &units, &stats, &csrf, &all, &groups,
     ))
 }
 
@@ -44,11 +45,13 @@ pub async fn rows(
         .await
         .unwrap_or_default();
     let (units, all) = core::load_units_and_siblings(&state, KINDS).await?;
+    let groups = discovery::list_groups(&state.quadlet_dir);
     Ok(templates::list::list_rows(
         &templates::services::SPEC,
         &units,
         &csrf,
         &all,
+        &groups,
     ))
 }
 

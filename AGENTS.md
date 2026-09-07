@@ -38,12 +38,12 @@ opens `Connection::session()` on startup and exits if it fails).
 | `config.rs` | `Config` (figment: defaults → TOML → `SOOTH_` env) and `AppState` (the `Arc`-wrapped handles every handler gets). |
 | `error.rs` | `AppError` + `PageError` (full-page) / `FragmentError` (htmx inline) wrappers. The **only** place an error becomes an HTTP response; every handler returns `Result<_, PageError|FragmentError>` and uses `?`. |
 | `events.rs` | `DashboardEvent` (`Status { service, status }` / `UnitsChanged`) on an app-wide `broadcast` channel. Independent of `systemd`/`web`. |
-| `quadlet/` | Disk side. `discovery` (enumerate/parse/load, fs watch), `parser` (INI → ordered `Section`s, keeps duplicate keys), `model` (`QuadletUnit`, `UnitKind`), `naming` (file name ↔ service name, `valid_stem`), `writer` (validate + atomic write + generator dry-run), `ports` (`PublishPort=` parse + collision detection), `envfile` (`env/<stem>.env` sidecar + managed `EnvironmentFile=` line patching), `install` (`[Install]` section = rootless "enable": `set_enabled` raw-text patch of `WantedBy=default.target`). |
+| `quadlet/` | Disk side. `discovery` (**recursive** enumerate/parse/load, `find_in_tree`/`list_groups`, recursive fs watch), `parser` (INI → ordered `Section`s, keeps duplicate keys), `model` (`QuadletUnit` incl. `group` + `rel_path()`, `UnitKind`), `naming` (file name ↔ service name, `valid_stem`, `valid_group`, `compose_rel_path`, `basename`), `writer` (validate + atomic write + generator dry-run, `move_file` / `move_dir` / `delete_dir` — groups are **not** auto-pruned when emptied), `ports` (`PublishPort=` parse + collision detection), `envfile` (`env/<stem>.env` sidecar + managed `EnvironmentFile=` line patching — **group-independent**, always keyed by stem under `env/`), `install` (`[Install]` section = rootless "enable": `set_enabled` raw-text patch of `WantedBy=default.target`). |
 | `systemd/` | D-Bus side. `client` (`org.freedesktop.systemd1.Manager` proxy: start/stop/restart/reload/status + environment get/set/unset), `status` (fetch `UnitStatus` via `Properties.GetAll`), `watch` (subscribe to `PropertiesChanged` for every unit, filter to sooth-managed, re-fetch + broadcast). **No enable/disable D-Bus call**: podman's `.service` units live under a systemd generator dir, which `EnableUnitFiles` rejects ("transient or generated"). "Enable"/"disable" is `quadlet::install::set_enabled` patching the file's `[Install]` section + `client.reload()`. "Enabled" state is **not** read from the file (it can name a target that doesn't exist / isn't in the login path) but from systemd's computed `WantedBy=`/`RequiredBy=` reverse deps — `UnitStatus::is_autostart_enabled` is true iff `default.target` is among them. `UnitFileState` is unusable here: systemd always reports `generated` for these. |
 | `hostenv.rs` | The user manager's `${NAME}` environment. Owns `~/.config/environment.d/50-sooth.conf`; reads other `*.conf` there read-only. |
 | `journal.rs` | The one shell-out in the app: `journalctl --user -u <service>` for the log tail + live follow. |
-| `web/routes.rs` | Router assembly. `mount_unit_routes` registers the shared per-unit routes (detail/actions/start/…/edit/delete/logs) at **six** prefixes: `/containers /pods /volumes /networks /images /units`. |
-| `web/core.rs` | Kind-agnostic business logic (`execute_action`, `create_unit`, `edit_unit`, `delete_unit`, `load_units_for_kinds`) + `section_path` / `section_index_path` / `unit_url` — the single source of truth for turning a unit into a URL. |
+| `web/routes.rs` | Router assembly. `mount_unit_routes` registers the shared per-unit routes (detail/actions/start/…/edit/delete/**move**/logs) at **six** prefixes: `/containers /pods /volumes /networks /images /units`. Plus the group-directory routes (`handlers::groups` → `core::*group*`): `POST /groups` (`mkdir` an empty group, or a subgroup with a `parent` field), `/groups/move` (re-parent), `/groups/rename` (rename the leaf), `/groups/delete` (rmdir — refused while any unit lives under it). |
+| `web/core.rs` | Kind-agnostic business logic (`execute_action`, `create_unit`, `edit_unit`, `delete_unit`, `move_unit`, `load_units_for_kinds`) + `section_path` / `section_index_path` / `unit_url` — the single source of truth for turning a unit into a URL. |
 | `web/handlers/` | Thin Axum handlers. Most kinds share one implementation; only `services` (the `/` home = Containers + Pods) and `list` (Volumes/Networks/Images/all) differ, and only by a `ListSpec`. `raw_create` is the one create path for every section. |
 | `web/sse.rs` | `/events` stream: renders `DashboardEvent`s as named SSE events (`status-{service}` carries a badge fragment; `units-changed` / `any-status` are `"1"` pings that trigger htmx re-fetches). |
 | `web/assets.rs` | `/static/*` from `rust-embed` (baked in for release, read from disk in debug). Content-hash ETag + `Cache-Control: no-cache`. |
@@ -56,6 +56,24 @@ opens `Connection::session()` on startup and exits if it fails).
   (`web.service`, from `naming::service_name`). Never mix them. All
   unit→URL construction goes through `web/core.rs` so this stays structurally
   hard to get wrong.
+- **File name vs on-disk path.** A unit may sit in a group subdirectory, so
+  its disk path is `<group>/<file_name>` (`QuadletUnit::rel_path()`), but the
+  *bare file name* is still the unique key (podman requires it unique
+  tree-wide) — URLs, CSS ids, and `discovery::load_by_name` all key off the
+  basename. Anything that *writes* (`writer::*`, `core::edit/delete/move`)
+  must use `rel_path()`, not `file_name`, or it lands in the wrong directory.
+  Group changes go through `core::move_unit` (a rename + reload; the service
+  is unchanged). The row menu's move form and the table drag-and-drop
+  (`frontend/dragdrop.js`) post `/…/move` over htmx and rely on the
+  `units-changed` SSE refresh — only the *detail-page* move redirects. Group
+  directories are first-class and **user-managed**: emptying one (moving or
+  deleting its last unit) does **not** delete it. `discovery::list_groups`
+  walks dirs (not just files) so an empty group still renders as a
+  (drop-target) collapsible section; the group-header ⋯ menu and drag re-parent
+  drive `/groups/{move,rename,delete}` (delete refused while units remain).
+  `writer::move_dir` renames the directory with every unit inside keeping its
+  service name; `core::move_group_dir` rejects a move into the group itself or
+  a subgroup.
 - **One implementation, six mount points.** Per-unit behavior does not vary
   by kind — don't add kind-specific handler modules. The detail page
   dispatches on `unit.kind` (the loaded unit's real kind, not the URL
@@ -110,15 +128,19 @@ opens `Connection::session()` on startup and exits if it fails).
   off the shared one races zbus's reply dispatcher and can swallow a method
   reply, hanging a concurrent `StartUnit`.
 - `discovery::watch` filters inotify events to real content changes
-  (`is_content_change`): sooth reads these files on every render, and
-  treating reads as changes would make it trigger `daemon-reload` + full UI
-  refresh on its own traffic.
+  (`is_content_change`) *and* to paths `load_all` would surface
+  (`is_watched_path` — not under `env/` / `*.d` / a dot-path): sooth reads
+  these files on every render, and treating reads or sidecar writes as
+  changes would make it trigger `daemon-reload` + full UI refresh on its own
+  traffic. The watch is **recursive** (group subdirectories).
 - The status watch fires for *every* user unit on the bus (the desktop
   session's churn). `discovery::has_quadlet_for_service` gates it to
-  sooth-managed units before any broadcast.
+  sooth-managed units before any broadcast — it now walks the group tree
+  each call, which is fine only because the tree is tiny.
 - `env/` (the sidecar dir) sits inside `quadlet_dir` but is invisible to
-  `discovery` (non-recursive, only the 7 quadlet extensions) and to the
-  podman generator — keep it that way.
+  `discovery` (which skips it, `*.d`, and dot-dirs while recursing, and only
+  matches the 7 quadlet extensions) and to the podman generator — keep it
+  that way. The sidecar is never moved when a unit changes group.
 
 ## Commit style
 

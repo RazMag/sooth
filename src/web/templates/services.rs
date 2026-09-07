@@ -67,6 +67,7 @@ pub fn services_page(
     stats: &Stats,
     csrf: &str,
     all_units: &[QuadletUnit],
+    known_groups: &[String],
 ) -> Markup {
     let body = html! {
         (super::page_header("Services", html! {
@@ -77,7 +78,7 @@ pub fn services_page(
             hx-trigger="sse:units-changed, sse:any-status delay:300ms" hx-swap="innerHTML" {
             (stats_bar(stats))
         }
-        (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units))
+        (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units, known_groups))
     };
     shell("Services", Some(NavItem::Services), body)
 }

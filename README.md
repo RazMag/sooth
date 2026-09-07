@@ -15,7 +15,9 @@ CSS/JS embedded, so it runs from any directory.
   session — not the system-wide quadlet locations.
 - Template units (`name@.container`) are listed read-only; instantiate them
   with the CLI.
-- `.d/` drop-in directories are not merged into what's shown.
+- Subdirectories of the quadlet directory *are* descended into (they're the
+  "groups" a unit can be filed under); `.d/` drop-in directories are not, and
+  are not merged into what's shown.
 
 ## Features
 
@@ -46,6 +48,15 @@ CSS/JS embedded, so it runs from any directory.
   `<quadlet_dir>/env/<name>.env` and keeps a managed `EnvironmentFile=` line
   pointing at it (added when there are variables, removed when there are
   none; any other `EnvironmentFile=` lines are left alone).
+- **Groups** — file quadlets into subdirectories of the quadlet directory
+  (`media/`, `infra/db/`, …) from the UI: an optional field on the New form,
+  and a "Move" control on every unit's detail page and row menu. Podman
+  recurses into these subdirectories and the name has no effect on the
+  generated unit, so a move is a plain file rename — the service keeps running.
+  The list tables group by directory into collapsible sections (root units
+  first, then one section per group; collapsed state is remembered per
+  browser). `.d/` drop-in directories and the `env/` sidecar dir are still
+  skipped.
 - Writes are atomic (temp file + `rename`) and validated up front — including
   a best-effort dry-run against the real podman quadlet generator — so a
   reader never sees a partial file and an invalid submission never lands.

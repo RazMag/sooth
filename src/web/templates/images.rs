@@ -38,7 +38,12 @@ pub const COLUMNS: &[Column] = &[
     },
 ];
 
-pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
+pub fn detail_page(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    csrf: &str,
+    known_groups: &[String],
+) -> Markup {
     // "Type" would duplicate the Overview's "Kind" row -- just Source here.
     detail::detail_page(
         unit,
@@ -46,5 +51,6 @@ pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Marku
         csrf,
         &[("Source", html! { code { (image_source(unit)) } })],
         None,
+        known_groups,
     )
 }

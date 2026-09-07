@@ -12,7 +12,7 @@ use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
-use crate::quadlet::{QuadletUnit, UnitKind, discovery, install, writer};
+use crate::quadlet::{QuadletUnit, UnitKind, discovery, install, naming, writer};
 use crate::systemd::UnitStatus;
 
 /// The section a unit belongs to, and therefore the URL prefix all of its
@@ -150,7 +150,7 @@ async fn set_autostart(
     if patched == unit.raw {
         return Ok(());
     }
-    writer::write_atomic(&state.quadlet_dir, &unit.file_name, &patched)?;
+    writer::write_atomic(&state.quadlet_dir, &unit.rel_path(), &patched)?;
     state.systemd.reload().await?;
     tracing::info!(file = %unit.file_name, enabled, "autostart toggled via [Install]");
     Ok(())
@@ -201,21 +201,30 @@ pub async fn create_unit(
     session: &Session,
     csrf_token: &str,
     file_name: &str,
+    group: &str,
     contents: &str,
 ) -> Result<QuadletUnit, AppError> {
     if !auth::csrf::verify(session, csrf_token).await {
         return Err(AppError::Csrf);
     }
-    if state.quadlet_dir.join(file_name).exists() {
+    if !naming::valid_group(group) {
+        return Err(
+            crate::quadlet::QuadletError::Validation(format!("invalid group '{group}'")).into(),
+        );
+    }
+    // Podman keys the generated service off the bare file name, so it must be
+    // unique across the whole group tree -- not just the target directory.
+    if discovery::find_in_tree(&state.quadlet_dir, file_name).is_some() {
         return Err(crate::quadlet::QuadletError::Validation(format!(
             "{file_name} already exists"
         ))
         .into());
     }
-    writer::write_atomic(&state.quadlet_dir, file_name, contents)?;
+    let rel_path = naming::compose_rel_path(group, file_name);
+    writer::write_atomic(&state.quadlet_dir, &rel_path, contents)?;
     state.systemd.reload().await?;
     let _ = state.events.send(DashboardEvent::UnitsChanged);
-    tracing::info!(file = file_name, "quadlet created");
+    tracing::info!(file = %rel_path, "quadlet created");
     Ok(discovery::load_by_name(
         state.quadlet_dir.as_path(),
         file_name,
@@ -234,10 +243,13 @@ pub async fn edit_unit(
     if !auth::csrf::verify(session, csrf_token).await {
         return Err(AppError::Csrf);
     }
-    writer::write_atomic(&state.quadlet_dir, file_name, contents)?;
+    // Resolve the file's group so the write lands in its subdirectory rather
+    // than at the root.
+    let rel_path = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?.rel_path();
+    writer::write_atomic(&state.quadlet_dir, &rel_path, contents)?;
     state.systemd.reload().await?;
     let _ = state.events.send(DashboardEvent::UnitsChanged);
-    tracing::info!(file = file_name, "quadlet edited");
+    tracing::info!(file = %rel_path, "quadlet edited");
     Ok(discovery::load_by_name(
         state.quadlet_dir.as_path(),
         file_name,
@@ -253,10 +265,161 @@ pub async fn delete_unit(
     if !auth::csrf::verify(session, csrf_token).await {
         return Err(AppError::Csrf);
     }
-    writer::delete(&state.quadlet_dir, file_name)?;
+    let rel_path = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?.rel_path();
+    writer::delete(&state.quadlet_dir, &rel_path)?;
     state.systemd.reload().await?;
     let _ = state.events.send(DashboardEvent::UnitsChanged);
-    tracing::info!(file = file_name, "quadlet deleted");
+    tracing::info!(file = %rel_path, "quadlet deleted");
+    Ok(())
+}
+
+/// Moves a quadlet file into a different group directory (or to the root when
+/// `new_group` is empty). The generated service is byte-identical and keeps
+/// its name -- only the file's path changes -- so this is a rename plus a
+/// `daemon-reload` for the generator to re-scan, with no enable/disable
+/// handling. A no-op (returns the unit unchanged) when the group already matches.
+pub async fn move_unit(
+    state: &AppState,
+    session: &Session,
+    csrf_token: &str,
+    file_name: &str,
+    new_group: &str,
+) -> Result<QuadletUnit, AppError> {
+    if !auth::csrf::verify(session, csrf_token).await {
+        return Err(AppError::Csrf);
+    }
+    let new_group = new_group.trim();
+    if !naming::valid_group(new_group) {
+        return Err(crate::quadlet::QuadletError::Validation(format!(
+            "invalid group '{new_group}': use path segments of letters, digits, '_', '-', '.'; no '..'"
+        ))
+        .into());
+    }
+    let unit = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?;
+    if unit.group == new_group {
+        return Ok(unit);
+    }
+    let to_rel = naming::compose_rel_path(new_group, file_name);
+    writer::move_file(&state.quadlet_dir, &unit.rel_path(), &to_rel)?;
+    state.systemd.reload().await?;
+    let _ = state.events.send(DashboardEvent::UnitsChanged);
+    tracing::info!(file = file_name, from = %unit.group, to = new_group, "quadlet moved");
+    Ok(discovery::load_by_name(
+        state.quadlet_dir.as_path(),
+        file_name,
+    )?)
+}
+
+/// Re-parents a whole group directory: `<quadlet_dir>/<group>` becomes
+/// `<quadlet_dir>/<new_parent>/<basename(group)>`. Every unit inside moves
+/// with it and keeps its service name (podman keys off the bare file name).
+/// A rename + `daemon-reload`; a no-op when the parent is unchanged. Rejects
+/// moving a group into itself or one of its own descendants.
+pub async fn move_group_dir(
+    state: &AppState,
+    session: &Session,
+    csrf_token: &str,
+    group: &str,
+    new_parent: &str,
+) -> Result<(), AppError> {
+    if !auth::csrf::verify(session, csrf_token).await {
+        return Err(AppError::Csrf);
+    }
+    let group = group.trim().trim_matches('/');
+    let new_parent = new_parent.trim().trim_matches('/');
+    if group.is_empty() || !naming::valid_group(group) {
+        return Err(bad_group(group));
+    }
+    if !naming::valid_group(new_parent) {
+        return Err(bad_group(new_parent));
+    }
+    if new_parent == group || new_parent.starts_with(&format!("{group}/")) {
+        return Err(crate::quadlet::QuadletError::Validation(
+            "cannot move a group into itself or one of its own subgroups".into(),
+        )
+        .into());
+    }
+    let to = naming::compose_rel_path(new_parent, naming::basename(group));
+    if to == group {
+        return Ok(()); // already at this parent
+    }
+    writer::move_dir(&state.quadlet_dir, group, &to)?;
+    state.systemd.reload().await?;
+    let _ = state.events.send(DashboardEvent::UnitsChanged);
+    tracing::info!(from = group, to = %to, "group directory moved");
+    Ok(())
+}
+
+fn bad_group(g: &str) -> AppError {
+    crate::quadlet::QuadletError::Validation(format!(
+        "invalid group '{g}': use path segments of letters, digits, '_', '-', '.'; no '..'"
+    ))
+    .into()
+}
+
+/// Renames a group's last path segment, keeping it under the same parent:
+/// `media/arr` + `series` -> `media/series`. A `rename` on disk (contents
+/// move with it) + `daemon-reload`; a no-op when the name is unchanged.
+pub async fn rename_group(
+    state: &AppState,
+    session: &Session,
+    csrf_token: &str,
+    group: &str,
+    new_name: &str,
+) -> Result<(), AppError> {
+    if !auth::csrf::verify(session, csrf_token).await {
+        return Err(AppError::Csrf);
+    }
+    let group = group.trim().trim_matches('/');
+    let new_name = new_name.trim();
+    if group.is_empty() || !naming::valid_group(group) {
+        return Err(bad_group(group));
+    }
+    // a single segment only -- `valid_group` of a `/`-free string checks the rest
+    if new_name.is_empty() || new_name.contains('/') || !naming::valid_group(new_name) {
+        return Err(crate::quadlet::QuadletError::Validation(format!(
+            "invalid group name '{new_name}'"
+        ))
+        .into());
+    }
+    let parent = group.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
+    let to = naming::compose_rel_path(parent, new_name);
+    if to == group {
+        return Ok(());
+    }
+    writer::move_dir(&state.quadlet_dir, group, &to)?;
+    state.systemd.reload().await?;
+    let _ = state.events.send(DashboardEvent::UnitsChanged);
+    tracing::info!(from = group, to = %to, "group renamed");
+    Ok(())
+}
+
+/// Deletes a group directory (and any empty subdirectory tree under it).
+/// Refuses when a quadlet file still lives anywhere below it -- the units must
+/// be moved or deleted first.
+pub async fn delete_group(
+    state: &AppState,
+    session: &Session,
+    csrf_token: &str,
+    group: &str,
+) -> Result<(), AppError> {
+    if !auth::csrf::verify(session, csrf_token).await {
+        return Err(AppError::Csrf);
+    }
+    let group = group.trim().trim_matches('/');
+    if group.is_empty() || !naming::valid_group(group) {
+        return Err(bad_group(group));
+    }
+    if discovery::group_has_units(&state.quadlet_dir, group) {
+        return Err(crate::quadlet::QuadletError::Validation(format!(
+            "group '{group}' still contains units — move or delete them first"
+        ))
+        .into());
+    }
+    writer::delete_dir(&state.quadlet_dir, group)?;
+    state.systemd.reload().await?;
+    let _ = state.events.send(DashboardEvent::UnitsChanged);
+    tracing::info!(group, "group deleted");
     Ok(())
 }
 

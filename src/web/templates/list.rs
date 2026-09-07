@@ -5,7 +5,10 @@
 
 use maud::{Markup, html};
 
-use super::{NavItem, autostart_pill, kebab_menu, page_header, shell, status_badge};
+use super::{
+    Icon, NavItem, autostart_pill, autoupdate_pill, csrf_input, group_kebab, icon, kebab_menu,
+    known_groups_datalist, page_header, shell, status_badge,
+};
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -50,6 +53,7 @@ fn row(
     columns: &[Column],
     csrf: &str,
     all_units: &[QuadletUnit],
+    group_member: Option<&str>,
 ) -> Markup {
     let service = unit.service_name();
     let ctx = RowCtx {
@@ -57,22 +61,99 @@ fn row(
         status,
         all_units,
     };
+    let move_url = format!("{}/move", core::unit_url(unit));
+    // A member of `media/arr` renders one indent step past the "arr" header.
+    let depth = group_member.map_or(0, |g| g.matches('/').count() + 1);
     html! {
-        tr {
+        tr class=[group_member.map(|_| "is-collapsed")]
+            data-group-member=[group_member]
+            data-depth=(depth)
+            data-move-url=(move_url) {
             td {
-                a href=(core::unit_url(unit)) { (unit.file_name) }
-                @if unit.is_template() {
-                    " " span.chip.chip-muted title="Template unit — managed read-only, use the CLI to instantiate it" { "template" }
-                }
-                @if let Some(desc) = unit.description() {
-                    div.cell-secondary { (desc) }
+                div.row-indent style=(format!("--depth:{depth}")) {
+                    @if !unit.is_template() {
+                        span.drag-handle draggable="true"
+                            title="Drag to file this unit under another group" aria-hidden="true" {
+                            (icon(Icon::Grip))
+                        }
+                    }
+                    a href=(core::unit_url(unit)) { (unit.file_name) }
+                    @if unit.is_template() {
+                        " " span.chip.chip-muted title="Template unit — managed read-only, use the CLI to instantiate it" { "template" }
+                    }
+                    @if let Some(desc) = unit.description() {
+                        div.cell-secondary { (desc) }
+                    }
                 }
             }
             @for column in columns {
                 td { ((column.cell)(&ctx)) }
             }
-            td { (status_badge(&service, status)) (autostart_pill(status.is_autostart_enabled())) }
+            td {
+                (status_badge(&service, status))
+                (autostart_pill(status.is_autostart_enabled()))
+                (autoupdate_pill(unit))
+            }
             td { (kebab_menu(unit, status, csrf)) }
+        }
+    }
+}
+
+/// The full ordered set of group paths to render sections for: every group a
+/// listed unit is in, plus every group directory that exists on disk (so a
+/// freshly-created but still-empty group shows up as a drop target). Sorted,
+/// which puts each parent path immediately before its children.
+fn section_groups<'a>(
+    units: &'a [(QuadletUnit, UnitStatus)],
+    known_groups: &'a [String],
+) -> Vec<&'a str> {
+    let mut groups: Vec<&str> = units
+        .iter()
+        .map(|(u, _)| u.group.as_str())
+        .filter(|g| !g.is_empty())
+        .chain(known_groups.iter().map(String::as_str))
+        .collect();
+    groups.sort_unstable();
+    groups.dedup();
+    groups
+}
+
+/// A collapsible section header row for one group directory. It is both a drop
+/// target for "move a unit into this group" and, via its own grip handle, a
+/// draggable to re-parent the whole group (see `frontend/dragdrop.js`); the ⋯
+/// menu adds a subgroup / renames / moves / deletes it. The row keeps the same
+/// column shape as a unit row -- a wide first cell plus a trailing kebab cell
+/// -- so its menu lines up with the unit rows' menus. Rendered with
+/// `aria-expanded="false"`; `groups.js` reconciles it against the per-browser
+/// remembered state, and member rows carry `is-collapsed` so the no-JS /
+/// pre-JS view starts collapsed.
+fn group_header_row(path: &str, count: usize, colspan: usize, csrf: &str) -> Markup {
+    let depth = path.matches('/').count();
+    let (parent, last) = match path.rsplit_once('/') {
+        Some((p, l)) => (Some(p), l),
+        None => (None, path),
+    };
+    html! {
+        tr.group-row data-group=(path) data-depth=(depth) {
+            td.group-head-cell colspan=(colspan - 1) {
+                div.group-row-inner style=(format!("--depth:{depth}")) {
+                    span.drag-handle.group-drag draggable="true"
+                        title="Drag to move this group under another" aria-hidden="true" {
+                        (icon(Icon::Grip))
+                    }
+                    button.group-toggle type="button" aria-expanded="false" title=(path) {
+                        span.group-chevron aria-hidden="true" { (icon(Icon::ChevronDown)) }
+                        span.group-name {
+                            @if let Some(p) = parent {
+                                span.group-parent { (p) "/" }
+                            }
+                            (last)
+                        }
+                        span.group-count { (count) }
+                    }
+                }
+            }
+            td.group-kebab-cell { (group_kebab(path, csrf)) }
         }
     }
 }
@@ -82,13 +163,56 @@ pub fn list_rows(
     units: &[(QuadletUnit, UnitStatus)],
     csrf: &str,
     all_units: &[QuadletUnit],
+    known_groups: &[String],
 ) -> Markup {
-    html! {
-        @if units.is_empty() {
+    let groups = section_groups(units, known_groups);
+    if units.is_empty() && groups.is_empty() {
+        return html! {
             tr { td colspan=(spec.columns.len() + 3) .empty { (spec.empty_hint) } }
-        } @else {
-            @for (unit, status) in units {
-                (row(unit, status, spec.columns, csrf, all_units))
+        };
+    }
+    let colspan = spec.columns.len() + 3;
+    html! {
+        // Root (ungrouped) units first, bare.
+        @for (unit, status) in units.iter().filter(|(u, _)| u.group.is_empty()) {
+            (row(unit, status, spec.columns, csrf, all_units, None))
+        }
+        // Then one collapsible section per group directory.
+        @for grp in groups {
+            @let members: Vec<&(QuadletUnit, UnitStatus)> =
+                units.iter().filter(|(u, _)| u.group == grp).collect();
+            (group_header_row(grp, members.len(), colspan, csrf))
+            @if members.is_empty() {
+                @let d = grp.matches('/').count() + 1;
+                tr.group-empty.is-collapsed data-group-member=(grp) data-depth=(d) {
+                    td colspan=(colspan) {
+                        div.row-indent style=(format!("--depth:{d}")) {
+                            "Empty — drag a unit here to file it under this group."
+                        }
+                    }
+                }
+            } @else {
+                @for (unit, status) in members {
+                    (row(unit, status, spec.columns, csrf, all_units, Some(grp)))
+                }
+            }
+        }
+    }
+}
+
+/// The toolbar's "Add group" disclosure: creates an empty group directory so
+/// it can be used as a drag target before anything lives in it. htmx post +
+/// `hx-swap="none"`; the SSE `units-changed` refresh redraws the table.
+fn add_group_control(csrf: &str) -> Markup {
+    html! {
+        details.add-group {
+            summary.btn.btn-sm { (icon(Icon::Plus)) span { "Add group" } }
+            form.add-group-form hx-post="/groups" hx-swap="none" {
+                (csrf_input(csrf))
+                input.input.input-sm type="text" name="group" placeholder="e.g. media/arr"
+                    list="known-groups" aria-label="New group name"
+                    autocomplete="off" autocapitalize="off" spellcheck="false" required;
+                button.btn.btn-sm.btn-primary type="submit" { "Create" }
             }
         }
     }
@@ -104,10 +228,13 @@ pub fn list_table(
     csrf: &str,
     rows_route: &str,
     all_units: &[QuadletUnit],
+    known_groups: &[String],
 ) -> Markup {
     html! {
+        (known_groups_datalist(known_groups))
         div.toolbar {
             input.input.filter-box type="search" data-filter-target=(ROWS_ID) placeholder="Filter…";
+            (add_group_control(csrf))
         }
         div.table-wrap {
             table.data-table {
@@ -121,13 +248,13 @@ pub fn list_table(
                         th {}
                     }
                 }
-                // Only a create/edit/delete rebuilds the whole row set. A
+                // Only a create/edit/delete/move rebuilds the whole row set. A
                 // status change updates each row's badge (its own `sse-swap`)
                 // and the kebab's action forms (a scoped swap inside the
                 // menu) in place -- swapping the whole `<tbody>` here would
                 // slam shut any menu the user has open.
                 tbody id=(ROWS_ID) hx-get=(rows_route) hx-trigger="sse:units-changed" hx-swap="innerHTML" {
-                    (list_rows(spec, units, csrf, all_units))
+                    (list_rows(spec, units, csrf, all_units, known_groups))
                 }
             }
         }
@@ -139,12 +266,13 @@ pub fn list_page(
     units: &[(QuadletUnit, UnitStatus)],
     csrf: &str,
     all_units: &[QuadletUnit],
+    known_groups: &[String],
 ) -> Markup {
     let body = html! {
         (page_header(spec.title, html! {
             a.btn.btn-primary href=(spec.new_href) { (super::icon(super::Icon::Plus)) span { "New" } }
         }))
-        (list_table(spec, units, csrf, &rows_route(spec), all_units))
+        (list_table(spec, units, csrf, &rows_route(spec), all_units, known_groups))
     };
     shell(spec.title, spec.active_nav, body)
 }

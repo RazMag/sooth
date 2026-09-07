@@ -101,6 +101,11 @@ impl Section {
 #[derive(Debug, Clone)]
 pub struct QuadletUnit {
     pub file_name: String,
+    /// The `/`-separated subdirectory the file sits in, relative to the
+    /// quadlet directory (`""` at the root, `"media/arr"` when filed under a
+    /// group). Podman recurses into these subdirectories and the name has no
+    /// effect on the generated service, so this is purely organisational.
+    pub group: String,
     pub path: PathBuf,
     pub kind: UnitKind,
     pub sections: Vec<Section>,
@@ -113,6 +118,12 @@ pub struct QuadletUnit {
 impl QuadletUnit {
     pub fn service_name(&self) -> String {
         super::naming::service_name(&self.file_name)
+    }
+
+    /// The file's path relative to the quadlet directory: `file_name` at the
+    /// root, or `group/file_name` when filed under a group.
+    pub fn rel_path(&self) -> String {
+        super::naming::compose_rel_path(&self.group, &self.file_name)
     }
 
     pub fn section(&self, name: &str) -> Option<&Section> {

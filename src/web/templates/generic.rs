@@ -8,7 +8,7 @@ use maud::{Markup, html};
 use super::detail;
 use super::{
     BannerKind, EditorFileName, NavItem, back_link, banner, code_editor, csrf_input,
-    env_var_editor, host_vars_panel, page_header, shell,
+    env_var_editor, host_vars_panel, known_groups_datalist, page_header, shell,
 };
 use crate::hostenv::EnvVar;
 use crate::quadlet::{QuadletUnit, UnitKind};
@@ -16,8 +16,13 @@ use crate::systemd::UnitStatus;
 
 /// A plain, kind-branch-free detail page -- used for any kind without a
 /// dedicated section template (today, just Kube).
-pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
-    detail::detail_page(unit, status, csrf, &[], None)
+pub fn detail_page(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    csrf: &str,
+    known_groups: &[String],
+) -> Markup {
+    detail::detail_page(unit, status, csrf, &[], None, known_groups)
 }
 
 /// How the "New" page's file-name field behaves: a stem plus a fixed
@@ -56,6 +61,10 @@ pub struct NewUnitPage<'a> {
     pub editor_body: &'a str,
     /// The stem field's value (`""` first render, the posted stem on 422).
     pub stem_prefill: &'a str,
+    /// The group (subdirectory) field's value -- `""` for the quadlet-dir root.
+    pub group_prefill: &'a str,
+    /// Group paths already in use, offered as datalist suggestions.
+    pub known_groups: &'a [String],
     /// Current `KEY=VALUE` lines for the env editor (`""` unless redisplaying
     /// a Container/Build submission).
     pub env_vars_body: &'a str,
@@ -111,6 +120,13 @@ pub fn new_unit_page(p: NewUnitPage<'_>) -> Markup {
                         }
                     }
                 }
+            }
+            div.field {
+                label for="group" { "Group " span.field-hint { "(optional subdirectory)" } }
+                input.input type="text" id="group" name="group" list="known-groups"
+                    value=(p.group_prefill) placeholder="e.g. media/arr"
+                    autocomplete="off" autocapitalize="off" spellcheck="false";
+                (known_groups_datalist(p.known_groups))
             }
             div.editor-row {
                 div.editor-col {

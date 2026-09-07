@@ -162,6 +162,34 @@ fn restore_sidecar(state: &AppState, stem: &str, prev: Option<Vec<(String, Strin
 }
 
 #[derive(Deserialize)]
+pub struct MoveForm {
+    csrf_token: String,
+    #[serde(default)]
+    group: String,
+}
+
+/// Files the quadlet into a different group directory (blank `group` = the
+/// quadlet-dir root). Kind-agnostic, mounted at every section prefix. The file
+/// name -- and the URL -- is unchanged by a move. An htmx caller (the row
+/// menu, drag-and-drop) gets `204` and lets the SSE `units-changed` refresh
+/// redraw the table in place; a plain form post (the detail page) is
+/// redirected back to the now-updated detail page.
+pub async fn move_group(
+    State(state): State<AppState>,
+    session: Session,
+    headers: axum::http::HeaderMap,
+    Path(file_name): Path<String>,
+    Form(form): Form<MoveForm>,
+) -> Result<Response, PageError> {
+    let unit = core::move_unit(&state, &session, &form.csrf_token, &file_name, &form.group).await?;
+    if headers.contains_key("hx-request") {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    } else {
+        Ok(Redirect::to(&core::unit_url(&unit)).into_response())
+    }
+}
+
+#[derive(Deserialize)]
 pub struct DeleteForm {
     csrf_token: String,
 }

@@ -31,6 +31,7 @@ pub fn detail_page(
     csrf: &str,
     all_units: &[QuadletUnit],
     used_by: &[String],
+    known_groups: &[String],
 ) -> Markup {
     let driver = unit
         .section("Volume")
@@ -45,5 +46,6 @@ pub fn detail_page(
             ("Used by", super::unit_links(all_units, used_by)),
         ],
         None,
+        known_groups,
     )
 }

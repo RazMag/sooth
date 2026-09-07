@@ -23,6 +23,16 @@ pub fn stem(file_name: &str) -> &str {
         .unwrap_or(file_name)
 }
 
+/// The final `/`-separated component of a disk-relative quadlet path
+/// (`media/arr/web.container` -> `web.container`). A path with no `/` is
+/// returned unchanged.
+pub fn basename(rel_path: &str) -> &str {
+    rel_path
+        .rsplit_once('/')
+        .map(|(_, base)| base)
+        .unwrap_or(rel_path)
+}
+
 pub fn extension(file_name: &str) -> Option<&str> {
     file_name.rsplit_once('.').map(|(_, ext)| ext)
 }
@@ -60,6 +70,50 @@ pub fn compose_file_name(stem: &str, kind: UnitKind) -> Result<String, QuadletEr
         )));
     }
     Ok(format!("{stem}.{}", kind.extension()))
+}
+
+/// A safe quadlet *group* -- the `/`-separated subdirectory path a unit is
+/// filed under, relative to the quadlet directory. The empty string is valid
+/// (the directory root). Otherwise every `/`-delimited segment must be
+/// non-empty, at most 64 chars, not begin with `.`, contain no `..`, and use
+/// only `[A-Za-z0-9_.-]` (no `@`, no whitespace, no `\`). The whole path is
+/// capped at 200 chars, and its first segment may not be `env` -- that name is
+/// reserved for the sidecar env-file directory. Rejecting `/` at either end
+/// and doubled `/` keeps `dir.join(compose_rel_path(group, name))` inside the
+/// quadlet directory.
+pub fn valid_group(group: &str) -> bool {
+    if group.is_empty() {
+        return true;
+    }
+    if group.len() > 200 || group.starts_with('/') || group.ends_with('/') || group.contains("//") {
+        return false;
+    }
+    let mut segments = group.split('/');
+    if segments.next() == Some("env") {
+        return false;
+    }
+    group.split('/').all(|seg| {
+        !seg.is_empty()
+            && seg.len() <= 64
+            && !seg.starts_with('.')
+            && !seg.contains("..")
+            && seg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+    })
+}
+
+/// Joins a validated group and file name into the quadlet-dir-relative path
+/// the file lives at on disk: `"web.container"` at the root, or
+/// `"media/arr/web.container"` under a group. The one place a disk path is
+/// assembled from the group field, mirroring [`compose_file_name`]'s role for
+/// the stem.
+pub fn compose_rel_path(group: &str, file_name: &str) -> String {
+    if group.is_empty() {
+        file_name.to_string()
+    } else {
+        format!("{group}/{file_name}")
+    }
 }
 
 /// True for a template unit definition, `name@.container`, as opposed to a
@@ -119,6 +173,46 @@ mod tests {
         assert!(!valid_stem("foo bar"));
         assert!(!valid_stem("foo\tbar"));
         assert!(!valid_stem(&"x".repeat(300)));
+    }
+
+    #[test]
+    fn valid_group_accepts_root_and_nested_paths() {
+        assert!(valid_group(""));
+        assert!(valid_group("media"));
+        assert!(valid_group("media/arr"));
+        assert!(valid_group("infra/db-1/replica.2"));
+    }
+
+    #[test]
+    fn valid_group_rejects_traversal_and_reserved_names() {
+        assert!(!valid_group("/media"));
+        assert!(!valid_group("media/"));
+        assert!(!valid_group("media//arr"));
+        assert!(!valid_group(".."));
+        assert!(!valid_group("media/../etc"));
+        assert!(!valid_group("a\\b"));
+        assert!(!valid_group("with space"));
+        assert!(!valid_group(".hidden"));
+        assert!(!valid_group("media/@x"));
+        assert!(!valid_group("env"));
+        assert!(!valid_group("env/sub"));
+        assert!(valid_group("environments")); // only the exact segment `env` is reserved
+        assert!(!valid_group(&"x".repeat(201)));
+    }
+
+    #[test]
+    fn compose_rel_path_joins_group_and_name() {
+        assert_eq!(compose_rel_path("", "web.container"), "web.container");
+        assert_eq!(
+            compose_rel_path("media/arr", "web.container"),
+            "media/arr/web.container"
+        );
+    }
+
+    #[test]
+    fn basename_takes_the_last_component() {
+        assert_eq!(basename("media/arr/web.container"), "web.container");
+        assert_eq!(basename("web.container"), "web.container");
     }
 
     #[test]

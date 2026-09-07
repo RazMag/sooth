@@ -158,18 +158,20 @@
   .btn-danger { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-line-strong)); }
   .btn-danger:hover { background: var(--color-danger-soft); }
 
-  /* Lifecycle actions on the unit detail page. Soft-tinted fills in the
-     semantic palette -- same background/foreground pairing as the banners
-     and chips -- so each action reads at a glance: Start = ok/green,
-     Stop = danger/red, Restart = warn/yellow, Enable/Disable = accent/blue. */
-  .btn-start   { background: var(--color-ok-soft);     color: var(--color-ok);     border-color: color-mix(in srgb, var(--color-ok) 40%, transparent); }
-  .btn-stop    { background: var(--color-danger-soft); color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 40%, transparent); }
-  .btn-restart { background: var(--color-warn-soft);   color: var(--color-warn);   border-color: color-mix(in srgb, var(--color-warn) 40%, transparent); }
-  .btn-enable  { background: var(--color-accent-soft); color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
-  .btn-start:hover   { background: color-mix(in srgb, var(--color-ok) 16%, var(--color-surface)); }
-  .btn-stop:hover    { background: color-mix(in srgb, var(--color-danger) 16%, var(--color-surface)); }
-  .btn-restart:hover { background: color-mix(in srgb, var(--color-warn) 16%, var(--color-surface)); }
-  .btn-enable:hover  { background: color-mix(in srgb, var(--color-accent) 16%, var(--color-surface)); }
+  /* Lifecycle actions on the unit detail page *and* in the row kebab menu.
+     Soft-tinted fills in the semantic palette -- same background/foreground
+     pairing as the banners and chips -- so each action reads at a glance:
+     Start = ok/green, Stop = danger/red, Restart = warn/yellow,
+     Enable/Disable = accent/blue. Qualified with `.btn` so the tint also
+     wins over the flatter `.menu-panel button` reset. */
+  .btn.btn-start   { background: var(--color-ok-soft);     color: var(--color-ok);     border-color: color-mix(in srgb, var(--color-ok) 40%, transparent); }
+  .btn.btn-stop    { background: var(--color-danger-soft); color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 40%, transparent); }
+  .btn.btn-restart { background: var(--color-warn-soft);   color: var(--color-warn);   border-color: color-mix(in srgb, var(--color-warn) 40%, transparent); }
+  .btn.btn-enable  { background: var(--color-accent-soft); color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+  .btn.btn-start:hover   { background: color-mix(in srgb, var(--color-ok) 16%, var(--color-surface)); }
+  .btn.btn-stop:hover    { background: color-mix(in srgb, var(--color-danger) 16%, var(--color-surface)); }
+  .btn.btn-restart:hover { background: color-mix(in srgb, var(--color-warn) 16%, var(--color-surface)); }
+  .btn.btn-enable:hover  { background: color-mix(in srgb, var(--color-accent) 16%, var(--color-surface)); }
 
   .btn-ghost { border-color: transparent; background: transparent; }
   .btn-ghost:hover { background: var(--color-raised); }
@@ -396,6 +398,18 @@
   .field > .input:not(textarea) { max-width: 34rem; }
   textarea.input { font-family: var(--font-mono); min-height: 6rem; resize: vertical; }
   .field-hint { font-size: 0.78rem; color: var(--color-faint); }
+  .field > .field-hint { margin: 0; }
+  .field-note-env { font-size: 0.78rem; color: var(--color-warn); margin: 0.1rem 0 0; }
+  .input[readonly] { background: var(--color-raised); color: var(--color-muted); cursor: not-allowed; }
+  .checkbox-line { display: flex; align-items: center; gap: 0.5rem; }
+
+  /* Settings page: h2-labelled card sections */
+  .settings-form .card + h2,
+  .settings-form h2 { margin-top: 1.5rem; }
+  .settings-form > h2:first-of-type { margin-top: 0.75rem; }
+  .card > .field:last-child { margin-bottom: 0; }
+  .settings-form > .btn-primary { margin-top: 1.25rem; }
+  .settings-form > .field-hint { margin-top: 0.4rem; }
 
   .validate-status { display: flex; align-items: flex-start; gap: 0.3rem; font-size: 0.82rem; margin-top: 0.4rem; min-height: 1.2em; }
   .validate-status:empty { display: none; }
@@ -468,6 +482,16 @@
   .menu-panel svg { width: 0.95rem; height: 0.95rem; flex: none; color: var(--color-muted); }
   .menu-panel form,
   .menu-panel .menu-actions { display: contents; }
+  /* The kebab's start/stop/restart/enable buttons carry the same semantic
+     `.btn .btn-sm .btn-*` classes as the detail-page action row. Restore the
+     button box the `.menu-panel button` reset above flattens so they render
+     as the same tinted pills instead of plain menu rows. */
+  .menu-panel .menu-actions .btn {
+    width: 100%;
+    border-width: 1px;
+    border-style: solid;
+  }
+  .menu-panel .menu-actions .btn svg { color: inherit; }
 
   /* App shell / sidebar ------------------------------- */
   .app-shell { display: flex; min-height: 100vh; }
@@ -552,6 +576,253 @@
   .action-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.9rem 0; }
   .detail-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.75rem 0 0.5rem; }
   .inline-form { display: inline; }
+
+  /* Auto-update policy picker in the detail action row. One uniform surface --
+     a muted "Auto-update" caption and a borderless <select>, split by a hair
+     line rather than a filled segment -- sized to sit in line with the .btn-sm
+     lifecycle actions beside it. `.is-on` recolours the caption + border to
+     accent when a policy is active; "Off" stays neutral. */
+  .autoupdate-control {
+    display: inline-flex;
+    align-items: stretch;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.4rem;
+    background: var(--color-surface);
+    overflow: hidden;
+    line-height: 1;
+  }
+  .autoupdate-control:hover { background: var(--color-raised); }
+  .autoupdate-control:focus-within { border-color: var(--color-accent); }
+
+  .autoupdate-control .autoupdate-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0 0.55rem 0 0.7rem;
+    color: var(--color-muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .autoupdate-control .autoupdate-label svg { width: 0.9rem; height: 0.9rem; }
+
+  .autoupdate-control .autoupdate-select {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    border-left: 1px solid var(--color-line);
+  }
+  .autoupdate-control select {
+    appearance: none;
+    -webkit-appearance: none;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-ink);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.3rem 1.5rem 0.3rem 0.6rem;
+    cursor: pointer;
+  }
+  .autoupdate-control select:focus { outline: none; }
+  .autoupdate-control .autoupdate-select > svg {
+    position: absolute;
+    right: 0.45rem;
+    width: 0.85rem;
+    height: 0.85rem;
+    color: var(--color-muted);
+    pointer-events: none;
+  }
+
+  .autoupdate-control.is-on { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+  .autoupdate-control.is-on .autoupdate-select { border-left-color: color-mix(in srgb, var(--color-accent) 22%, transparent); }
+  .autoupdate-control.is-on .autoupdate-label,
+  .autoupdate-control.is-on select { color: var(--color-accent); }
+
+  .input-sm { padding: 0.3rem 0.5rem; font-size: 0.82rem; border-radius: 0.4rem; }
+
+  /* Row-menu "move to group": a compact icon + datalist field + submit.
+     Overrides `.menu-panel form { display: contents }` so it stays one row. */
+  .menu-panel .move-form { display: flex; align-items: center; padding: 0.25rem 0.4rem; gap: 0.3rem; }
+  .menu-panel .move-form .move-input {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.8rem;
+  }
+  .menu-panel .move-form button {
+    width: auto;
+    flex: none;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.78rem;
+    background: var(--color-raised);
+  }
+
+  /* Detail-page group control: current group + a dropdown of the rest. */
+  .group-picker { position: relative; display: inline-block; }
+  .group-picker > summary { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; list-style: none; }
+  .group-picker > summary::-webkit-details-marker { display: none; }
+  .group-picker > summary svg:last-child { width: 0.8rem; height: 0.8rem; }
+  .group-picker-panel {
+    position: absolute;
+    z-index: 30;
+    margin-top: 0.25rem;
+    min-width: 12rem;
+    max-width: 18rem;
+    padding: 0.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    box-shadow: var(--shadow-pop);
+  }
+  .group-picker-list { display: flex; flex-direction: column; gap: 0.05rem; max-height: 14rem; overflow-y: auto; }
+  .group-opt {
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    border: 0;
+    border-radius: 0.35rem;
+    background: none;
+    font: inherit;
+    font-size: 0.83rem;
+    color: var(--color-ink);
+    cursor: pointer;
+  }
+  .group-opt:hover { background: var(--color-raised); }
+  .group-picker-new { display: flex; gap: 0.3rem; padding-top: 0.35rem; margin-top: 0.1rem; border-top: 1px solid var(--color-line); }
+  .group-picker-new .input { flex: 1; min-width: 0; }
+
+  /* "Add group" disclosure in the list toolbar. */
+  .add-group { position: relative; }
+  .add-group > summary { list-style: none; }
+  .add-group > summary::-webkit-details-marker { display: none; }
+  .add-group-form { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.5rem; }
+
+  /* Drag handle on each unit row. */
+  .drag-handle { display: inline-flex; vertical-align: middle; margin-right: 0.3rem; color: var(--color-faint); cursor: grab; }
+  .drag-handle:active { cursor: grabbing; }
+  .drag-handle svg { width: 0.85rem; height: 0.85rem; }
+  .data-table tr.dragging { opacity: 0.45; }
+  .data-table tr.drag-over > td { box-shadow: inset 0 2px 0 var(--color-accent); }
+  .data-table tr.group-row.drag-over > td { background: var(--color-accent-soft); box-shadow: none; }
+
+  /* Collapsible group sections in the list tables ------ *
+   * Nesting is shown three ways: the header spells out the parent path
+   * (`media/` faint, then the leaf bold); every row of a nested section is
+   * indented one `--gstep` per level; and a guide bar sits on the boundary
+   * between a child and its parent's indent. `--depth` is set inline per row. */
+  .data-table { --gstep: 1.35rem; --gpad: 0.65rem; }
+
+  /* A group header keeps a unit row's column shape: a wide first cell (name,
+     drag grip, toggle) plus the trailing kebab cell -- so the ⋯ menu lands in
+     the exact same column, at the same x, as every unit row's kebab, and the
+     nesting indent (which only moves content inside the first cell) never
+     shifts it. */
+  .data-table tr.group-row > td { background: var(--color-raised); vertical-align: middle; }
+  .data-table tr.group-row:hover > td { background: var(--color-raised); }
+  .data-table tr.group-row > .group-head-cell { padding: 0; }
+  .data-table tr.group-row > .group-kebab-cell { padding: 0.3rem 0.65rem; }
+  .group-row-inner {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.65rem 0.4rem calc(var(--gpad) + var(--depth, 0) * var(--gstep));
+  }
+  .group-row-inner .drag-handle { margin: 0; }
+
+  /* First-cell wrapper on unit / empty rows -- carries the same indent as the
+     group header above it, so the row's padding lives on the wrapper. */
+  .data-table tbody td:first-child:has(> .row-indent) { padding: 0; }
+  .row-indent { padding: 0.6rem 0.65rem 0.6rem calc(var(--gpad) + var(--depth, 0) * var(--gstep)); }
+
+  /* The guide bar: for any nested row (depth >= 1) drop the deep left padding,
+     push the content box in by the *parent's* indent with a margin, and draw a
+     rule on its left edge -- so the bar always lands exactly on the
+     child/parent seam regardless of how deep the nesting goes. */
+  .data-table tbody tr[data-depth]:not([data-depth="0"]) .group-row-inner,
+  .data-table tbody tr[data-depth]:not([data-depth="0"]) .row-indent {
+    margin-left: calc((var(--depth) - 1) * var(--gstep) + var(--gpad));
+    padding-left: 0.7rem;
+    border-left: 2px solid var(--color-line-strong);
+  }
+  .data-table tbody tr.drag-over .row-indent,
+  .data-table tbody tr.group-row.drag-over .group-row-inner {
+    border-left-color: var(--color-accent);
+  }
+  .group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0.05rem 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--color-muted);
+    text-align: left;
+    cursor: pointer;
+  }
+  .group-toggle:hover { color: var(--color-ink); }
+
+  /* Actions menu (⋯) on a group header row -- reuses `.menu` wholesale so its
+     summary is byte-for-byte the unit kebab (same padding, same icon size, so
+     they align); only the hover tint and the wider panel differ. */
+  .data-table tr.group-row .menu > summary:hover,
+  .data-table tr.group-row .menu[open] > summary { background: var(--color-surface); }
+  .group-menu .menu-panel { min-width: 15rem; }
+  /* Override `.menu-panel form { display: contents }` so each editor stays one row. */
+  .menu-panel .group-menu-form {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.4rem;
+  }
+  .menu-panel .group-menu-form .input {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+    padding: 0.25rem 0.4rem;
+    font-size: 0.8rem;
+  }
+  .menu-panel .group-menu-form button {
+    width: auto;
+    flex: none;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.78rem;
+    background: var(--color-raised);
+  }
+  /* chevron-down glyph: points down when expanded, rotate -90° (points right)
+     when the section is collapsed. */
+  .group-chevron { display: inline-flex; transition: transform 0.12s ease; }
+  .group-chevron svg { width: 0.9rem; height: 0.9rem; }
+  .group-toggle[aria-expanded="false"] .group-chevron { transform: rotate(-90deg); }
+  .group-name { color: var(--color-ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .group-parent { color: var(--color-faint); font-weight: 500; }
+  .group-count {
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--color-muted);
+  }
+  .data-table tr.group-empty .row-indent {
+    color: var(--color-muted);
+    font-size: 0.82rem;
+    font-style: italic;
+  }
+  .data-table tr.is-collapsed { display: none; }
+  /* While the filter box holds a needle, reveal matches even inside collapsed
+     groups; rows the filter itself hid (`[hidden]`) stay hidden. */
+  .data-table[data-filtering] tr.is-collapsed:not([hidden]) { display: table-row; }
 
   /* Unit detail: one action toolbar + two-column layout w/ facts rail */
   .detail-toolbar {

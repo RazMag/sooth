@@ -20,12 +20,13 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{AppError, PageError};
-use crate::quadlet::{UnitKind, envfile, naming};
+use crate::quadlet::{UnitKind, discovery, envfile, naming};
 use crate::web::templates::NavItem;
 use crate::web::templates::generic::{KindChoice, NewUnitPage};
 use crate::web::{core, templates};
 
 async fn new_form(
+    state: &AppState,
     session: Session,
     active: Option<NavItem>,
     action: &str,
@@ -36,6 +37,7 @@ async fn new_form(
         .await
         .unwrap_or_default();
     let host_vars = crate::hostenv::load().unwrap_or_default();
+    let known_groups = discovery::list_groups(&state.quadlet_dir);
     templates::generic::new_unit_page(NewUnitPage {
         csrf: &csrf,
         active,
@@ -43,6 +45,8 @@ async fn new_form(
         kind,
         editor_body: skeleton,
         stem_prefill: "",
+        group_prefill: "",
+        known_groups: &known_groups,
         env_vars_body: "",
         host_vars: &host_vars,
         error: None,
@@ -50,6 +54,7 @@ async fn new_form(
 }
 
 pub async fn containers_new_form(
+    State(state): State<AppState>,
     session: Session,
     Query(query): Query<PodQuery>,
 ) -> impl IntoResponse {
@@ -58,6 +63,7 @@ pub async fn containers_new_form(
         None => "[Container]\nImage=\n".to_string(),
     };
     new_form(
+        &state,
         session,
         Some(NavItem::Services),
         "/containers",
@@ -72,8 +78,9 @@ pub struct PodQuery {
     pod: Option<String>,
 }
 
-pub async fn pods_new_form(session: Session) -> impl IntoResponse {
+pub async fn pods_new_form(State(state): State<AppState>, session: Session) -> impl IntoResponse {
     new_form(
+        &state,
         session,
         Some(NavItem::Services),
         "/pods",
@@ -82,8 +89,12 @@ pub async fn pods_new_form(session: Session) -> impl IntoResponse {
     )
     .await
 }
-pub async fn volumes_new_form(session: Session) -> impl IntoResponse {
+pub async fn volumes_new_form(
+    State(state): State<AppState>,
+    session: Session,
+) -> impl IntoResponse {
     new_form(
+        &state,
         session,
         Some(NavItem::Volumes),
         "/volumes",
@@ -92,8 +103,12 @@ pub async fn volumes_new_form(session: Session) -> impl IntoResponse {
     )
     .await
 }
-pub async fn networks_new_form(session: Session) -> impl IntoResponse {
+pub async fn networks_new_form(
+    State(state): State<AppState>,
+    session: Session,
+) -> impl IntoResponse {
     new_form(
+        &state,
         session,
         Some(NavItem::Networks),
         "/networks",
@@ -102,8 +117,9 @@ pub async fn networks_new_form(session: Session) -> impl IntoResponse {
     )
     .await
 }
-pub async fn images_new_form(session: Session) -> impl IntoResponse {
+pub async fn images_new_form(State(state): State<AppState>, session: Session) -> impl IntoResponse {
     new_form(
+        &state,
         session,
         Some(NavItem::Images),
         "/images",
@@ -112,8 +128,9 @@ pub async fn images_new_form(session: Session) -> impl IntoResponse {
     )
     .await
 }
-pub async fn units_new_form(session: Session) -> impl IntoResponse {
+pub async fn units_new_form(State(state): State<AppState>, session: Session) -> impl IntoResponse {
     new_form(
+        &state,
         session,
         None,
         "/units",
@@ -151,6 +168,9 @@ pub struct CreateForm {
     /// The unit kind's extension (`container` .. `image`), from the hidden
     /// input or the `<select>`.
     kind: String,
+    /// Optional group (subdirectory) to file the new unit under; blank = root.
+    #[serde(default)]
+    group: Option<String>,
     /// `section` | `units` -- which "New" form shape to redisplay on a 422.
     #[serde(default)]
     origin: Option<String>,
@@ -172,15 +192,20 @@ pub async fn create(
     }
 
     let stem = form.file_name.trim().to_string();
+    let group = form.group.as_deref().unwrap_or("").trim().to_string();
     let origin = form.origin.as_deref();
     let env_text = form.env_vars.as_deref().unwrap_or("");
 
     let Some(kind) = UnitKind::from_extension(form.kind.trim()) else {
         return Ok(reject_new(
+            &state,
             &session,
             origin,
-            UnitKind::Container,
-            &stem,
+            RejectCtx {
+                kind: UnitKind::Container,
+                stem: &stem,
+                group: &group,
+            },
             &form.contents,
             env_text,
             "Pick a unit type.",
@@ -192,10 +217,14 @@ pub async fn create(
         Ok(f) => f,
         Err(e) => {
             return Ok(reject_new(
+                &state,
                 &session,
                 origin,
-                kind,
-                &stem,
+                RejectCtx {
+                    kind,
+                    stem: &stem,
+                    group: &group,
+                },
                 &form.contents,
                 env_text,
                 &e.to_string(),
@@ -204,6 +233,23 @@ pub async fn create(
         }
     };
 
+    if !naming::valid_group(&group) {
+        return Ok(reject_new(
+            &state,
+            &session,
+            origin,
+            RejectCtx {
+                kind,
+                stem: &stem,
+                group: &group,
+            },
+            &form.contents,
+            env_text,
+            &format!("invalid group '{group}'"),
+        )
+        .await);
+    }
+
     let wants_env = matches!(kind, UnitKind::Container | UnitKind::Build);
 
     let pairs = if wants_env {
@@ -211,10 +257,14 @@ pub async fn create(
             Ok(p) => p,
             Err(msg) => {
                 return Ok(reject_new(
+                    &state,
                     &session,
                     origin,
-                    kind,
-                    &stem,
+                    RejectCtx {
+                        kind,
+                        stem: &stem,
+                        group: &group,
+                    },
                     &form.contents,
                     env_text,
                     &msg,
@@ -246,7 +296,16 @@ pub async fn create(
             .map_err(|e| AppError::Internal(e.into()))?;
     }
 
-    match core::create_unit(&state, &session, &form.csrf_token, &file_name, &contents).await {
+    match core::create_unit(
+        &state,
+        &session,
+        &form.csrf_token,
+        &file_name,
+        &group,
+        &contents,
+    )
+    .await
+    {
         Ok(unit) => Ok(Redirect::to(&core::unit_url(&unit)).into_response()),
         Err(AppError::Quadlet(e)) if e.is_client_error() => {
             tracing::warn!(file = file_name, error = %e, "rejected new quadlet file");
@@ -254,10 +313,14 @@ pub async fn create(
                 let _ = envfile::delete(&state.quadlet_dir, &stem);
             }
             Ok(reject_new(
+                &state,
                 &session,
                 origin,
-                kind,
-                &stem,
+                RejectCtx {
+                    kind,
+                    stem: &stem,
+                    group: &group,
+                },
                 &form.contents,
                 env_text,
                 &e.to_string(),
@@ -273,13 +336,21 @@ pub async fn create(
     }
 }
 
-/// Renders the "New" form again with a 422, preserving the stem, the editor
-/// body as typed, and the env-var text.
+/// The originating "New" form's identity, carried through a 422 redisplay so
+/// the stem, group, and kind picker come back filled in as submitted.
+struct RejectCtx<'a> {
+    kind: UnitKind,
+    stem: &'a str,
+    group: &'a str,
+}
+
+/// Renders the "New" form again with a 422, preserving the stem, group, the
+/// editor body as typed, and the env-var text.
 async fn reject_new(
+    state: &AppState,
     session: &Session,
     origin: Option<&str>,
-    kind: UnitKind,
-    stem: &str,
+    ctx: RejectCtx<'_>,
     editor_body: &str,
     env_vars_body: &str,
     error: &str,
@@ -287,8 +358,9 @@ async fn reject_new(
     let csrf = crate::auth::csrf::current(session)
         .await
         .unwrap_or_default();
-    let (active, action, choice) = redisplay_target(origin, kind);
+    let (active, action, choice) = redisplay_target(origin, ctx.kind);
     let host_vars = crate::hostenv::load().unwrap_or_default();
+    let known_groups = discovery::list_groups(&state.quadlet_dir);
     (
         StatusCode::UNPROCESSABLE_ENTITY,
         templates::generic::new_unit_page(NewUnitPage {
@@ -297,7 +369,9 @@ async fn reject_new(
             action,
             kind: choice,
             editor_body,
-            stem_prefill: stem,
+            stem_prefill: ctx.stem,
+            group_prefill: ctx.group,
+            known_groups: &known_groups,
             env_vars_body,
             host_vars: &host_vars,
             error: Some(error),
