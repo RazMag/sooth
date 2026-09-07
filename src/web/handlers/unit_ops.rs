@@ -48,6 +48,19 @@ action_handler!(restart, "restart");
 action_handler!(enable, "enable");
 action_handler!(disable, "disable");
 
+/// A unit's verbatim `[Section]` config cards, re-rendered from disk. The
+/// detail page wraps its Configuration column in an element that `hx-get`s
+/// this on `sse:units-changed`, so an autostart toggle (which patches the
+/// quadlet's `[Install]` section) or an external edit shows up without a
+/// manual refresh -- the same way list rows track file changes.
+pub async fn config(
+    State(state): State<AppState>,
+    Path(file_name): Path<String>,
+) -> Result<maud::Markup, FragmentError> {
+    let unit = discovery::load_by_name(&state.quadlet_dir, &file_name)?;
+    Ok(templates::section_table(&unit))
+}
+
 #[derive(Deserialize)]
 pub struct ActionsQuery {
     /// `?style=menu` -> just the kebab's status forms (for `.menu-actions`);

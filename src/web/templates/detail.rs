@@ -61,7 +61,13 @@ pub fn detail_page(
             }
             div.detail-main {
                 h2 { "Configuration" }
-                (section_table(unit))
+                // The quadlet file changes under an open detail page on an
+                // autostart toggle (Enable/Disable patches the `[Install]`
+                // section) or an external edit, so re-fetch the rendered
+                // sections on the same broadcast the list pages react to.
+                div.config-live hx-get={(base) "/config"} hx-trigger="sse:units-changed delay:300ms" hx-swap="innerHTML" {
+                    (section_table(unit))
+                }
             }
         }
     };

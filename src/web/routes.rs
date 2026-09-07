@@ -14,8 +14,8 @@ use super::handlers::{
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
-/// actions, edit, delete, logs -- at one URL prefix. Called once per
-/// section (`/containers`, `/pods`, `/volumes`, `/networks`, `/images`,
+/// actions, config fragment, edit, delete, logs -- at one URL prefix. Called
+/// once per section (`/containers`, `/pods`, `/volumes`, `/networks`, `/images`,
 /// and `/units` for the generic Kube/fallback section), always pointing at
 /// the exact same handler functions: none of this logic differs by kind, so
 /// there's exactly one implementation, just reachable at six prefixes.
@@ -25,6 +25,10 @@ fn mount_unit_routes(router: Router<AppState>, prefix: &str) -> Router<AppState>
         .route(
             &format!("{prefix}/{{file_name}}/actions"),
             get(unit_ops::actions),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/config"),
+            get(unit_ops::config),
         )
         .route(
             &format!("{prefix}/{{file_name}}/start"),
