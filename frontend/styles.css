@@ -158,6 +158,19 @@
   .btn-danger { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-line-strong)); }
   .btn-danger:hover { background: var(--color-danger-soft); }
 
+  /* Lifecycle actions on the unit detail page. Soft-tinted fills in the
+     semantic palette -- same background/foreground pairing as the banners
+     and chips -- so each action reads at a glance: Start = ok/green,
+     Stop = danger/red, Restart = warn/yellow, Enable/Disable = accent/blue. */
+  .btn-start   { background: var(--color-ok-soft);     color: var(--color-ok);     border-color: color-mix(in srgb, var(--color-ok) 40%, transparent); }
+  .btn-stop    { background: var(--color-danger-soft); color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 40%, transparent); }
+  .btn-restart { background: var(--color-warn-soft);   color: var(--color-warn);   border-color: color-mix(in srgb, var(--color-warn) 40%, transparent); }
+  .btn-enable  { background: var(--color-accent-soft); color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+  .btn-start:hover   { background: color-mix(in srgb, var(--color-ok) 16%, var(--color-surface)); }
+  .btn-stop:hover    { background: color-mix(in srgb, var(--color-danger) 16%, var(--color-surface)); }
+  .btn-restart:hover { background: color-mix(in srgb, var(--color-warn) 16%, var(--color-surface)); }
+  .btn-enable:hover  { background: color-mix(in srgb, var(--color-accent) 16%, var(--color-surface)); }
+
   .btn-ghost { border-color: transparent; background: transparent; }
   .btn-ghost:hover { background: var(--color-raised); }
 

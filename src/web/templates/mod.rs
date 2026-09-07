@@ -336,27 +336,35 @@ fn delete_form(base_url: &str, csrf: &str, btn_class: &str) -> Markup {
 
 /// The status-dependent action forms (start-or-stop+restart, then
 /// enable-or-disable) -- shared by the kebab menu and the detail-page action
-/// row. `start_class` / `other_class` style the buttons: empty inside the
-/// kebab (styled by `.menu-panel button`), `.btn` combos on the detail page.
+/// row. When `styled` is set each button carries its semantic `.btn-*`
+/// variant (green Start, red Stop, yellow Restart, blue Enable/Disable) for
+/// the detail page; the kebab passes it unset and lets `.menu-panel button`
+/// style them.
 fn unit_action_forms(
     base: &str,
     service: &str,
     status: &UnitStatus,
     csrf: &str,
-    start_class: &str,
-    other_class: &str,
+    styled: bool,
 ) -> Markup {
+    let cls = |variant: &str| {
+        if styled {
+            format!("btn btn-sm {variant}")
+        } else {
+            String::new()
+        }
+    };
     html! {
         @if status.is_active() {
-            (action_form(base, service, "stop", "Stop", Icon::Stop, csrf, other_class))
-            (action_form(base, service, "restart", "Restart", Icon::Restart, csrf, other_class))
+            (action_form(base, service, "stop", "Stop", Icon::Stop, csrf, &cls("btn-stop")))
+            (action_form(base, service, "restart", "Restart", Icon::Restart, csrf, &cls("btn-restart")))
         } @else {
-            (action_form(base, service, "start", "Start", Icon::Play, csrf, start_class))
+            (action_form(base, service, "start", "Start", Icon::Play, csrf, &cls("btn-start")))
         }
         @if status.is_autostart_enabled() {
-            (action_form(base, service, "disable", "Disable", Icon::Power, csrf, other_class))
+            (action_form(base, service, "disable", "Disable", Icon::Power, csrf, &cls("btn-enable")))
         } @else {
-            (action_form(base, service, "enable", "Enable", Icon::Power, csrf, other_class))
+            (action_form(base, service, "enable", "Enable", Icon::Power, csrf, &cls("btn-enable")))
         }
     }
 }
@@ -371,8 +379,7 @@ pub fn kebab_action_forms(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -
         &unit.service_name(),
         status,
         csrf,
-        "",
-        "",
+        false,
     )
 }
 
@@ -392,7 +399,7 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
                 @if !unit.is_template() {
                     div.menu-actions hx-get={(base) "/actions?style=menu"}
                         hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
-                        (unit_action_forms(&base, &service, status, csrf, "", ""))
+                        (unit_action_forms(&base, &service, status, csrf, false))
                     }
                 }
                 a href={(base) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
@@ -413,8 +420,7 @@ pub fn action_row(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
                 &unit.service_name(),
                 status,
                 csrf,
-                "btn btn-primary btn-sm",
-                "btn btn-ghost btn-sm",
+                true,
             ))
             (autostart_pill(status.is_autostart_enabled()))
         }
