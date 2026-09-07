@@ -10,7 +10,9 @@ use super::model::UnitKind;
 /// A file with no recognized quadlet extension falls back to `<stem>.service`.
 pub fn service_name(file_name: &str) -> String {
     let stem = stem(file_name);
-    let infix = kind_of(file_name).map(UnitKind::service_infix).unwrap_or("");
+    let infix = kind_of(file_name)
+        .map(UnitKind::service_infix)
+        .unwrap_or("");
     format!("{stem}{infix}.service")
 }
 

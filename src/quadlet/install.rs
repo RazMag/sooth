@@ -144,8 +144,11 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
     for i in (body_start..body_end).rev() {
         let act = match install_target_line(&lines[i]) {
             Some((key, targets)) if targets.contains(&LOGIN_TARGET) => {
-                let rest: Vec<&str> =
-                    targets.iter().copied().filter(|t| *t != LOGIN_TARGET).collect();
+                let rest: Vec<&str> = targets
+                    .iter()
+                    .copied()
+                    .filter(|t| *t != LOGIN_TARGET)
+                    .collect();
                 if rest.is_empty() {
                     Act::Drop
                 } else {
