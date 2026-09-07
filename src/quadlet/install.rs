@@ -13,43 +13,50 @@
 //! Consistent with the rest of sooth, [`set_enabled`] patches the raw file
 //! text rather than re-serialising the parsed model, so comments and
 //! formatting the app didn't touch survive byte-for-byte.
+//!
+//! Whether a unit is *currently* enabled is not read back from here -- the
+//! file can name a `WantedBy=` target that doesn't exist or isn't in the
+//! login path. That question is answered by systemd's computed reverse deps:
+//! `UnitStatus::is_autostart_enabled` (see `systemd::status`).
 
-use super::model::Section;
-
-/// The `WantedBy=` target sooth manages. `default.target` is the rootless
-/// user-session equivalent of `multi-user.target` -- it's what a `systemctl
-/// --user` login reaches, so a unit wanted by it starts on login.
+/// The one target this module adds or removes. `default.target` is the
+/// rootless user-session equivalent of `multi-user.target` -- it's what a
+/// `systemctl --user` login reaches, so a unit wanted by it starts on login.
+/// Any *other* target the user put in `[Install]` is left strictly alone.
+const LOGIN_TARGET: &str = "default.target";
 const MANAGED_LINE: &str = "WantedBy=default.target";
 const SECTION: &str = "Install";
-
-/// True when an `[Install]` section already declares a non-empty `WantedBy=`
-/// or `RequiredBy=` -- i.e. the quadlet generator will emit an autostart
-/// symlink for this unit.
-pub fn is_enabled(sections: &[Section]) -> bool {
-    sections
-        .iter()
-        .filter(|s| s.name.eq_ignore_ascii_case(SECTION))
-        .flat_map(|s| &s.entries)
-        .any(|(k, v)| is_install_target(k) && !v.trim().is_empty())
-}
 
 fn is_install_target(key: &str) -> bool {
     let k = key.trim();
     k.eq_ignore_ascii_case("WantedBy") || k.eq_ignore_ascii_case("RequiredBy")
 }
 
-/// Add (`enabled == true`) or remove (`enabled == false`) a managed
-/// `[Install]` / `WantedBy=default.target` in `raw`, leaving every other line
-/// byte-for-byte alone. Text already in the desired state is returned
-/// unchanged.
+/// `Some((key, targets))` when `line` is an `[Install]` `WantedBy=` /
+/// `RequiredBy=` assignment, with the value split into its whitespace-
+/// separated target list (systemd allows `WantedBy=a.target b.target`).
+/// `None` for anything else.
+fn install_target_line(line: &str) -> Option<(&str, Vec<&str>)> {
+    let (k, v) = line.trim().split_once('=')?;
+    is_install_target(k).then(|| (k.trim(), v.split_whitespace().collect()))
+}
+
+/// Add (`enabled == true`) or remove (`enabled == false`) the managed
+/// `WantedBy=default.target` in `raw`'s `[Install]` section, leaving every
+/// other line -- including any other `WantedBy=` / `RequiredBy=` target the
+/// user wrote -- byte-for-byte alone. Text already in the desired state is
+/// returned unchanged.
 ///
-/// * enable: if an `[Install]` section already carries any `WantedBy=` /
-///   `RequiredBy=`, nothing changes; if the section exists without one, the
-///   managed line is appended to it; otherwise a fresh `[Install]` section is
-///   added at end of file.
-/// * disable: every `WantedBy=` / `RequiredBy=` line in the `[Install]`
-///   section is removed, and if that empties the section its header goes too
-///   (a hand-written `Alias=` or similar keeps it alive).
+/// * enable: if some `WantedBy=` / `RequiredBy=` in the `[Install]` section
+///   already lists `default.target`, nothing changes; otherwise
+///   `WantedBy=default.target` is appended -- to the existing section, or a
+///   fresh one at end of file. A populated `WantedBy=` naming only other
+///   targets does *not* count as enabled, so this adds the login target
+///   alongside it.
+/// * disable: `default.target` is dropped from every `WantedBy=` /
+///   `RequiredBy=` that lists it -- the whole line if that leaves it empty,
+///   and the section header too if that empties the section. A hand-written
+///   `Alias=`, or a `WantedBy=` naming only other targets, keeps it alive.
 ///
 /// Round-trips LF text; on a CRLF file the `\r` stays attached to untouched
 /// lines (matching is on the trimmed line) but a newly inserted line is
@@ -71,10 +78,8 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
             .and_then(|x| x.strip_suffix(']'))
             .is_some_and(|name| name.trim().eq_ignore_ascii_case(SECTION))
     };
-    let is_target_line = |l: &str| {
-        l.trim()
-            .split_once('=')
-            .is_some_and(|(k, v)| is_install_target(k) && !v.trim().is_empty())
+    let names_login = |l: &str| {
+        install_target_line(l).is_some_and(|(_, targets)| targets.contains(&LOGIN_TARGET))
     };
     let is_blank_or_comment = |l: &str| {
         let t = l.trim();
@@ -99,8 +104,8 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
                     .iter()
                     .position(|l| is_any_header(l))
                     .map_or(lines.len(), |p| body_start + p);
-                if (body_start..body_end).any(|i| is_target_line(&lines[i])) {
-                    return finish(lines); // already enabled
+                if (body_start..body_end).any(|i| names_login(&lines[i])) {
+                    return finish(lines); // already wanted by default.target
                 }
                 let mut ins = body_end;
                 while ins > body_start && lines[ins - 1].trim().is_empty() {
@@ -119,7 +124,9 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
         return finish(lines);
     }
 
-    // disable
+    // disable: drop `default.target` wherever it's listed, but leave any
+    // other target (a hand-written `multi-user.target`, a `RequiredBy=`) as
+    // the user wrote it.
     let Some(h) = header_idx else {
         return finish(lines); // no [Install] section -- already disabled
     };
@@ -129,10 +136,31 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
         .position(|l| is_any_header(l))
         .map_or(lines.len(), |p| body_start + p);
 
+    enum Act {
+        Keep,
+        Drop,
+        Rewrite(String),
+    }
     for i in (body_start..body_end).rev() {
-        if is_target_line(&lines[i]) {
-            lines.remove(i);
-            body_end -= 1;
+        let act = match install_target_line(&lines[i]) {
+            Some((key, targets)) if targets.contains(&LOGIN_TARGET) => {
+                let rest: Vec<&str> =
+                    targets.iter().copied().filter(|t| *t != LOGIN_TARGET).collect();
+                if rest.is_empty() {
+                    Act::Drop
+                } else {
+                    Act::Rewrite(format!("{key}={}", rest.join(" ")))
+                }
+            }
+            _ => Act::Keep,
+        };
+        match act {
+            Act::Keep => {}
+            Act::Drop => {
+                lines.remove(i);
+                body_end -= 1;
+            }
+            Act::Rewrite(s) => lines[i] = s,
         }
     }
 
@@ -155,34 +183,6 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
 mod tests {
     use super::*;
 
-    fn section(name: &str, entries: &[(&str, &str)]) -> Section {
-        Section {
-            name: name.to_string(),
-            entries: entries
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-        }
-    }
-
-    #[test]
-    fn is_enabled_needs_a_nonempty_wanted_or_required_by() {
-        assert!(is_enabled(&[section(
-            "Install",
-            &[("WantedBy", "default.target")]
-        )]));
-        assert!(is_enabled(&[section(
-            "install",
-            &[("RequiredBy", "other.target")]
-        )]));
-        assert!(!is_enabled(&[section(
-            "Install",
-            &[("Alias", "x.service")]
-        )]));
-        assert!(!is_enabled(&[section("Install", &[("WantedBy", "  ")])]));
-        assert!(!is_enabled(&[section("Container", &[("Image", "alpine")])]));
-    }
-
     #[test]
     fn enable_appends_a_fresh_section_at_eof() {
         let raw = "[Container]\nImage=alpine\n";
@@ -199,8 +199,20 @@ mod tests {
     }
 
     #[test]
-    fn enable_keeps_a_hand_written_target() {
+    fn enable_adds_the_login_target_next_to_a_hand_written_one() {
+        // A populated `WantedBy=` that isn't `default.target` does not make
+        // the unit autostart on login, so Enable appends the login target
+        // rather than treating the section as already enabled.
         let raw = "[Container]\nImage=alpine\n\n[Install]\nWantedBy=multi-user.target\n";
+        assert_eq!(
+            set_enabled(raw, true),
+            "[Container]\nImage=alpine\n\n[Install]\nWantedBy=multi-user.target\nWantedBy=default.target\n"
+        );
+    }
+
+    #[test]
+    fn enable_is_idempotent_when_login_target_shares_a_line() {
+        let raw = "[Container]\nImage=alpine\n\n[Install]\nWantedBy=other.target default.target\n";
         assert_eq!(set_enabled(raw, true), raw);
     }
 
@@ -229,9 +241,27 @@ mod tests {
     }
 
     #[test]
-    fn disable_drops_both_wanted_and_required_by() {
+    fn disable_removes_only_the_login_target_not_other_deps() {
         let raw = "[Container]\nImage=alpine\n\n[Install]\nWantedBy=default.target\nRequiredBy=x.target\n";
-        assert_eq!(set_enabled(raw, false), "[Container]\nImage=alpine\n");
+        assert_eq!(
+            set_enabled(raw, false),
+            "[Container]\nImage=alpine\n\n[Install]\nRequiredBy=x.target\n"
+        );
+    }
+
+    #[test]
+    fn disable_strips_the_login_target_from_a_shared_line() {
+        let raw = "[Container]\nImage=alpine\n\n[Install]\nWantedBy=default.target other.target\n";
+        assert_eq!(
+            set_enabled(raw, false),
+            "[Container]\nImage=alpine\n\n[Install]\nWantedBy=other.target\n"
+        );
+    }
+
+    #[test]
+    fn disable_is_a_noop_when_only_other_targets_are_present() {
+        let raw = "[Container]\nImage=alpine\n\n[Install]\nWantedBy=multi-user.target\n";
+        assert_eq!(set_enabled(raw, false), raw);
     }
 
     #[test]

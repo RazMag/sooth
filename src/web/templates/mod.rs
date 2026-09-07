@@ -22,7 +22,7 @@ use maud::{DOCTYPE, Markup, html};
 use uuid::Uuid;
 
 use crate::hostenv::EnvVar;
-use crate::quadlet::{QuadletUnit, UnitKind, install};
+use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 use crate::web::core;
 
@@ -342,7 +342,6 @@ fn unit_action_forms(
     base: &str,
     service: &str,
     status: &UnitStatus,
-    autostart: bool,
     csrf: &str,
     start_class: &str,
     other_class: &str,
@@ -354,7 +353,7 @@ fn unit_action_forms(
         } @else {
             (action_form(base, service, "start", "Start", Icon::Play, csrf, start_class))
         }
-        @if autostart {
+        @if status.is_autostart_enabled() {
             (action_form(base, service, "disable", "Disable", Icon::Power, csrf, other_class))
         } @else {
             (action_form(base, service, "enable", "Enable", Icon::Power, csrf, other_class))
@@ -371,7 +370,6 @@ pub fn kebab_action_forms(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -
         &core::unit_url(unit),
         &unit.service_name(),
         status,
-        install::is_enabled(&unit.sections),
         csrf,
         "",
         "",
@@ -394,7 +392,7 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
                 @if !unit.is_template() {
                     div.menu-actions hx-get={(base) "/actions?style=menu"}
                         hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
-                        (unit_action_forms(&base, &service, status, install::is_enabled(&unit.sections), csrf, "", ""))
+                        (unit_action_forms(&base, &service, status, csrf, "", ""))
                     }
                 }
                 a href={(base) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
@@ -408,19 +406,17 @@ pub fn kebab_menu(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
 /// The same actions as `kebab_menu`, laid out as plain buttons -- used on
 /// detail pages where there's room and the extra visibility is welcome.
 pub fn action_row(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
-    let autostart = install::is_enabled(&unit.sections);
     html! {
         div.action-row {
             (unit_action_forms(
                 &core::unit_url(unit),
                 &unit.service_name(),
                 status,
-                autostart,
                 csrf,
                 "btn btn-primary btn-sm",
                 "btn btn-ghost btn-sm",
             ))
-            (autostart_pill(autostart))
+            (autostart_pill(status.is_autostart_enabled()))
         }
     }
 }

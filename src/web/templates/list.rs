@@ -6,7 +6,7 @@
 use maud::{Markup, html};
 
 use super::{NavItem, autostart_pill, kebab_menu, page_header, shell, status_badge};
-use crate::quadlet::{QuadletUnit, install};
+use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 use crate::web::core;
 
@@ -50,7 +50,7 @@ fn row(unit: &QuadletUnit, status: &UnitStatus, columns: &[Column], csrf: &str) 
             @for column in columns {
                 td { ((column.cell)(unit, status)) }
             }
-            td { (status_badge(&service, status)) (autostart_pill(install::is_enabled(&unit.sections))) }
+            td { (status_badge(&service, status)) (autostart_pill(status.is_autostart_enabled())) }
             td { (kebab_menu(unit, status, csrf)) }
         }
     }

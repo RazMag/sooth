@@ -5,6 +5,11 @@ use zbus::{Connection, fdo::PropertiesProxy, names::InterfaceName, zvariant::Own
 use super::SystemdError;
 use super::client::ManagerProxy;
 
+/// The target a rootless `systemctl --user` login reaches; a unit wanted or
+/// required by it starts on login. The rootless equivalent of
+/// `multi-user.target` -- see `quadlet::install`'s `MANAGED_LINE`.
+const LOGIN_TARGET: &str = "default.target";
+
 /// A unit's live status as reported by systemd over D-Bus.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnitStatus {
@@ -12,6 +17,13 @@ pub struct UnitStatus {
     pub active_state: String,
     pub sub_state: String,
     pub description: String,
+    /// The targets that pull this unit in, from systemd's *computed*
+    /// `WantedBy=` / `RequiredBy=` reverse dependencies -- i.e. the
+    /// `[Install]` section *after* the quadlet generator has turned it into
+    /// `<target>.wants/` symlinks. This is the real autostart wiring, unlike
+    /// the raw file, which can name a target that doesn't exist or isn't in
+    /// the login path.
+    pub autostart_targets: Vec<String>,
 }
 
 impl UnitStatus {
@@ -25,6 +37,7 @@ impl UnitStatus {
             active_state: "inactive".into(),
             sub_state: "dead".into(),
             description: String::new(),
+            autostart_targets: Vec::new(),
         }
     }
 
@@ -34,6 +47,14 @@ impl UnitStatus {
 
     pub fn is_failed(&self) -> bool {
         self.active_state == "failed"
+    }
+
+    /// True when this unit actually autostarts on a rootless login -- i.e.
+    /// systemd computed `default.target` as one of its `WantedBy=` /
+    /// `RequiredBy=` reverse deps. An `[Install]` section pointing at a
+    /// missing or non-login target leaves this false, matching reality.
+    pub fn is_autostart_enabled(&self) -> bool {
+        self.autostart_targets.iter().any(|t| t == LOGIN_TARGET)
     }
 }
 
@@ -66,11 +87,19 @@ pub(super) async fn fetch(
         .await
         .map_err(|e| SystemdError::action_failed(unit, "status", e))?;
 
+    // `WantedBy` / `RequiredBy` on the Unit interface are the *reverse* deps
+    // systemd computed from every loaded `<target>.wants/` dir -- so this
+    // reflects the symlink the quadlet generator wrote for a real `[Install]`
+    // target and stays empty for one that names a bogus/unloaded target.
+    let mut autostart_targets = get_strv(&unit_props, "WantedBy");
+    autostart_targets.extend(get_strv(&unit_props, "RequiredBy"));
+
     Ok(UnitStatus {
         load_state: get_str(&unit_props, "LoadState"),
         active_state: get_str(&unit_props, "ActiveState"),
         sub_state: get_str(&unit_props, "SubState"),
         description: get_str(&unit_props, "Description"),
+        autostart_targets,
     })
 }
 
@@ -78,4 +107,34 @@ fn get_str(map: &HashMap<String, OwnedValue>, key: &str) -> String {
     map.get(key)
         .and_then(|v| String::try_from(v.clone()).ok())
         .unwrap_or_default()
+}
+
+fn get_strv(map: &HashMap<String, OwnedValue>, key: &str) -> Vec<String> {
+    map.get(key)
+        .and_then(|v| Vec::<String>::try_from(v.clone()).ok())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_targets(targets: &[&str]) -> UnitStatus {
+        UnitStatus {
+            autostart_targets: targets.iter().map(|s| s.to_string()).collect(),
+            ..UnitStatus::not_found()
+        }
+    }
+
+    #[test]
+    fn autostart_needs_the_login_target_specifically() {
+        assert!(with_targets(&["default.target"]).is_autostart_enabled());
+        assert!(with_targets(&["some.target", "default.target"]).is_autostart_enabled());
+        // An [Install] section pointing at a target that doesn't exist or
+        // isn't in the login path: systemd computes no default.target dep.
+        assert!(!with_targets(&["bogus.target"]).is_autostart_enabled());
+        assert!(!with_targets(&["multi-user.target"]).is_autostart_enabled());
+        assert!(!with_targets(&[]).is_autostart_enabled());
+        assert!(!UnitStatus::not_found().is_autostart_enabled());
+    }
 }
