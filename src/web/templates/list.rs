@@ -218,10 +218,21 @@ fn add_group_control(csrf: &str) -> Markup {
     }
 }
 
-/// The filter box + table + SSE-refreshed `<tbody>` -- everything below a
-/// page's own header. Split out from `list_page` so a page that needs its
-/// own custom header (the Services home page, with its stats bar) can still
-/// reuse the table itself.
+/// The toolbar's create action(s), right-aligned next to "Add group": a
+/// single "New" for the generic sections, "Container" + "Pod" for the
+/// Services home page. Same `.btn-sm` scale as the rest of the toolbar so
+/// the create controls, the filter box and "Add group" read as one bar.
+fn new_actions(spec: &ListSpec) -> Markup {
+    html! {
+        a.btn.btn-sm.btn-primary href=(spec.new_href) { (icon(Icon::Plus)) span { "New" } }
+    }
+}
+
+/// The filter box + toolbar actions + table + SSE-refreshed `<tbody>` --
+/// everything below a page's own `<h1>`. Split out from `list_page` so a
+/// page that needs its own custom header (the Services home page, with its
+/// stats bar) can still reuse the table itself. `create` is the toolbar's
+/// right-aligned create control(s) -- see `new_actions`.
 pub fn list_table(
     spec: &ListSpec,
     units: &[(QuadletUnit, UnitStatus)],
@@ -229,12 +240,16 @@ pub fn list_table(
     rows_route: &str,
     all_units: &[QuadletUnit],
     known_groups: &[String],
+    create: Markup,
 ) -> Markup {
     html! {
         (known_groups_datalist(known_groups))
         div.toolbar {
-            input.input.filter-box type="search" data-filter-target=(ROWS_ID) placeholder="Filter…";
-            (add_group_control(csrf))
+            input.input.input-sm.filter-box type="search" data-filter-target=(ROWS_ID) placeholder="Filter…";
+            div.toolbar-actions {
+                (add_group_control(csrf))
+                (create)
+            }
         }
         div.table-wrap {
             table.data-table {
@@ -269,10 +284,8 @@ pub fn list_page(
     known_groups: &[String],
 ) -> Markup {
     let body = html! {
-        (page_header(spec.title, html! {
-            a.btn.btn-primary href=(spec.new_href) { (super::icon(super::Icon::Plus)) span { "New" } }
-        }))
-        (list_table(spec, units, csrf, &rows_route(spec), all_units, known_groups))
+        (page_header(spec.title, html! {}))
+        (list_table(spec, units, csrf, &rows_route(spec), all_units, known_groups, new_actions(spec)))
     };
     shell(spec.title, spec.active_nav, body)
 }

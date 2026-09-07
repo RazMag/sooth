@@ -69,16 +69,17 @@ pub fn services_page(
     all_units: &[QuadletUnit],
     known_groups: &[String],
 ) -> Markup {
+    let create = html! {
+        a.btn.btn-sm.btn-primary href="/containers/new" { (icon(Icon::Plus)) span { "Container" } }
+        a.btn.btn-sm href="/pods/new" { (icon(Icon::Plus)) span { "Pod" } }
+    };
     let body = html! {
-        (super::page_header("Services", html! {
-            a.btn.btn-primary href="/containers/new" { (icon(Icon::Plus)) span { "Container" } }
-            a.btn href="/pods/new" { (icon(Icon::Plus)) span { "Pod" } }
-        }))
+        (super::page_header("Services", html! {}))
         div id="services-counts" hx-get="/services/counts"
             hx-trigger="sse:units-changed, sse:any-status delay:300ms" hx-swap="innerHTML" {
             (stats_bar(stats))
         }
-        (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units, known_groups))
+        (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units, known_groups, create))
     };
     shell("Services", Some(NavItem::Services), body)
 }
