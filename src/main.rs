@@ -39,18 +39,12 @@ fn main() -> anyhow::Result<()> {
 /// never need a separate tool just to configure the one credential this app
 /// has.
 fn hash_password_cli() -> anyhow::Result<()> {
-    use argon2::password_hash::PasswordHasher;
-
     let password = rpassword::prompt_password("Password: ")?;
     let confirm = rpassword::prompt_password("Confirm password: ")?;
     if password != confirm {
         anyhow::bail!("passwords did not match");
     }
-    let hash = argon2::Argon2::default()
-        .hash_password(password.as_bytes())
-        .map_err(|e| anyhow::anyhow!("failed to hash password: {e}"))?
-        .to_string();
-    println!("{hash}");
+    println!("{}", auth::hash_password(&password)?);
     Ok(())
 }
 

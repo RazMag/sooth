@@ -52,14 +52,7 @@ pub async fn login_submit(
     session: Session,
     Form(form): Form<LoginForm>,
 ) -> Result<Response, PageError> {
-    use argon2::password_hash::PasswordVerifier;
-
-    let hash = argon2::PasswordHash::new(&state.config.auth_password_hash).map_err(|e| {
-        anyhow::anyhow!("stored SOOTH_AUTH_PASSWORD_HASH is not a valid argon2 hash: {e}")
-    })?;
-    let valid = argon2::Argon2::default()
-        .verify_password(form.password.as_bytes(), &hash)
-        .is_ok();
+    let valid = crate::auth::verify_password(&state.config.auth_password_hash, &form.password);
 
     if !valid {
         warn!("failed login attempt");
