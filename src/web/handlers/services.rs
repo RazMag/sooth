@@ -29,9 +29,11 @@ pub async fn page(
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    let units = core::load_units_for_kinds(&state, KINDS).await?;
+    let (units, all) = core::load_units_and_siblings(&state, KINDS).await?;
     let stats = compute_stats(&units);
-    Ok(templates::services::services_page(&units, &stats, &csrf))
+    Ok(templates::services::services_page(
+        &units, &stats, &csrf, &all,
+    ))
 }
 
 pub async fn rows(
@@ -41,11 +43,12 @@ pub async fn rows(
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    let units = core::load_units_for_kinds(&state, KINDS).await?;
+    let (units, all) = core::load_units_and_siblings(&state, KINDS).await?;
     Ok(templates::list::list_rows(
         &templates::services::SPEC,
         &units,
         &csrf,
+        &all,
     ))
 }
 

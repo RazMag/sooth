@@ -74,8 +74,8 @@ macro_rules! list_handlers {
             let csrf = crate::auth::csrf::current(&session)
                 .await
                 .unwrap_or_default();
-            let units = core::load_units_for_kinds(&state, $kinds).await?;
-            Ok(templates::list::list_page($spec, &units, &csrf))
+            let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
+            Ok(templates::list::list_page($spec, &units, &csrf, &all))
         }
 
         pub async fn $rows_fn(
@@ -85,8 +85,8 @@ macro_rules! list_handlers {
             let csrf = crate::auth::csrf::current(&session)
                 .await
                 .unwrap_or_default();
-            let units = core::load_units_for_kinds(&state, $kinds).await?;
-            Ok(templates::list::list_rows($spec, &units, &csrf))
+            let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
+            Ok(templates::list::list_rows($spec, &units, &csrf, &all))
         }
     };
 }

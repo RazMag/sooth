@@ -272,7 +272,7 @@
 
   .stat-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.75rem;
   }
   .stat-card {
@@ -315,6 +315,51 @@
   .data-table tbody tr:hover td { background: var(--color-raised); }
   .data-table .row-collision td { background: var(--color-danger-soft); }
   .cell-secondary { color: var(--color-muted); font-size: 0.82rem; margin-top: 0.1rem; }
+
+  /* Published-port summary (Services list column + detail Overview): the
+     host port renders as a compact pill that `frontend/ports.js` turns into
+     a link to the same host on that port, with the container-port half
+     muted beside it. */
+  .port-list { display: inline-flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; }
+  .port-map { display: inline-flex; align-items: baseline; white-space: nowrap; }
+  .port-dest { color: var(--color-muted); font-family: var(--font-mono); font-size: 0.82em; }
+  .mono { font-family: var(--font-mono); font-size: 0.85em; }
+
+  .port-link,
+  .port-static {
+    display: inline-flex;
+    align-items: baseline;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid transparent;
+    border-radius: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.82em;
+    font-weight: 600;
+    line-height: 1.5;
+    text-decoration: none;
+  }
+  .port-link {
+    border-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+  }
+  .port-link:hover {
+    background: color-mix(in srgb, var(--color-accent) 15%, var(--color-surface));
+    border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+    text-decoration: none;
+  }
+  /* Owning service isn't running -- same pill, greyed and inert. */
+  .port-static {
+    border-color: var(--color-line);
+    background: var(--color-raised);
+    color: var(--color-faint);
+    cursor: default;
+  }
+
+  /* Ports page "Host Port" cell: same pill, no destination suffix. */
+  .data-table td .port-link,
+  .data-table td .port-static { font-size: 0.8rem; }
 
   .kv-table {
     width: 100%;

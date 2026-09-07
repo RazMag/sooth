@@ -5,13 +5,13 @@
 
 use maud::{Markup, html};
 
-use super::list::{Column, ListSpec, kind_cell};
+use super::list::{Column, ListSpec, RowCtx, kind_cell};
 use super::{Icon, NavItem, icon, ports_summary, shell};
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 
-fn ports_cell(unit: &QuadletUnit, _status: &UnitStatus) -> Markup {
-    ports_summary(unit)
+fn ports_cell(ctx: &RowCtx) -> Markup {
+    ports_summary(ctx.unit, ctx.status.is_active())
 }
 
 pub const COLUMNS: &[Column] = &[
@@ -62,7 +62,12 @@ pub fn counts_fragment(stats: &Stats) -> Markup {
     stats_bar(stats)
 }
 
-pub fn services_page(units: &[(QuadletUnit, UnitStatus)], stats: &Stats, csrf: &str) -> Markup {
+pub fn services_page(
+    units: &[(QuadletUnit, UnitStatus)],
+    stats: &Stats,
+    csrf: &str,
+    all_units: &[QuadletUnit],
+) -> Markup {
     let body = html! {
         (super::page_header("Services", html! {
             a.btn.btn-primary href="/containers/new" { (icon(Icon::Plus)) span { "Container" } }
@@ -72,7 +77,7 @@ pub fn services_page(units: &[(QuadletUnit, UnitStatus)], stats: &Stats, csrf: &
             hx-trigger="sse:units-changed, sse:any-status delay:300ms" hx-swap="innerHTML" {
             (stats_bar(stats))
         }
-        (super::list::list_table(&SPEC, units, csrf, "/services/rows"))
+        (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units))
     };
     shell("Services", Some(NavItem::Services), body)
 }

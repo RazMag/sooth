@@ -38,9 +38,15 @@ pub fn ports_page(rows: &[PortRow]) -> Markup {
                             tr class=[row.collides.then_some("row-collision")] {
                                 td title=(row.mapping.raw) {
                                     @match row.mapping.host_port {
-                                        Some(r) if r.start == r.end => (r.start.to_string()),
-                                        Some(r) => (format!("{}-{}", r.start, r.end)),
-                                        None => span.muted { "dynamic" },
+                                        Some(r) if r.start == r.end => {
+                                            @if row.status.is_active() {
+                                                span data-host-port=(r.start.to_string()) { (r.start) }
+                                            } @else {
+                                                span.port-static title="Service not running" { (r.start) }
+                                            }
+                                        }
+                                        Some(r) => { (format!("{}-{}", r.start, r.end)) }
+                                        None => { span.muted { "dynamic" } }
                                     }
                                     @if row.collides {
                                         div.cell-secondary { "conflicts with another unit" }

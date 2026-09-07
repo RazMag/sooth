@@ -460,21 +460,57 @@ pub fn login_page(error: Option<&str>) -> Markup {
     }
 }
 
-/// A comma-joined summary of a Container/Pod unit's declared `PublishPort=`
-/// entries, e.g. `8080:80, 53:53/udp` -- shared by the Services and Ports
-/// list columns.
-pub fn ports_summary(unit: &QuadletUnit) -> Markup {
+/// A summary of a Container/Pod unit's declared `PublishPort=` entries, e.g.
+/// `8080:80  53:53/udp` -- shared by the Services list column and the
+/// Container/Pod detail Overview. When `active`, a static host port is
+/// wrapped in a `data-host-port` span that `frontend/ports.js` turns into a
+/// link (pill) to the same host on that port; when the unit isn't running
+/// the same port renders as a greyed, unclickable pill instead. The
+/// container-port half stays muted beside it.
+pub fn ports_summary(unit: &QuadletUnit, active: bool) -> Markup {
     let mappings = crate::quadlet::ports::extract(std::slice::from_ref(unit));
     if mappings.is_empty() {
         return html! { span.muted { "—" } };
     }
     html! {
-        @for (i, m) in mappings.iter().enumerate() {
+        span.port-list {
+            @for m in &mappings {
+                span.port-map {
+                    @match m.host_port {
+                        Some(range) if range.start == range.end => {
+                            @if active {
+                                span data-host-port=(range.start.to_string()) { (range.start) }
+                            } @else {
+                                span.port-static title="Service not running" { (range.start) }
+                            }
+                            span.port-dest { ":" (m.container_port) }
+                        }
+                        Some(range) => {
+                            span.mono { (format!("{}-{}", range.start, range.end)) }
+                            span.port-dest { ":" (m.container_port) }
+                        }
+                        None => { span.port-dest { (m.container_port) " (dynamic)" } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A comma-separated list of links to quadlet units named by `file_names`,
+/// resolved against `all_units` for the correct section URL. A muted dash
+/// when the list is empty. Used by the Volumes/Networks "Used by" column and
+/// detail Overview row.
+pub fn unit_links(all_units: &[QuadletUnit], file_names: &[String]) -> Markup {
+    if file_names.is_empty() {
+        return html! { span.muted { "—" } };
+    }
+    html! {
+        @for (i, name) in file_names.iter().enumerate() {
             @if i > 0 { ", " }
-            @match m.host_port {
-                Some(range) if range.start == range.end => (format!("{}:{}", range.start, m.container_port)),
-                Some(range) => (format!("{}-{}:{}", range.start, range.end, m.container_port)),
-                None => (format!("{} (dynamic)", m.container_port)),
+            @match all_units.iter().find(|u| &u.file_name == name) {
+                Some(u) => { a href=(core::unit_url(u)) { (name) } }
+                None => { (name) }
             }
         }
     }

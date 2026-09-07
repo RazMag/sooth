@@ -14,9 +14,19 @@ use crate::web::core;
 /// the `data-filter-target` of the filter box. One value everywhere.
 pub const ROWS_ID: &str = "unit-rows";
 
+/// What a column cell can draw on: the row's own unit and live status, plus
+/// every quadlet on disk (all kinds) for columns that resolve cross-unit
+/// references -- the Volumes/Networks "Used by" column. `all_units` is an
+/// empty slice when the caller didn't supply siblings.
+pub struct RowCtx<'a> {
+    pub unit: &'a QuadletUnit,
+    pub status: &'a UnitStatus,
+    pub all_units: &'a [QuadletUnit],
+}
+
 pub struct Column {
     pub header: &'static str,
-    pub cell: fn(&QuadletUnit, &UnitStatus) -> Markup,
+    pub cell: fn(&RowCtx) -> Markup,
 }
 
 pub struct ListSpec {
@@ -30,12 +40,23 @@ pub struct ListSpec {
 /// A "Kind" column cell, shared by any list that mixes multiple kinds
 /// together (the Services home page's Container+Pod list, and the generic
 /// all-units fallback's every-kind list).
-pub fn kind_cell(unit: &QuadletUnit, _status: &UnitStatus) -> Markup {
-    html! { (unit.kind.primary_section()) }
+pub fn kind_cell(ctx: &RowCtx) -> Markup {
+    html! { (ctx.unit.kind.primary_section()) }
 }
 
-fn row(unit: &QuadletUnit, status: &UnitStatus, columns: &[Column], csrf: &str) -> Markup {
+fn row(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    columns: &[Column],
+    csrf: &str,
+    all_units: &[QuadletUnit],
+) -> Markup {
     let service = unit.service_name();
+    let ctx = RowCtx {
+        unit,
+        status,
+        all_units,
+    };
     html! {
         tr {
             td {
@@ -48,7 +69,7 @@ fn row(unit: &QuadletUnit, status: &UnitStatus, columns: &[Column], csrf: &str) 
                 }
             }
             @for column in columns {
-                td { ((column.cell)(unit, status)) }
+                td { ((column.cell)(&ctx)) }
             }
             td { (status_badge(&service, status)) (autostart_pill(status.is_autostart_enabled())) }
             td { (kebab_menu(unit, status, csrf)) }
@@ -56,13 +77,18 @@ fn row(unit: &QuadletUnit, status: &UnitStatus, columns: &[Column], csrf: &str) 
     }
 }
 
-pub fn list_rows(spec: &ListSpec, units: &[(QuadletUnit, UnitStatus)], csrf: &str) -> Markup {
+pub fn list_rows(
+    spec: &ListSpec,
+    units: &[(QuadletUnit, UnitStatus)],
+    csrf: &str,
+    all_units: &[QuadletUnit],
+) -> Markup {
     html! {
         @if units.is_empty() {
             tr { td colspan=(spec.columns.len() + 3) .empty { (spec.empty_hint) } }
         } @else {
             @for (unit, status) in units {
-                (row(unit, status, spec.columns, csrf))
+                (row(unit, status, spec.columns, csrf, all_units))
             }
         }
     }
@@ -77,6 +103,7 @@ pub fn list_table(
     units: &[(QuadletUnit, UnitStatus)],
     csrf: &str,
     rows_route: &str,
+    all_units: &[QuadletUnit],
 ) -> Markup {
     html! {
         div.toolbar {
@@ -100,19 +127,24 @@ pub fn list_table(
                 // menu) in place -- swapping the whole `<tbody>` here would
                 // slam shut any menu the user has open.
                 tbody id=(ROWS_ID) hx-get=(rows_route) hx-trigger="sse:units-changed" hx-swap="innerHTML" {
-                    (list_rows(spec, units, csrf))
+                    (list_rows(spec, units, csrf, all_units))
                 }
             }
         }
     }
 }
 
-pub fn list_page(spec: &ListSpec, units: &[(QuadletUnit, UnitStatus)], csrf: &str) -> Markup {
+pub fn list_page(
+    spec: &ListSpec,
+    units: &[(QuadletUnit, UnitStatus)],
+    csrf: &str,
+    all_units: &[QuadletUnit],
+) -> Markup {
     let body = html! {
         (page_header(spec.title, html! {
             a.btn.btn-primary href=(spec.new_href) { (super::icon(super::Icon::Plus)) span { "New" } }
         }))
-        (list_table(spec, units, csrf, &rows_route(spec)))
+        (list_table(spec, units, csrf, &rows_route(spec), all_units))
     };
     shell(spec.title, spec.active_nav, body)
 }

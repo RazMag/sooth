@@ -5,6 +5,7 @@ pub mod model;
 pub mod naming;
 pub mod parser;
 pub mod ports;
+pub mod refs;
 pub mod writer;
 
 pub use model::{QuadletUnit, UnitKind};

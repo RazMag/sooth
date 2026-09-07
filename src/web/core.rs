@@ -55,17 +55,28 @@ pub async fn load_units_for_kinds(
     state: &AppState,
     kinds: &[UnitKind],
 ) -> Result<Vec<(QuadletUnit, UnitStatus)>, AppError> {
+    Ok(load_units_and_siblings(state, kinds).await?.0)
+}
+
+/// Like [`load_units_for_kinds`], but also returns *every* quadlet on disk
+/// (all kinds) alongside the filtered+status list -- for list columns that
+/// resolve cross-unit references (the Volumes/Networks "Used by" column).
+/// The full enumeration happens either way, so this adds no I/O.
+pub async fn load_units_and_siblings(
+    state: &AppState,
+    kinds: &[UnitKind],
+) -> Result<(Vec<(QuadletUnit, UnitStatus)>, Vec<QuadletUnit>), AppError> {
     let all = discovery::load_all(&state.quadlet_dir)?;
     let mut out = Vec::new();
-    for unit in all.into_iter().filter(|u| kinds.contains(&u.kind)) {
+    for unit in all.iter().filter(|u| kinds.contains(&u.kind)) {
         let status = if unit.is_template() {
             UnitStatus::not_found()
         } else {
             state.systemd.status(&unit.service_name()).await?
         };
-        out.push((unit, status));
+        out.push((unit.clone(), status));
     }
-    Ok(out)
+    Ok((out, all))
 }
 
 pub struct ActionOutcome {

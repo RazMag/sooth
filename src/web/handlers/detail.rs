@@ -9,7 +9,7 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::PageError;
-use crate::quadlet::{UnitKind, discovery};
+use crate::quadlet::{UnitKind, discovery, refs};
 use crate::web::templates;
 
 pub async fn show(
@@ -37,8 +37,16 @@ pub async fn show(
                 .count();
             templates::pods::detail_page(&unit, &status, &csrf, member_count)
         }
-        UnitKind::Volume => templates::volumes::detail_page(&unit, &status, &csrf),
-        UnitKind::Network => templates::networks::detail_page(&unit, &status, &csrf),
+        UnitKind::Volume => {
+            let all = discovery::load_all(&state.quadlet_dir)?;
+            let used_by = refs::consumers_of(&unit, &all);
+            templates::volumes::detail_page(&unit, &status, &csrf, &all, &used_by)
+        }
+        UnitKind::Network => {
+            let all = discovery::load_all(&state.quadlet_dir)?;
+            let used_by = refs::consumers_of(&unit, &all);
+            templates::networks::detail_page(&unit, &status, &csrf, &all, &used_by)
+        }
         UnitKind::Image | UnitKind::Build => templates::images::detail_page(&unit, &status, &csrf),
         UnitKind::Kube => templates::generic::detail_page(&unit, &status, &csrf),
     })

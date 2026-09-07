@@ -21,7 +21,10 @@ pub fn detail_page(
         unit,
         status,
         csrf,
-        &[("Members", html! { (member_count) })],
+        &[
+            ("Members", html! { (member_count) }),
+            ("Ports", super::ports_summary(unit, status.is_active())),
+        ],
         Some(extra),
     )
 }

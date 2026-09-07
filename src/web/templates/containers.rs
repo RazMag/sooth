@@ -13,7 +13,10 @@ pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Marku
         unit,
         status,
         csrf,
-        &[("Image", html! { code { (image) } })],
+        &[
+            ("Image", html! { code { (image) } }),
+            ("Ports", super::ports_summary(unit, status.is_active())),
+        ],
         None,
     )
 }

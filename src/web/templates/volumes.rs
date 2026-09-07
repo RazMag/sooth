@@ -1,23 +1,49 @@
 use maud::{Markup, html};
 
 use super::detail;
-use super::list::Column;
+use super::list::{Column, RowCtx};
 use crate::quadlet::QuadletUnit;
+use crate::quadlet::refs;
 use crate::systemd::UnitStatus;
 
-fn driver_cell(unit: &QuadletUnit, _status: &UnitStatus) -> Markup {
-    html! { (unit.section("Volume").and_then(|s| s.get("Driver")).unwrap_or("—")) }
+fn driver_cell(ctx: &RowCtx) -> Markup {
+    html! { (ctx.unit.section("Volume").and_then(|s| s.get("Driver")).unwrap_or("—")) }
 }
 
-pub const COLUMNS: &[Column] = &[Column {
-    header: "Driver",
-    cell: driver_cell,
-}];
+fn used_by_cell(ctx: &RowCtx) -> Markup {
+    super::unit_links(ctx.all_units, &refs::consumers_of(ctx.unit, ctx.all_units))
+}
 
-pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup {
+pub const COLUMNS: &[Column] = &[
+    Column {
+        header: "Driver",
+        cell: driver_cell,
+    },
+    Column {
+        header: "Used by",
+        cell: used_by_cell,
+    },
+];
+
+pub fn detail_page(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    csrf: &str,
+    all_units: &[QuadletUnit],
+    used_by: &[String],
+) -> Markup {
     let driver = unit
         .section("Volume")
         .and_then(|s| s.get("Driver"))
         .unwrap_or("—");
-    detail::detail_page(unit, status, csrf, &[("Driver", html! { (driver) })], None)
+    detail::detail_page(
+        unit,
+        status,
+        csrf,
+        &[
+            ("Driver", html! { (driver) }),
+            ("Used by", super::unit_links(all_units, used_by)),
+        ],
+        None,
+    )
 }

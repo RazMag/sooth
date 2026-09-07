@@ -1,12 +1,12 @@
 use maud::{Markup, html};
 
 use super::detail;
-use super::list::Column;
+use super::list::{Column, RowCtx};
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 
-fn type_cell(unit: &QuadletUnit, _status: &UnitStatus) -> Markup {
-    html! { (unit.kind.primary_section()) }
+fn type_cell(ctx: &RowCtx) -> Markup {
+    html! { (ctx.unit.kind.primary_section()) }
 }
 
 fn image_source(unit: &QuadletUnit) -> &str {
@@ -23,8 +23,8 @@ fn image_source(unit: &QuadletUnit) -> &str {
     }
 }
 
-fn source_cell(unit: &QuadletUnit, _status: &UnitStatus) -> Markup {
-    html! { (image_source(unit)) }
+fn source_cell(ctx: &RowCtx) -> Markup {
+    html! { (image_source(ctx.unit)) }
 }
 
 pub const COLUMNS: &[Column] = &[
