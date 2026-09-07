@@ -113,4 +113,10 @@ pub struct AppState {
     /// connections would make that wait forever. Those handlers race their
     /// stream against this flag and end it once shutdown is signaled.
     pub shutdown: tokio::sync::watch::Receiver<bool>,
+    /// Notified by the Settings page's "Restart" button. `main` treats it
+    /// like a shutdown signal, then re-execs the binary instead of exiting
+    /// -- the deployment-agnostic way to reload config that a systemd
+    /// `restart` (needs a unit) or a plain exit (needs `Restart=`) don't
+    /// cover.
+    pub restart: Arc<tokio::sync::Notify>,
 }

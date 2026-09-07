@@ -104,6 +104,8 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/environment/delete", post(environment::remove))
         .route("/settings", get(settings::page).post(settings::save))
+        .route("/settings/password", post(settings::change_password))
+        .route("/settings/restart", post(settings::restart))
         .route("/validate", post(validate::check))
         .route("/events", get(super::sse::events_stream))
         .route("/logout", post(auth::session::logout));

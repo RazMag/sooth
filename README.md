@@ -103,9 +103,15 @@ secrets in an `EnvironmentFile=`.
 | `SOOTH_LOG_FILTER` | `sooth=info,tower_http=info,zbus=warn` | A `tracing-subscriber` `EnvFilter` string; `RUST_LOG` also works. |
 | `SOOTH_SESSION_IDLE_TIMEOUT_SECS` | `43200` (12h) | Session idle expiry. |
 
-Everything except the password hash is also editable from the in-app
-Settings page, which writes back to the resolved TOML file; changes there
-take effect on the next restart.
+All of these are also editable from the in-app Settings page, which writes
+back to the resolved TOML file; changes there take effect on the next
+restart. The Settings page can also set a new login password (it verifies
+the current one, then writes the new hash to the same file). A field pinned
+by a `SOOTH_*` variable is shown read-only there, since the environment
+layer would override the saved value on the next start anyway. A **Restart**
+button on the same page winds the server down and re-execs the binary in
+place (same argv and environment) so those saved changes take effect without
+shell access — it doesn't rely on a systemd `Restart=` or a known unit name.
 
 ### Run as a systemd user service
 

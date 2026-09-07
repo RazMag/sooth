@@ -16,8 +16,9 @@ mod systemd;
 mod web;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use tokio::sync::broadcast;
+use tokio::sync::{Notify, broadcast};
 use tracing::{error, info};
 
 use config::{AppState, Config};
@@ -101,6 +102,7 @@ async fn run() -> anyhow::Result<()> {
     };
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let restart = Arc::new(Notify::new());
 
     let state = AppState {
         config: Arc::new(config.clone()),
@@ -109,14 +111,23 @@ async fn run() -> anyhow::Result<()> {
         config_path: Arc::new(config_path),
         events: events_tx,
         shutdown: shutdown_rx,
+        restart: restart.clone(),
     };
 
     let app = web::build_router(state);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     info!(addr = %config.bind_addr, "sooth listening");
 
+    // Set by `shutdown_signal` when the wind-down was triggered by the
+    // Settings "Restart" button rather than a real signal.
+    let restart_requested = Arc::new(AtomicBool::new(false));
+
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(shutdown_tx))
+        .with_graceful_shutdown(shutdown_signal(
+            shutdown_tx,
+            restart,
+            restart_requested.clone(),
+        ))
         .await?;
 
     // Both of these loop forever on their own (there's nothing that closes
@@ -126,16 +137,53 @@ async fn run() -> anyhow::Result<()> {
     // logged that it shut down.
     watch_task.abort();
     fs_watch_task.abort();
+
+    if restart_requested.load(Ordering::SeqCst) {
+        // The listener is dropped by now, so the port is free for the fresh
+        // process to rebind. `exec` only returns on failure.
+        return reexec();
+    }
+
     info!("shut down cleanly");
     Ok(())
 }
 
-/// Waits for Ctrl-C or SIGTERM, then flips `shutdown_tx` before returning.
-/// `with_graceful_shutdown` uses this future's completion to start winding
-/// down (stop accepting new connections, wait for in-flight ones); the flag
-/// flip is what lets our own SSE handlers notice and end their otherwise-
-/// infinite streams so that wait actually finishes. See `AppState::shutdown`.
-async fn shutdown_signal(shutdown_tx: tokio::sync::watch::Sender<bool>) {
+/// Replace the current process with a fresh `sooth`, inheriting argv and the
+/// environment. This is how the in-app "Restart" button reloads config: it
+/// works the same whether sooth runs under systemd, the dev script, or a
+/// bare shell, none of which a `systemctl restart` or a plain exit would.
+#[cfg(unix)]
+fn reexec() -> anyhow::Result<()> {
+    use std::os::unix::process::CommandExt;
+
+    let exe = std::env::current_exe()?;
+    info!(exe = %exe.display(), "restarting: re-executing");
+    let err = std::process::Command::new(&exe)
+        .args(std::env::args_os().skip(1))
+        .exec();
+    Err(anyhow::anyhow!(
+        "failed to re-exec {}: {err}",
+        exe.display()
+    ))
+}
+
+#[cfg(not(unix))]
+fn reexec() -> anyhow::Result<()> {
+    anyhow::bail!("in-app restart is only supported on Unix")
+}
+
+/// Waits for Ctrl-C, SIGTERM, or the Settings page's "Restart" button, then
+/// flips `shutdown_tx` before returning. `with_graceful_shutdown` uses this
+/// future's completion to start winding down (stop accepting new
+/// connections, wait for in-flight ones); the flag flip is what lets our own
+/// SSE handlers notice and end their otherwise-infinite streams so that wait
+/// actually finishes. See `AppState::shutdown`. A restart sets
+/// `restart_requested` so `main` re-execs instead of exiting.
+async fn shutdown_signal(
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+    restart: Arc<Notify>,
+    restart_requested: Arc<AtomicBool>,
+) {
     let ctrl_c = async {
         // SIGINT (Ctrl-C from a terminal, or `systemctl --user stop`'s
         // initial signal) is always available; SIGTERM matters for the
@@ -158,9 +206,12 @@ async fn shutdown_signal(shutdown_tx: tokio::sync::watch::Sender<bool>) {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
+        _ = ctrl_c => info!("shutdown signal received"),
+        _ = terminate => info!("shutdown signal received"),
+        _ = restart.notified() => {
+            info!("restart requested from the Settings page");
+            restart_requested.store(true, Ordering::SeqCst);
+        }
     }
-    info!("shutdown signal received");
     let _ = shutdown_tx.send(true);
 }
