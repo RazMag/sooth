@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use tokio::sync::broadcast;
 use tracing::{info, warn};
 
-use super::model::QuadletUnit;
+use super::model::{QuadletUnit, UnitKind};
 use super::{QuadletError, naming, parser};
 
 const EXTENSIONS: &[&str] = &[
@@ -28,21 +28,26 @@ pub fn default_quadlet_dir() -> Result<PathBuf, QuadletError> {
 }
 
 /// Whether `dir` holds a quadlet file whose generated systemd unit is
-/// `service` (`foo.service` <- `foo.{container,pod,...}`), also matching a
-/// template instance against its template file (`foo@bar.service` <-
-/// `foo@.container`). A cheap existence check with no parsing, for the
-/// status-watch hot path -- it fires for *every* user unit on the bus, most
-/// of which sooth doesn't manage.
+/// `service`, reversing the naming in `UnitKind::service_infix`
+/// (`foo-volume.service` <- `foo.volume`, `bar.service` <- `bar.container`),
+/// also matching a template instance against its template file
+/// (`foo@bar.service` <- `foo@.container`). A cheap existence check with no
+/// parsing, for the status-watch hot path -- it fires for *every* user unit
+/// on the bus, most of which sooth doesn't manage.
 pub fn has_quadlet_for_service(dir: &Path, service: &str) -> bool {
     let stem = service.strip_suffix(".service").unwrap_or(service);
-    let mut bases = vec![stem.to_string()];
-    if let Some((prefix, _)) = stem.split_once('@') {
-        bases.push(format!("{prefix}@"));
-    }
-    bases.iter().any(|base| {
-        EXTENSIONS
-            .iter()
-            .any(|ext| dir.join(format!("{base}.{ext}")).exists())
+    UnitKind::all().iter().any(|&kind| {
+        // Recover the file stem by peeling off this kind's service infix
+        // (empty for container/kube, so those always reach the check).
+        let Some(base) = stem.strip_suffix(kind.service_infix()) else {
+            return false;
+        };
+        let ext = kind.extension();
+        let mut names = vec![format!("{base}.{ext}")];
+        if let Some((prefix, _)) = base.split_once('@') {
+            names.push(format!("{prefix}@.{ext}"));
+        }
+        names.iter().any(|n| dir.join(n).exists())
     })
 }
 
@@ -167,7 +172,9 @@ mod tests {
         std::fs::write(dir.path().join("tmpl@.container"), "[Container]\n").unwrap();
 
         assert!(has_quadlet_for_service(dir.path(), "web.service"));
-        assert!(has_quadlet_for_service(dir.path(), "data.service"));
+        // a .volume generates <name>-volume.service, not <name>.service
+        assert!(has_quadlet_for_service(dir.path(), "data-volume.service"));
+        assert!(!has_quadlet_for_service(dir.path(), "data.service"));
         // template instance resolves against the template file
         assert!(has_quadlet_for_service(dir.path(), "tmpl@1.service"));
         // desktop noise -- nothing sooth manages

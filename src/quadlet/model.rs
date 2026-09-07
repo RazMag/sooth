@@ -38,6 +38,21 @@ impl UnitKind {
         }
     }
 
+    /// The infix podman inserts before `.service` in the unit it generates for
+    /// this kind, per podman-systemd.unit(5): `foo.volume` -> `foo-volume.service`,
+    /// and likewise `-network`, `-pod`, `-image`, `-build`. `.container` and
+    /// `.kube` files generate a plain `foo.service`, so their infix is empty.
+    pub fn service_infix(self) -> &'static str {
+        match self {
+            Self::Container | Self::Kube => "",
+            Self::Volume => "-volume",
+            Self::Network => "-network",
+            Self::Pod => "-pod",
+            Self::Image => "-image",
+            Self::Build => "-build",
+        }
+    }
+
     /// The `[Section]` header quadlet requires as the file's primary section.
     pub fn primary_section(self) -> &'static str {
         match self {

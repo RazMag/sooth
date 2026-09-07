@@ -2,13 +2,16 @@ use super::QuadletError;
 use super::model::UnitKind;
 
 /// Maps a quadlet file name to the systemd service unit name it generates,
-/// per podman-systemd.unit(5): the quadlet extension is stripped and
-/// `.service` is appended. Template files (`foo@.container`) and instances
-/// (`foo@bar.container`) follow the same rule applied to the stem, e.g.
-/// `foo@.container` -> `foo@.service`, `foo@bar.container` -> `foo@bar.service`.
+/// per podman-systemd.unit(5): the quadlet extension is stripped and, for
+/// `.volume`/`.network`/`.pod`/`.image`/`.build`, a matching infix
+/// (`-volume`, ...) is inserted before `.service`; `.container` and `.kube`
+/// generate a plain `<stem>.service`. Template files (`foo@.container`) and
+/// instances (`foo@bar.container`) follow the same rule applied to the stem.
+/// A file with no recognized quadlet extension falls back to `<stem>.service`.
 pub fn service_name(file_name: &str) -> String {
     let stem = stem(file_name);
-    format!("{stem}.service")
+    let infix = kind_of(file_name).map(UnitKind::service_infix).unwrap_or("");
+    format!("{stem}{infix}.service")
 }
 
 pub fn stem(file_name: &str) -> &str {
@@ -70,12 +73,12 @@ mod tests {
     #[test]
     fn plain_units() {
         assert_eq!(service_name("myapp.container"), "myapp.service");
-        assert_eq!(service_name("data.volume"), "data.service");
-        assert_eq!(service_name("mynet.network"), "mynet.service");
-        assert_eq!(service_name("mypod.pod"), "mypod.service");
+        assert_eq!(service_name("data.volume"), "data-volume.service");
+        assert_eq!(service_name("mynet.network"), "mynet-network.service");
+        assert_eq!(service_name("mypod.pod"), "mypod-pod.service");
         assert_eq!(service_name("app.kube"), "app.service");
-        assert_eq!(service_name("img.build"), "img.service");
-        assert_eq!(service_name("img.image"), "img.service");
+        assert_eq!(service_name("img.build"), "img-build.service");
+        assert_eq!(service_name("img.image"), "img-image.service");
     }
 
     #[test]
