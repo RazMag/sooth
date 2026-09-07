@@ -118,6 +118,22 @@ fn section_groups<'a>(
     groups
 }
 
+/// How many units live in `group` *or any of its descendant groups*. This is
+/// the number a section header shows: collapsing a group hides its subgroups
+/// and their rows too, so the count has to speak for everything underneath,
+/// not just the units filed directly in that directory.
+fn nested_unit_count(units: &[(QuadletUnit, UnitStatus)], group: &str) -> usize {
+    units
+        .iter()
+        .filter(|(u, _)| {
+            u.group == group
+                || u.group
+                    .strip_prefix(group)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        })
+        .count()
+}
+
 /// A collapsible section header row for one group directory. It is both a drop
 /// target for "move a unit into this group" and, via its own grip handle, a
 /// draggable to re-parent the whole group (see `frontend/dragdrop.js`); the ⋯
@@ -181,8 +197,9 @@ pub fn list_rows(
         @for grp in groups {
             @let members: Vec<&(QuadletUnit, UnitStatus)> =
                 units.iter().filter(|(u, _)| u.group == grp).collect();
-            (group_header_row(grp, members.len(), colspan, csrf))
-            @if members.is_empty() {
+            @let nested = nested_unit_count(units, grp);
+            (group_header_row(grp, nested, colspan, csrf))
+            @if members.is_empty() && nested == 0 {
                 @let d = grp.matches('/').count() + 1;
                 tr.group-empty.is-collapsed data-group-member=(grp) data-depth=(d) {
                     td colspan=(colspan) {
@@ -300,4 +317,42 @@ fn rows_route(spec: &ListSpec) -> String {
         .map(|(prefix, _)| prefix)
         .unwrap_or(spec.new_href);
     format!("{section}/rows")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::quadlet::UnitKind;
+    use crate::systemd::UnitStatus;
+
+    fn in_group(group: &str) -> (QuadletUnit, UnitStatus) {
+        let unit = QuadletUnit {
+            file_name: "x.container".into(),
+            group: group.into(),
+            path: "/tmp/x.container".into(),
+            kind: UnitKind::Container,
+            sections: Vec::new(),
+            raw: String::new(),
+        };
+        (unit, UnitStatus::not_found())
+    }
+
+    #[test]
+    fn nested_unit_count_includes_descendant_groups() {
+        let units = [
+            in_group(""),
+            in_group("media"),
+            in_group("media/arr"),
+            in_group("media/arr/hd"),
+            in_group("media-extra"),
+        ];
+
+        // Direct member + everything under `media/`, but not the sibling
+        // `media-extra` (prefix match without a `/` boundary) or root units.
+        assert_eq!(nested_unit_count(&units, "media"), 3);
+        assert_eq!(nested_unit_count(&units, "media/arr"), 2);
+        assert_eq!(nested_unit_count(&units, "media/arr/hd"), 1);
+        assert_eq!(nested_unit_count(&units, "media-extra"), 1);
+        assert_eq!(nested_unit_count(&units, "empty"), 0);
+    }
 }
