@@ -51,6 +51,10 @@ fn mount_unit_routes(router: Router<AppState>, prefix: &str) -> Router<AppState>
             post(unit_ops::disable),
         )
         .route(
+            &format!("{prefix}/{{file_name}}/autoupdate"),
+            post(unit_ops::autoupdate),
+        )
+        .route(
             &format!("{prefix}/{{file_name}}/edit"),
             get(edit_delete::edit_form).post(edit_delete::edit_submit),
         )

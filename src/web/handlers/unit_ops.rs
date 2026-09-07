@@ -15,6 +15,7 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::FragmentError;
+use crate::quadlet::autoupdate::AutoUpdateMode;
 use crate::quadlet::discovery;
 use crate::web::{core, templates};
 
@@ -47,6 +48,33 @@ action_handler!(stop, "stop");
 action_handler!(restart, "restart");
 action_handler!(enable, "enable");
 action_handler!(disable, "disable");
+
+#[derive(Deserialize)]
+pub struct AutoUpdateForm {
+    csrf_token: String,
+    /// `"off"` (or anything unrecognised) clears the policy; `"registry"` /
+    /// `"local"` set it.
+    mode: String,
+}
+
+/// Sets the container's `[Container]` `AutoUpdate=` policy and returns the
+/// freshly rendered control, which the `<select>` swaps in place -- the same
+/// shape as `actions` returning `action_row`. Container-only; `core` rejects
+/// other kinds.
+pub async fn autoupdate(
+    State(state): State<AppState>,
+    session: Session,
+    Path(file_name): Path<String>,
+    Form(form): Form<AutoUpdateForm>,
+) -> Result<maud::Markup, FragmentError> {
+    let mode = AutoUpdateMode::parse(&form.mode);
+    let unit = core::set_container_autoupdate(&state, &session, &form.csrf_token, &file_name, mode)
+        .await?;
+    let csrf = crate::auth::csrf::current(&session)
+        .await
+        .unwrap_or_default();
+    Ok(templates::autoupdate_control(&unit, &csrf))
+}
 
 /// A unit's verbatim `[Section]` config cards, re-rendered from disk. The
 /// detail page wraps its Configuration column in an element that `hx-get`s

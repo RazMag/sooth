@@ -29,6 +29,9 @@ pub enum Icon {
     Images,
     Ports,
     Environment,
+    Folder,
+    ChevronDown,
+    Grip,
 }
 
 pub fn icon(which: Icon) -> Markup {
@@ -83,6 +86,13 @@ pub fn icon(which: Icon) -> Markup {
         }
         Icon::Environment => {
             r#"<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>"#
+        }
+        Icon::Folder => {
+            r#"<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>"#
+        }
+        Icon::ChevronDown => r#"<path d="m6 9 6 6 6-6"/>"#,
+        Icon::Grip => {
+            r#"<circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/>"#
         }
     };
     PreEscaped(format!(

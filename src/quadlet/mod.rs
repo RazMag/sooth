@@ -1,3 +1,4 @@
+pub mod autoupdate;
 pub mod discovery;
 pub mod envfile;
 pub mod install;

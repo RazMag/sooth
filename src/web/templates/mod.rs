@@ -22,6 +22,7 @@ use maud::{DOCTYPE, Markup, html};
 use uuid::Uuid;
 
 use crate::hostenv::EnvVar;
+use crate::quadlet::autoupdate::AutoUpdateMode;
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -298,6 +299,55 @@ pub fn autostart_pill(enabled: bool) -> Markup {
     }
 }
 
+/// Reads a container's current `[Container]` `AutoUpdate=` policy from the
+/// parsed model (`None` == off / absent / unrecognised).
+fn autoupdate_mode(unit: &QuadletUnit) -> Option<AutoUpdateMode> {
+    unit.section("Container")
+        .and_then(|s| s.get("AutoUpdate"))
+        .and_then(AutoUpdateMode::parse)
+}
+
+/// The container detail-page auto-update control: a `<select>` (Off / Registry
+/// / Local) that posts its new value over htmx and swaps itself with the
+/// re-rendered control (the same shape as `actions` returning `action_row`).
+/// Shown only for Container units -- `core::set_container_autoupdate` rejects
+/// other kinds.
+pub fn autoupdate_control(unit: &QuadletUnit, csrf: &str) -> Markup {
+    let base = core::unit_url(unit);
+    let current = autoupdate_mode(unit);
+    html! {
+        form.inline-form.autoupdate-control.is-on[current.is_some()] hx-post={(base) "/autoupdate"}
+            hx-trigger="change" hx-target="this" hx-swap="outerHTML" {
+            (csrf_input(csrf))
+            span.autoupdate-label {
+                (icon(Icon::Restart))
+                span { "Auto-update" }
+            }
+            span.autoupdate-select {
+                select name="mode" aria-label="Auto-update policy" {
+                    option value="off" selected[current.is_none()] { "Off" }
+                    option value="registry" selected[current == Some(AutoUpdateMode::Registry)] { "Registry" }
+                    option value="local" selected[current == Some(AutoUpdateMode::Local)] { "Local" }
+                }
+                (icon(Icon::ChevronDown))
+            }
+        }
+    }
+}
+
+/// A read-only chip for list rows showing a container's `AutoUpdate=` policy
+/// when one is set -- nothing for "off" or for a non-container unit (which has
+/// no `[Container]` section).
+pub fn autoupdate_pill(unit: &QuadletUnit) -> Markup {
+    html! {
+        @if let Some(m) = autoupdate_mode(unit) {
+            span.chip title="Auto-updates when podman-auto-update runs" {
+                "Auto-update: " (m.as_str())
+            }
+        }
+    }
+}
+
 /// One systemd action, as a small htmx form that swaps the freshly rendered
 /// status badge in place. `btn_class` is empty inside the kebab menu (styled
 /// by `.menu-panel button`) and a `.btn` combo on detail pages.
@@ -423,6 +473,9 @@ pub fn action_row(unit: &QuadletUnit, status: &UnitStatus, csrf: &str) -> Markup
                 true,
             ))
             (autostart_pill(status.is_autostart_enabled()))
+            @if unit.kind == UnitKind::Container {
+                (autoupdate_control(unit, csrf))
+            }
         }
     }
 }

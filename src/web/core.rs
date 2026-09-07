@@ -11,6 +11,7 @@ use crate::auth;
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
+use crate::quadlet::autoupdate::{self, AutoUpdateMode};
 use crate::quadlet::{QuadletUnit, UnitKind, discovery, install, writer};
 use crate::systemd::UnitStatus;
 
@@ -153,6 +154,42 @@ async fn set_autostart(
     state.systemd.reload().await?;
     tracing::info!(file = %unit.file_name, enabled, "autostart toggled via [Install]");
     Ok(())
+}
+
+/// Sets (or clears, with `mode == None`) the `[Container]` `AutoUpdate=` policy
+/// on a container quadlet: patch the raw file text, write it atomically (same
+/// validation as any edit), and reload so the generator re-labels the service.
+/// A no-op when the file is already in the requested state. Rejects non-Container
+/// kinds -- `AutoUpdate=` is a `[Container]` key.
+pub async fn set_container_autoupdate(
+    state: &AppState,
+    session: &Session,
+    csrf_token: &str,
+    file_name: &str,
+    mode: Option<AutoUpdateMode>,
+) -> Result<QuadletUnit, AppError> {
+    if !auth::csrf::verify(session, csrf_token).await {
+        return Err(AppError::Csrf);
+    }
+    let unit = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?;
+    if unit.kind != UnitKind::Container {
+        return Err(crate::quadlet::QuadletError::Validation(
+            "auto-update is a container-only setting".into(),
+        )
+        .into());
+    }
+    let patched = autoupdate::set_autoupdate(&unit.raw, mode);
+    if patched == unit.raw {
+        return Ok(unit);
+    }
+    writer::write_atomic(&state.quadlet_dir, &unit.rel_path(), &patched)?;
+    state.systemd.reload().await?;
+    let _ = state.events.send(DashboardEvent::UnitsChanged);
+    tracing::info!(file = %unit.file_name, ?mode, "auto-update policy set");
+    Ok(discovery::load_by_name(
+        state.quadlet_dir.as_path(),
+        file_name,
+    )?)
 }
 
 /// Verifies CSRF, atomically writes a brand-new quadlet file (rejecting if
