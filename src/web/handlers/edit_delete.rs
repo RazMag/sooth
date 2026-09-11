@@ -55,7 +55,14 @@ async fn render_edit(
     };
     Ok((
         status,
-        templates::generic::edit_unit_page(&unit, &csrf, &env_body, &host_vars, error),
+        templates::generic::edit_unit_page(
+            &unit,
+            &csrf,
+            &env_body,
+            &host_vars,
+            error,
+            state.health,
+        ),
     )
         .into_response())
 }

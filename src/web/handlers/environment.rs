@@ -17,6 +17,7 @@ use crate::config::AppState;
 use crate::error::{AppError, PageError};
 use crate::hostenv;
 use crate::web::templates;
+use crate::web::templates::environment::EnvironmentPage;
 
 #[derive(Deserialize)]
 pub struct FlashQuery {
@@ -167,14 +168,15 @@ async fn render(
         .map(|p| p.display().to_string())
         .unwrap_or_default();
 
-    templates::environment::page(
-        &csrf,
-        &configured,
-        &live,
-        &managed_file,
+    templates::environment::page(EnvironmentPage {
+        csrf: &csrf,
+        configured: &configured,
+        live: &live,
+        managed_file: &managed_file,
         prefill,
         notice,
         error,
-    )
+        health: state.health,
+    })
     .into_response()
 }

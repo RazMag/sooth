@@ -49,7 +49,8 @@ async fn with_rows<T>(
 }
 
 pub async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, PageError> {
-    Ok(with_rows(&state, templates::ports::ports_page).await?)
+    let health = state.health;
+    Ok(with_rows(&state, |rows| templates::ports::ports_page(rows, health)).await?)
 }
 
 /// The `<tbody>` rows only -- re-fetched by the Ports table on

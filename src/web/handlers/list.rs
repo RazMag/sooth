@@ -77,7 +77,12 @@ macro_rules! list_handlers {
             let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
             let groups = discovery::list_groups(&state.quadlet_dir);
             Ok(templates::list::list_page(
-                $spec, &units, &csrf, &all, &groups,
+                $spec,
+                &units,
+                &csrf,
+                &all,
+                &groups,
+                state.health,
             ))
         }
 

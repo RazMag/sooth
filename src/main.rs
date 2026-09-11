@@ -8,6 +8,7 @@ mod auth;
 mod config;
 mod error;
 mod events;
+mod health;
 mod hostenv;
 mod journal;
 mod logging;
@@ -64,6 +65,20 @@ async fn run() -> anyhow::Result<()> {
     info!("connecting to the systemd user session bus");
     let systemd_client = systemd::Client::connect().await?;
 
+    let health = health::Health::check();
+    if !health.podman_generator_found {
+        tracing::warn!(
+            "podman's quadlet generator was not found on this host; \
+             create/edit will skip dry-run validation against it"
+        );
+    }
+    if health.linger_enabled == Some(false) {
+        tracing::warn!(
+            "linger is not enabled for this user; sooth and the units it manages \
+             will stop on logout unless `loginctl enable-linger` is run"
+        );
+    }
+
     let (events_tx, _rx) = broadcast::channel(256);
 
     // Live status updates: forward systemd PropertiesChanged signals onto
@@ -108,6 +123,7 @@ async fn run() -> anyhow::Result<()> {
         config: Arc::new(config.clone()),
         quadlet_dir: Arc::new(quadlet_dir),
         systemd: Arc::new(systemd_client),
+        health,
         config_path: Arc::new(config_path),
         events: events_tx,
         shutdown: shutdown_rx,

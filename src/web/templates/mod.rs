@@ -21,6 +21,7 @@ use axum::http::StatusCode;
 use maud::{DOCTYPE, Markup, html};
 use uuid::Uuid;
 
+use crate::health::Health;
 use crate::hostenv::EnvVar;
 use crate::quadlet::autoupdate::AutoUpdateMode;
 use crate::quadlet::{QuadletUnit, UnitKind};
@@ -143,7 +144,11 @@ fn head_tag(title: &str) -> Markup {
 /// The page shell: doctype, head, sidebar, and the page's own content.
 /// `active` highlights the current sidebar link; pages outside the sidebar
 /// pass `None`.
-pub fn shell(title: &str, active: Option<NavItem>, body: Markup) -> Markup {
+/// `health` is `None` only for pages rendered outside `AppState` (currently
+/// just `error_page`) -- everywhere else it's `Some(state.health)`, so the
+/// banners below reflect the real, once-at-startup snapshot rather than a
+/// guess.
+pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -164,9 +169,16 @@ pub fn shell(title: &str, active: Option<NavItem>, body: Markup) -> Markup {
                             }
                         }
                         div.sidebar-footer {
-                            a.btn-icon href="/settings"
+                            a class={
+                                "btn-icon"
+                                (if health.is_some_and(|h| h.has_warning()) { " has-warning" } else { "" })
+                            } href="/settings"
                                 aria-current=[(active == Some(NavItem::Settings)).then_some("page")]
-                                title="Settings" { (icon(Icon::Settings)) }
+                                title=(if health.is_some_and(|h| h.has_warning()) {
+                                    "Settings — a host dependency needs attention"
+                                } else {
+                                    "Settings"
+                                }) { (icon(Icon::Settings)) }
                             button.btn-icon.theme-toggle type="button" data-theme-toggle
                                 title="Toggle light/dark theme" aria-label="Toggle light/dark theme" {
                                 span.i-sun { (icon(Icon::Sun)) }
@@ -185,7 +197,10 @@ pub fn shell(title: &str, active: Option<NavItem>, body: Markup) -> Markup {
                             }
                             a.brand href="/" { "sooth" }
                         }
-                        div.content-inner { (body) }
+                        div.content-inner {
+                            @if let Some(h) = health { (health_banners(h)) }
+                            (body)
+                        }
                     }
                 }
             }
@@ -226,6 +241,7 @@ pub enum BannerKind {
     Error,
     Success,
     Info,
+    Warn,
 }
 
 pub fn banner(kind: BannerKind, message: &str) -> Markup {
@@ -233,8 +249,34 @@ pub fn banner(kind: BannerKind, message: &str) -> Markup {
         BannerKind::Error => "banner banner-error",
         BannerKind::Success => "banner banner-success",
         BannerKind::Info => "banner banner-info",
+        BannerKind::Warn => "banner banner-warn",
     };
     html! { div class=(class) { (message) } }
+}
+
+/// Warning banners for the two host dependencies `Health` checks -- rendered
+/// at the top of every page's content area (see `shell`) so they're seen
+/// without a dedicated visit to Settings. Silent (no markup) when a check
+/// passed or couldn't be determined; see `Health` and `settings::health_card`
+/// for the fuller Settings-page write-up of the same checks.
+fn health_banners(health: Health) -> Markup {
+    html! {
+        @if !health.podman_generator_found {
+            (banner(
+                BannerKind::Warn,
+                "Podman's quadlet generator wasn't found on this host, so new and edited units \
+                 skip dry-run validation against it — structural checks still run. See Settings \
+                 for details.",
+            ))
+        }
+        @if health.linger_enabled == Some(false) {
+            (banner(
+                BannerKind::Warn,
+                "Linger isn't enabled for this user, so sooth and everything it manages will \
+                 stop when you log out. Run `loginctl enable-linger $USER` to keep them running.",
+            ))
+        }
+    }
 }
 
 /// A systemd service name like `myapp.service` is not a valid bare CSS
@@ -729,7 +771,7 @@ pub fn error_page(status: StatusCode, message: &str, id: Uuid) -> Markup {
         p.muted { (message) }
         p.muted { "Error ID: " code { (id.to_string()) } }
     };
-    shell("Error", None, body)
+    shell("Error", None, None, body)
 }
 
 /// A unit's parsed `[Section]` blocks, one card each, rendered verbatim as
@@ -904,6 +946,7 @@ mod tests {
             &[("Image", html! { code { "docker.io/library/nginx" } })],
             None,
             &[],
+            Health::default(),
         )
         .into_string();
 

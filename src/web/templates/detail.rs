@@ -10,6 +10,7 @@ use super::{
     BannerKind, NavItem, action_row, back_link, banner, detail_links, group_picker, page_header,
     section_back_target, section_table, shell, status_badge,
 };
+use crate::health::Health;
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -21,6 +22,7 @@ pub fn detail_page(
     facts: &[(&str, Markup)],
     extra: Option<Markup>,
     known_groups: &[String],
+    health: Health,
 ) -> Markup {
     let service = unit.service_name();
     let base = core::unit_url(unit);
@@ -78,5 +80,5 @@ pub fn detail_page(
             }
         }
     };
-    shell(&unit.file_name, active, body)
+    shell(&unit.file_name, active, Some(health), body)
 }

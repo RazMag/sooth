@@ -44,12 +44,21 @@ pub fn validate(rel_path: &str, contents: &str) -> Result<(), QuadletError> {
 /// can't be confidently attributed to this file (by name), we log and move
 /// on rather than rejecting a possibly-valid file on a guess -- the
 /// structural check above remains the authoritative gate either way.
+/// Fixed install paths for podman's quadlet generator, rootless (user) first
+/// since that's sooth's whole scope. Shared with `crate::health`, which
+/// surfaces the same absence as a UI warning instead of a silent skip.
+const GENERATOR_CANDIDATES: &[&str] = &[
+    "/usr/lib/systemd/user-generators/podman-user-generator",
+    "/usr/lib/systemd/system-generators/podman-system-generator",
+];
+
+/// Whether the real podman quadlet generator is present on this host.
+pub fn generator_present() -> bool {
+    GENERATOR_CANDIDATES.iter().any(|p| Path::new(p).is_file())
+}
+
 fn check_against_generator(file_name: &str) -> Result<(), QuadletError> {
-    const CANDIDATES: &[&str] = &[
-        "/usr/lib/systemd/user-generators/podman-user-generator",
-        "/usr/lib/systemd/system-generators/podman-system-generator",
-    ];
-    let Some(bin) = CANDIDATES.iter().find(|p| Path::new(p).is_file()) else {
+    let Some(bin) = GENERATOR_CANDIDATES.iter().find(|p| Path::new(p).is_file()) else {
         debug!("podman quadlet generator not found on this system; skipping dry-run validation");
         return Ok(());
     };

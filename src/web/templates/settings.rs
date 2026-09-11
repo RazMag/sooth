@@ -2,6 +2,7 @@ use maud::{DOCTYPE, Markup, html};
 
 use super::{BannerKind, NavItem, banner, csrf_input, page_header, shell};
 use crate::config::Config;
+use crate::health::Health;
 
 /// The values a settings form round-trips as plain strings (so a rejected
 /// submission can be redisplayed exactly as typed, same pattern as the
@@ -97,6 +98,7 @@ pub fn page(
     csrf: &str,
     message: Option<&str>,
     error: Option<&str>,
+    health: Health,
 ) -> Markup {
     let body = html! {
         (page_header("Settings", html! {}))
@@ -177,6 +179,9 @@ pub fn page(
             p.field-hint { "Changes take effect on the next restart of sooth." }
         }
 
+        h2 { "System" }
+        (health_card(health))
+
         h2 { "Restart" }
         div.card {
             p.field-hint {
@@ -224,7 +229,57 @@ pub fn page(
             }
         }
     };
-    shell("Settings", Some(NavItem::Settings), body)
+    shell("Settings", Some(NavItem::Settings), Some(health), body)
+}
+
+/// The connection to the systemd user session bus is a startup precondition
+/// (sooth can't be running this page without it), so it's not re-checked
+/// here -- just the two dependencies that degrade gracefully instead. See
+/// `crate::health` and `health_banners` for the checks themselves.
+fn health_card(health: Health) -> Markup {
+    html! {
+        div.card {
+            table.kv-table {
+                tr {
+                    td { "systemd user session" }
+                    td { (status_pill(true, "Connected", "")) }
+                }
+                tr {
+                    td { "Podman quadlet generator" }
+                    @if health.podman_generator_found {
+                        td { (status_pill(true, "Found", "")) }
+                    } @else {
+                        td {
+                            (status_pill(false, "Not found", ""))
+                            p.field-hint {
+                                "Create/edit will skip dry-run validation against it; structural "
+                                "checks still run."
+                            }
+                        }
+                    }
+                }
+                tr {
+                    td { "Linger (survives logout)" }
+                    @match health.linger_enabled {
+                        Some(true) => td { (status_pill(true, "Enabled", "")) },
+                        Some(false) => td {
+                            (status_pill(false, "Disabled", ""))
+                            p.field-hint {
+                                "sooth and everything it manages will stop when you log out. Run "
+                                code { "loginctl enable-linger $USER" } " to keep them running."
+                            }
+                        },
+                        None => td { (status_pill(false, "Unknown", "could not determine the current user")) },
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn status_pill(ok: bool, label: &str, title: &str) -> Markup {
+    let variant = if ok { "badge-running" } else { "badge-warn" };
+    html! { span class={"badge " (variant)} title=(title) { (label) } }
 }
 
 /// Shown after the "Restart" button: a standalone card (the app is winding

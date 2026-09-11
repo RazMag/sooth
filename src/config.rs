@@ -7,6 +7,7 @@ use figment::providers::{Env, Format, Serialized, Toml};
 use serde::{Deserialize, Serialize};
 
 use crate::events::EventSender;
+use crate::health::Health;
 use crate::quadlet::QuadletError;
 use crate::systemd::Client;
 
@@ -100,6 +101,9 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub quadlet_dir: Arc<PathBuf>,
     pub systemd: Arc<Client>,
+    /// Best-effort host-dependency checks, computed once at startup -- see
+    /// `crate::health`. `Copy`, so no `Arc` needed.
+    pub health: Health,
     pub events: EventSender,
     /// The TOML file `Config::load` actually resolved and read (whether or
     /// not it existed yet) -- kept around so the Settings page can write

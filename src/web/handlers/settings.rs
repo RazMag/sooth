@@ -46,6 +46,7 @@ pub async fn page(
         &csrf,
         message,
         None,
+        state.health,
     )
 }
 
@@ -69,6 +70,7 @@ async fn render_error(
             &csrf,
             None,
             Some(msg),
+            state.health,
         ),
     )
         .into_response()

@@ -30,7 +30,7 @@ pub async fn show(
 
     Ok(match unit.kind {
         UnitKind::Container => {
-            templates::containers::detail_page(&unit, &status, &csrf, &known_groups)
+            templates::containers::detail_page(&unit, &status, &csrf, &known_groups, state.health)
         }
         UnitKind::Pod => {
             let member_count = all
@@ -41,19 +41,44 @@ pub async fn show(
                         == Some(unit.file_name.as_str())
                 })
                 .count();
-            templates::pods::detail_page(&unit, &status, &csrf, member_count, &known_groups)
+            templates::pods::detail_page(
+                &unit,
+                &status,
+                &csrf,
+                member_count,
+                &known_groups,
+                state.health,
+            )
         }
         UnitKind::Volume => {
             let used_by = refs::consumers_of(&unit, &all);
-            templates::volumes::detail_page(&unit, &status, &csrf, &all, &used_by, &known_groups)
+            templates::volumes::detail_page(
+                &unit,
+                &status,
+                &csrf,
+                &all,
+                &used_by,
+                &known_groups,
+                state.health,
+            )
         }
         UnitKind::Network => {
             let used_by = refs::consumers_of(&unit, &all);
-            templates::networks::detail_page(&unit, &status, &csrf, &all, &used_by, &known_groups)
+            templates::networks::detail_page(
+                &unit,
+                &status,
+                &csrf,
+                &all,
+                &used_by,
+                &known_groups,
+                state.health,
+            )
         }
         UnitKind::Image | UnitKind::Build => {
-            templates::images::detail_page(&unit, &status, &csrf, &known_groups)
+            templates::images::detail_page(&unit, &status, &csrf, &known_groups, state.health)
         }
-        UnitKind::Kube => templates::generic::detail_page(&unit, &status, &csrf, &known_groups),
+        UnitKind::Kube => {
+            templates::generic::detail_page(&unit, &status, &csrf, &known_groups, state.health)
+        }
     })
 }

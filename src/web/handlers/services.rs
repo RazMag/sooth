@@ -33,7 +33,12 @@ pub async fn page(
     let groups = discovery::list_groups(&state.quadlet_dir);
     let stats = compute_stats(&units);
     Ok(templates::services::services_page(
-        &units, &stats, &csrf, &all, &groups,
+        &units,
+        &stats,
+        &csrf,
+        &all,
+        &groups,
+        state.health,
     ))
 }
 

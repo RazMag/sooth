@@ -9,6 +9,7 @@ use super::{
     Icon, NavItem, autostart_pill, autoupdate_pill, csrf_input, group_kebab, icon, kebab_menu,
     known_groups_datalist, page_header, shell, status_badge,
 };
+use crate::health::Health;
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -300,12 +301,13 @@ pub fn list_page(
     csrf: &str,
     all_units: &[QuadletUnit],
     known_groups: &[String],
+    health: Health,
 ) -> Markup {
     let body = html! {
         (page_header(spec.title, html! {}))
         (list_table(spec, units, csrf, &rows_route(spec), all_units, known_groups, new_actions(spec)))
     };
-    shell(spec.title, spec.active_nav, body)
+    shell(spec.title, spec.active_nav, Some(health), body)
 }
 
 /// The `/rows` fragment route lives at `{new_href's section}/rows` -- derived

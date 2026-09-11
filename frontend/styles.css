@@ -179,6 +179,7 @@
   .btn-sm { padding: 0.3rem 0.55rem; font-size: 0.8rem; border-radius: 0.4rem; }
 
   .btn-icon {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -191,6 +192,20 @@
   .btn-icon:hover { background: var(--color-raised); color: var(--color-ink); }
   .btn-icon[aria-current="page"] { color: var(--color-accent); background: var(--color-accent-soft); }
   .btn-icon svg { width: 1.1rem; height: 1.1rem; }
+  /* Notice dot -- e.g. the sidebar Settings icon when `Health` has a
+     warning. Bordered in the sidebar's own background so it reads as
+     inset rather than overlapping the icon. */
+  .btn-icon.has-warning::after {
+    content: "";
+    position: absolute;
+    top: 0.15rem;
+    right: 0.15rem;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: var(--color-warn);
+    border: 1.5px solid var(--color-surface);
+  }
 
   /* Link-style button (logout) --------------------------------- */
   .btn-link {
@@ -254,6 +269,8 @@
   .badge-stopped::before { background: var(--color-faint); }
   .badge-unknown { opacity: 0.75; }
   .badge-unknown::before { background: var(--color-faint); opacity: 0.5; }
+  .badge-warn { color: var(--color-ink); }
+  .badge-warn::before { background: var(--color-warn); }
 
   .chip {
     display: inline-flex;
@@ -433,6 +450,7 @@
   .banner-error { background: var(--color-danger-soft); border-color: color-mix(in srgb, var(--color-danger) 40%, transparent); }
   .banner-success { background: var(--color-ok-soft); border-color: color-mix(in srgb, var(--color-ok) 40%, transparent); }
   .banner-info { background: var(--color-accent-soft); border-color: color-mix(in srgb, var(--color-accent) 30%, transparent); }
+  .banner-warn { background: var(--color-warn-soft); border-color: color-mix(in srgb, var(--color-warn) 40%, transparent); }
 
   /* Kebab menu (native <details>) ---------------------- */
   .menu { position: relative; display: inline-block; }

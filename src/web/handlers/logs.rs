@@ -25,7 +25,7 @@ pub async fn logs_page(
             tracing::warn!(error = %e, "failed to read initial journal tail");
             String::new()
         });
-    Ok(templates::logs::logs_page(&unit, &initial))
+    Ok(templates::logs::logs_page(&unit, &initial, state.health))
 }
 
 pub async fn logs_stream(
