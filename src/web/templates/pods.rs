@@ -1,6 +1,7 @@
 use maud::{Markup, html};
 
 use super::{Icon, detail, icon};
+use crate::health::Health;
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 
@@ -10,6 +11,7 @@ pub fn detail_page(
     csrf: &str,
     member_count: usize,
     known_groups: &[String],
+    health: Health,
 ) -> Markup {
     let extra = html! {
         p.detail-links {
@@ -28,5 +30,6 @@ pub fn detail_page(
         ],
         Some(extra),
         known_groups,
+        health,
     )
 }

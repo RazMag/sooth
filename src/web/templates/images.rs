@@ -2,6 +2,7 @@ use maud::{Markup, html};
 
 use super::detail;
 use super::list::{Column, RowCtx};
+use crate::health::Health;
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 
@@ -43,6 +44,7 @@ pub fn detail_page(
     status: &UnitStatus,
     csrf: &str,
     known_groups: &[String],
+    health: Health,
 ) -> Markup {
     // "Type" would duplicate the Overview's "Kind" row -- just Source here.
     detail::detail_page(
@@ -52,5 +54,6 @@ pub fn detail_page(
         &[("Source", html! { code { (image_source(unit)) } })],
         None,
         known_groups,
+        health,
     )
 }

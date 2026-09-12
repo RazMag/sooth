@@ -2,6 +2,7 @@ use maud::{Markup, html};
 
 use super::detail;
 use super::list::{Column, RowCtx};
+use crate::health::Health;
 use crate::quadlet::QuadletUnit;
 use crate::quadlet::refs;
 use crate::systemd::UnitStatus;
@@ -32,6 +33,7 @@ pub fn detail_page(
     all_units: &[QuadletUnit],
     used_by: &[String],
     known_groups: &[String],
+    health: Health,
 ) -> Markup {
     let driver = unit
         .section("Volume")
@@ -47,5 +49,6 @@ pub fn detail_page(
         ],
         None,
         known_groups,
+        health,
     )
 }

@@ -7,6 +7,7 @@ use maud::{Markup, html};
 
 use super::list::{Column, ListSpec, RowCtx, kind_cell};
 use super::{Icon, NavItem, icon, ports_cell_live, shell};
+use crate::health::Health;
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 
@@ -68,6 +69,7 @@ pub fn services_page(
     csrf: &str,
     all_units: &[QuadletUnit],
     known_groups: &[String],
+    health: Health,
 ) -> Markup {
     let create = html! {
         a.btn.btn-sm.btn-primary href="/containers/new" { (icon(Icon::Plus)) span { "Container" } }
@@ -81,5 +83,5 @@ pub fn services_page(
         }
         (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units, known_groups, create))
     };
-    shell("Services", Some(NavItem::Services), body)
+    shell("Services", Some(NavItem::Services), Some(health), body)
 }

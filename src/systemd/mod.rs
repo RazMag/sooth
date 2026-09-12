@@ -7,7 +7,10 @@ pub use status::UnitStatus;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SystemdError {
-    #[error("failed to connect to the systemd user session bus: {0}")]
+    #[error(
+        "failed to connect to the systemd user session bus: {0} \
+         (is there an active login session, or has `loginctl enable-linger $USER` been run?)"
+    )]
     Connection(#[from] zbus::Error),
     #[error("action '{action}' failed for unit '{unit}': {detail}")]
     ActionFailed {

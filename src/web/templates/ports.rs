@@ -1,6 +1,7 @@
 use maud::{Markup, html};
 
 use super::{NavItem, page_header, shell, status_badge};
+use crate::health::Health;
 use crate::quadlet::naming;
 use crate::quadlet::ports::PortMapping;
 use crate::systemd::UnitStatus;
@@ -50,7 +51,7 @@ pub fn ports_rows(rows: &[PortRow]) -> Markup {
     }
 }
 
-pub fn ports_page(rows: &[PortRow]) -> Markup {
+pub fn ports_page(rows: &[PortRow], health: Health) -> Markup {
     let body = html! {
         (page_header("Ports", html! {}))
         p.page-meta { "Declared " code { "PublishPort=" } " entries across Containers and Pods." }
@@ -77,5 +78,5 @@ pub fn ports_page(rows: &[PortRow]) -> Markup {
             }
         }
     };
-    shell("Ports", Some(NavItem::Ports), body)
+    shell("Ports", Some(NavItem::Ports), Some(health), body)
 }

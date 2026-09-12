@@ -6,10 +6,11 @@
 use maud::{Markup, html};
 
 use super::{NavItem, back_link, page_header, shell};
+use crate::health::Health;
 use crate::quadlet::QuadletUnit;
 use crate::web::core;
 
-pub fn logs_page(unit: &QuadletUnit, initial: &str) -> Markup {
+pub fn logs_page(unit: &QuadletUnit, initial: &str, health: Health) -> Markup {
     let service = unit.service_name();
     let stream_url = format!("{}/logs/stream", core::unit_url(unit));
     let body = html! {
@@ -21,6 +22,7 @@ pub fn logs_page(unit: &QuadletUnit, initial: &str) -> Markup {
     shell(
         &format!("Logs: {}", unit.file_name),
         NavItem::for_kind(unit.kind),
+        Some(health),
         body,
     )
 }

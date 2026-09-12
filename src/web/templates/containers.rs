@@ -1,6 +1,7 @@
 use maud::{Markup, html};
 
 use super::detail;
+use crate::health::Health;
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 
@@ -9,6 +10,7 @@ pub fn detail_page(
     status: &UnitStatus,
     csrf: &str,
     known_groups: &[String],
+    health: Health,
 ) -> Markup {
     let image = unit
         .section("Container")
@@ -24,5 +26,6 @@ pub fn detail_page(
         ],
         None,
         known_groups,
+        health,
     )
 }

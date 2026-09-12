@@ -1,20 +1,36 @@
 use maud::{Markup, html};
 
 use super::{BannerKind, NavItem, banner, csrf_input, page_header, shell};
+use crate::health::Health;
 use crate::hostenv::EnvVar;
+
+/// Parameters for [`page`]. Grouped into a struct once `health` pushed the
+/// plain argument list past clippy's `too_many_arguments` threshold.
+pub struct EnvironmentPage<'a> {
+    pub csrf: &'a str,
+    pub configured: &'a [EnvVar],
+    pub live: &'a [(String, String)],
+    pub managed_file: &'a str,
+    pub prefill: Option<(&'a str, &'a str)>,
+    pub notice: Option<&'a str>,
+    pub error: Option<&'a str>,
+    pub health: Health,
+}
 
 /// The Environment page: an "add variable" form, the variables sooth manages
 /// (editable), and any others configured under `~/.config/environment.d/`
 /// (read-only). The inherited base environment is intentionally not shown.
-pub fn page(
-    csrf: &str,
-    configured: &[EnvVar],
-    live: &[(String, String)],
-    managed_file: &str,
-    prefill: Option<(&str, &str)>,
-    notice: Option<&str>,
-    error: Option<&str>,
-) -> Markup {
+pub fn page(p: EnvironmentPage<'_>) -> Markup {
+    let EnvironmentPage {
+        csrf,
+        configured,
+        live,
+        managed_file,
+        prefill,
+        notice,
+        error,
+        health,
+    } = p;
     let (pf_name, pf_value) = prefill.unwrap_or(("", ""));
     let managed: Vec<&EnvVar> = configured.iter().filter(|v| v.managed).collect();
     let external: Vec<&EnvVar> = configured.iter().filter(|v| !v.managed).collect();
@@ -100,7 +116,12 @@ pub fn page(
             "manager immediately and re-read on your next login."
         }
     };
-    shell("Environment", Some(NavItem::Environment), body)
+    shell(
+        "Environment",
+        Some(NavItem::Environment),
+        Some(health),
+        body,
+    )
 }
 
 /// The value column: the live manager value when it has one, otherwise the

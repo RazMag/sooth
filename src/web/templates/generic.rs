@@ -10,6 +10,7 @@ use super::{
     BannerKind, EditorFileName, NavItem, back_link, banner, code_editor, csrf_input,
     env_var_editor, host_vars_panel, known_groups_datalist, page_header, shell,
 };
+use crate::health::Health;
 use crate::hostenv::EnvVar;
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
@@ -21,8 +22,9 @@ pub fn detail_page(
     status: &UnitStatus,
     csrf: &str,
     known_groups: &[String],
+    health: Health,
 ) -> Markup {
-    detail::detail_page(unit, status, csrf, &[], None, known_groups)
+    detail::detail_page(unit, status, csrf, &[], None, known_groups, health)
 }
 
 /// How the "New" page's file-name field behaves: a stem plus a fixed
@@ -70,6 +72,7 @@ pub struct NewUnitPage<'a> {
     pub env_vars_body: &'a str,
     pub host_vars: &'a [EnvVar],
     pub error: Option<&'a str>,
+    pub health: Health,
 }
 
 /// Shared by every section's "New" page -- the differences are the POST
@@ -143,7 +146,7 @@ pub fn new_unit_page(p: NewUnitPage<'_>) -> Markup {
             button.btn.btn-primary type="submit" { "Create" }
         }
     };
-    shell("New quadlet", p.active, body)
+    shell("New quadlet", p.active, Some(p.health), body)
 }
 
 /// The raw-INI edit form. `.container` / `.build` units also get the sidecar
@@ -155,6 +158,7 @@ pub fn edit_unit_page(
     env_vars_body: &str,
     host_vars: &[EnvVar],
     error: Option<&str>,
+    health: Health,
 ) -> Markup {
     let base = crate::web::core::unit_url(unit);
     let wants_env = matches!(unit.kind, UnitKind::Container | UnitKind::Build);
@@ -182,6 +186,7 @@ pub fn edit_unit_page(
     shell(
         &format!("Edit {}", unit.file_name),
         NavItem::for_kind(unit.kind),
+        Some(health),
         body,
     )
 }

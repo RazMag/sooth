@@ -11,12 +11,37 @@
 #   scripts/run-dev.fish --hash '$argon2id$...'  # skip the prompt
 #   scripts/run-dev.fish --dir /path/to/dir   # reuse an existing scratch dir
 #   scripts/run-dev.fish --port 8123 --release --no-seed
+#
+# --fake-no-podman / --fake-linger-disabled exercise the Settings "System"
+# card and the dashboard warning banner (see src/health.rs) without actually
+# uninstalling podman or touching real linger state. Both run sooth inside a
+# `bwrap` (bubblewrap) sandbox that tmpfs-hides just the relevant path(s) --
+# your real filesystem is never modified. `bwrap --uid/--gid` (not
+# `unshare --map-root-user`) is what makes this work: it does the privileged
+# setup mounts internally but then drops the process back to your *real* uid
+# before exec'ing sooth, so `systemctl --user`'s D-Bus EXTERNAL auth (which
+# checks the connecting peer's real credentials) still succeeds. A plain
+# `unshare --map-root-user` leaves the process looking like uid 0 to itself,
+# which is enough to do the tmpfs mounts too, but breaks that D-Bus handshake
+# ("EXTERNAL rejected by the server") since the claimed identity (0) no
+# longer matches the real peer uid.
+#
+#   scripts/run-dev.fish --fake-no-podman
+#   scripts/run-dev.fish --fake-linger-disabled
+#   scripts/run-dev.fish --fake-no-podman --fake-linger-disabled   # both checklist items fail at once
 
-argparse 'd/dir=' 'p/port=' 'hash=' 'release' 'no-seed' 'h/help' -- $argv
+argparse 'd/dir=' 'p/port=' 'hash=' 'release' 'no-seed' 'fake-no-podman' 'fake-linger-disabled' 'h/help' -- $argv
 or exit 1
 
 if set -q _flag_help
     echo "Usage: run-dev.fish [--dir <path>] [--port <n>] [--hash <argon2-hash>] [--release] [--no-seed]"
+    echo "                    [--fake-no-podman] [--fake-linger-disabled]"
+    echo ""
+    echo "  --fake-no-podman        Hide podman's quadlet generator (in a bwrap sandbox,"
+    echo "                          not on your real system) so the health check reads"
+    echo "                          \"Not found\"."
+    echo "  --fake-linger-disabled  Same idea for the linger marker, so it reads"
+    echo "                          \"Disabled\" regardless of your real linger state."
     exit 0
 end
 
@@ -69,8 +94,29 @@ else
     or exit 1
 end
 
+set -l sandbox
+if set -q _flag_fake_no_podman; or set -q _flag_fake_linger_disabled
+    if not command -q bwrap
+        echo "error: --fake-no-podman/--fake-linger-disabled need bubblewrap (bwrap) installed" >&2
+        exit 1
+    end
+    set sandbox bwrap --unshare-user --unshare-pid \
+        --uid (id -u) --gid (id -g) \
+        --bind / / --dev /dev --proc /proc
+    if set -q _flag_fake_no_podman
+        echo "==> --fake-no-podman: hiding podman's quadlet generator in a bwrap sandbox (real system untouched)"
+        set sandbox $sandbox \
+            --tmpfs /usr/lib/systemd/user-generators \
+            --tmpfs /usr/lib/systemd/system-generators
+    end
+    if set -q _flag_fake_linger_disabled
+        echo "==> --fake-linger-disabled: hiding the linger marker in a bwrap sandbox (real system untouched)"
+        set sandbox $sandbox --tmpfs /var/lib/systemd/linger
+    end
+end
+
 echo "==> starting sooth on http://127.0.0.1:$port  (quadlet dir: $scratch)"
 env SOOTH_QUADLET_DIR=$scratch \
     SOOTH_AUTH_PASSWORD_HASH=$hash \
     SOOTH_BIND_ADDR=127.0.0.1:$port \
-    $bin
+    $sandbox $bin

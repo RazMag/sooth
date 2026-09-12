@@ -50,6 +50,7 @@ async fn new_form(
         env_vars_body: "",
         host_vars: &host_vars,
         error: None,
+        health: state.health.get(),
     })
 }
 
@@ -375,6 +376,7 @@ async fn reject_new(
             env_vars_body,
             host_vars: &host_vars,
             error: Some(error),
+            health: state.health.get(),
         }),
     )
         .into_response()
