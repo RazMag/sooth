@@ -79,9 +79,14 @@ CSS/JS embedded, so it runs from any directory.
   dry-run validation when present; sooth still works without it, relying on
   its own structural checks.
 - **A Rust stable toolchain**, 2024 edition (rustc 1.85 or newer), to build.
+  `rust-toolchain.toml` pins `stable` with `rustfmt`/`clippy`; `rustup` picks
+  it up automatically, no manual `rustup default` needed.
 - **Node.js 22+** only if you want to rebuild the frontend assets —
   `static/style.css` and `static/app.js` are committed, and `cargo build`
   falls back to them when no Node toolchain is present.
+- **[`just`](https://github.com/casey/just)** is optional — a `justfile` at
+  the repo root wraps the commands below for local development. See
+  [Development](#development).
 
 ### Build and run
 
@@ -154,6 +159,32 @@ When Node *is* set up, `build.rs` re-runs the frontend build on
 `cargo build` / `cargo run`, but only when something under `frontend/**` (or
 `package.json` / the build script) changed since the last build.
 
+### Using `just`
+
+A [`justfile`](justfile) at the repo root wraps the raw `cargo`/`npm`
+commands below into one command surface. It's a thin convenience layer, not
+a replacement — everything it runs is one of the commands documented in this
+section, and `cargo`/`npm`/`scripts/run-dev.sh` still work directly with no
+`just` installed. Run `just` or `just --list` to see the recipes:
+
+| Recipe | Does |
+|---|---|
+| `just build` / `just release` | `cargo build` / `cargo build --release` |
+| `just run` | `cargo run` — build (if needed) and serve, using real config/env discovery |
+| `just test` | `cargo test` |
+| `just fmt` / `just fmt-check` | `cargo fmt` / `cargo fmt --check` |
+| `just lint` | `cargo clippy --all-targets -- -D warnings` |
+| `just check` | `fmt-check` + `lint` + `test`, no frontend rebuild |
+| `just frontend` | `npm ci && npm run build` |
+| `just watch-frontend` | `npm run watch` |
+| `just dev [args...]` | `scripts/run-dev.sh [args...]` (args are forwarded) |
+| `just ci` | reproduces `.github/workflows/ci.yml` locally, end to end |
+
+`just dev` forwards arguments as-is, e.g. `just dev --port 8123
+--fake-no-podman` is `scripts/run-dev.sh --port 8123 --fake-no-podman`.
+
+### Commands
+
 ```sh
 npm ci            # once, to enable frontend rebuilds
 cargo run         # rebuilds static/ from frontend/** if needed, then serves
@@ -163,20 +194,20 @@ cargo clippy --all-targets
 cargo fmt --check
 ```
 
-Iterating on the UI: run `npm run watch` in a second pane — it rewrites
-`static/` on save and a debug build re-reads it per request, so you don't
-restart the server. Without watch, restart `cargo run` to pick up a
-`frontend/**` edit. `SOOTH_SKIP_FRONTEND_BUILD=1` skips the frontend build
-entirely (e.g. a read-only checkout).
+Iterating on the UI: run `npm run watch` (or `just watch-frontend`) in a
+second pane — it rewrites `static/` on save and a debug build re-reads it
+per request, so you don't restart the server. Without watch, restart
+`cargo run` to pick up a `frontend/**` edit. `SOOTH_SKIP_FRONTEND_BUILD=1`
+skips the frontend build entirely (e.g. a read-only checkout).
 
-`scripts/run-dev.fish` builds and runs sooth against a throwaway scratch
-quadlet directory (seeded with one demo unit) instead of your real
-`~/.config/containers/systemd`, so you can poke at the dashboard without
-touching anything real:
+`scripts/run-dev.sh` (or `just dev`) builds and runs sooth against a
+throwaway scratch quadlet directory (seeded with one demo unit) instead of
+your real `~/.config/containers/systemd`, so you can poke at the dashboard
+without touching anything real:
 
 ```sh
-scripts/run-dev.fish                 # prompts for a password, fresh scratch dir
-scripts/run-dev.fish --port 8123 --dir /tmp/sooth-scratch --no-seed
+scripts/run-dev.sh                 # prompts for a password, fresh scratch dir
+scripts/run-dev.sh --port 8123 --dir /tmp/sooth-scratch --no-seed
 ```
 
 `--fake-no-podman` and `--fake-linger-disabled` exercise the Settings "System"
@@ -185,13 +216,14 @@ inside a `bwrap` sandbox that hides just the relevant path -- your real
 system is never touched:
 
 ```sh
-scripts/run-dev.fish --fake-no-podman --fake-linger-disabled
+scripts/run-dev.sh --fake-no-podman --fake-linger-disabled
 ```
 
 CI (`.github/workflows/ci.yml`) runs two jobs: `frontend` rebuilds the
 assets and fails if `static/` is stale (`git diff --exit-code`), and `rust`
 runs `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, and
-`cargo test` with `SOOTH_SKIP_FRONTEND_BUILD=1`.
+`cargo test` with `SOOTH_SKIP_FRONTEND_BUILD=1`. `just ci` runs the same
+sequence locally (see the table above).
 
 ### Manual smoke test
 
