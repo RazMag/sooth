@@ -46,12 +46,12 @@ opens `Connection::session()` on startup and exits if it fails).
 | `main.rs` | Startup: load config, connect D-Bus, spawn the status watch + fs watch tasks, serve, cancel tasks on shutdown. Also the `--hash-password` CLI. |
 | `config.rs` | `Config` (figment: defaults → TOML → `SOOTH_` env) and `AppState` (the `Arc`-wrapped handles every handler gets). |
 | `error.rs` | `AppError` + `PageError` (full-page) / `FragmentError` (htmx inline) wrappers. The **only** place an error becomes an HTTP response; every handler returns `Result<_, PageError|FragmentError>` and uses `?`. |
-| `events.rs` | `DashboardEvent` (`Status { service, status }` / `UnitsChanged`) on an app-wide `broadcast` channel. Independent of `systemd`/`web`. |
-| `quadlet/` | Disk side. `discovery` (**recursive** enumerate/parse/load, `find_in_tree`/`list_groups`, recursive fs watch), `parser` (INI → ordered `Section`s, keeps duplicate keys), `model` (`QuadletUnit` incl. `group` + `rel_path()`, `UnitKind`), `naming` (file name ↔ service name, `valid_stem`, `valid_group`, `compose_rel_path`, `basename`), `writer` (validate + atomic write + generator dry-run, `move_file` / `move_dir` / `delete_dir` — groups are **not** auto-pruned when emptied), `ports` (`PublishPort=` parse + collision detection), `envfile` (`env/<stem>.env` sidecar + managed `EnvironmentFile=` line patching — **group-independent**, always keyed by stem under `env/`), `install` (`[Install]` section = rootless "enable": `set_enabled` raw-text patch of `WantedBy=default.target`). |
+| `events.rs` | `DashboardEvent` (`Status { service, status }` / `UnitsChanged` / `GitSyncChanged`) on an app-wide `broadcast` channel. Independent of `systemd`/`web`. |
+| `quadlet/` | Disk side. `discovery` (**recursive** enumerate/parse/load, `find_in_tree`/`list_groups`, recursive fs watch), `parser` (INI → ordered `Section`s, keeps duplicate keys), `model` (`QuadletUnit` incl. `group` + `rel_path()`, `UnitKind`), `naming` (file name ↔ service name, `valid_stem`, `valid_group`, `compose_rel_path`, `basename`), `writer` (validate + atomic write + generator dry-run, `move_file` / `move_dir` / `delete_dir` — groups are **not** auto-pruned when emptied), `ports` (`PublishPort=` parse + collision detection), `envfile` (`env/<stem>.env` sidecar + managed `EnvironmentFile=` line patching — **group-independent**, always keyed by stem under `env/`), `install` (`[Install]` section = rootless "enable": `set_enabled` raw-text patch of `WantedBy=default.target`), `gitsync` (a group directory mirrored from a git remote: `git` holds the shell-out wrappers, `manager` holds `GitSyncManager` — one poll task per configured sync, live add/remove, see its Gotchas note below). |
 | `systemd/` | D-Bus side. `client` (`org.freedesktop.systemd1.Manager` proxy: start/stop/restart/reload/status + environment get/set/unset), `status` (fetch `UnitStatus` via `Properties.GetAll`), `watch` (subscribe to `PropertiesChanged` for every unit, filter to sooth-managed, re-fetch + broadcast). **No enable/disable D-Bus call**: podman's `.service` units live under a systemd generator dir, which `EnableUnitFiles` rejects ("transient or generated"). "Enable"/"disable" is `quadlet::install::set_enabled` patching the file's `[Install]` section + `client.reload()`. "Enabled" state is **not** read from the file (it can name a target that doesn't exist / isn't in the login path) but from systemd's computed `WantedBy=`/`RequiredBy=` reverse deps — `UnitStatus::is_autostart_enabled` is true iff `default.target` is among them. `UnitFileState` is unusable here: systemd always reports `generated` for these. |
 | `hostenv.rs` | The user manager's `${NAME}` environment. Owns `~/.config/environment.d/50-sooth.conf`; reads other `*.conf` there read-only. |
-| `journal.rs` | The one shell-out in the app: `journalctl --user -u <service>` for the log tail + live follow. |
-| `web/routes.rs` | Router assembly. `mount_unit_routes` registers the shared per-unit routes (detail/actions/start/…/edit/delete/**move**/logs) at **six** prefixes: `/containers /pods /volumes /networks /images /units`. Plus the group-directory routes (`handlers::groups` → `core::*group*`): `POST /groups` (`mkdir` an empty group, or a subgroup with a `parent` field), `/groups/move` (re-parent), `/groups/rename` (rename the leaf), `/groups/delete` (rmdir — refused while any unit lives under it). |
+| `journal.rs` | Shells out to `journalctl --user -u <service>` for the log tail + live follow. (`quadlet::gitsync::git` is the app's other shell-out, to `git`.) |
+| `web/routes.rs` | Router assembly. `mount_unit_routes` registers the shared per-unit routes (detail/actions/start/…/edit/delete/**move**/logs) at **six** prefixes: `/containers /pods /volumes /networks /images /units`. Plus the group-directory routes (`handlers::groups` → `core::*group*`): `POST /groups` (`mkdir` an empty group, or a subgroup with a `parent` field), `/groups/move` (re-parent), `/groups/rename` (rename the leaf), `/groups/delete` (rmdir — refused while any unit lives under it). And the Git Sync routes (`handlers::gitsync` → `GitSyncManager`): `GET /git-sync` (page) + `POST` (add), `/git-sync/rows` (status fragment), `/git-sync/{sync,force,delete}` — each takes its target `group` from the POST body, not a `{group}` path segment, since a nested group's `/` can't live in one. |
 | `web/core.rs` | Kind-agnostic business logic (`execute_action`, `create_unit`, `edit_unit`, `delete_unit`, `move_unit`, `load_units_for_kinds`) + `section_path` / `section_index_path` / `unit_url` — the single source of truth for turning a unit into a URL. |
 | `web/handlers/` | Thin Axum handlers. Most kinds share one implementation; only `services` (the `/` home = Containers + Pods) and `list` (Volumes/Networks/Images/all) differ, and only by a `ListSpec`. `raw_create` is the one create path for every section. |
 | `web/sse.rs` | `/events` stream: renders `DashboardEvent`s as named SSE events (`status-{service}` carries a badge fragment; `units-changed` / `any-status` are `"1"` pings that trigger htmx re-fetches). |
@@ -82,7 +82,15 @@ opens `Connection::session()` on startup and exits if it fails).
   drive `/groups/{move,rename,delete}` (delete refused while units remain).
   `writer::move_dir` renames the directory with every unit inside keeping its
   service name; `core::move_group_dir` rejects a move into the group itself or
-  a subgroup.
+  a subgroup. A git-synced group (`quadlet::gitsync`) is the one exception to
+  "user-managed": `core::synced_destination`/`synced_source` reject filing a
+  unit into one, and reject moving/renaming the synced directory itself (or
+  an ancestor/descendant of it), since either would fight the next sync or
+  break `GitSyncConfig.group`'s path tracking. `templates::list::GroupLists`
+  carries both the full group list and the synced subset into the list
+  templates so the table can preview the same rule client-side (no drag
+  handle on a synced group's header, `dragdrop.js`'s `isSyncedTarget` guard) —
+  the server check is still the authoritative one.
 - **One implementation, six mount points.** Per-unit behavior does not vary
   by kind — don't add kind-specific handler modules. The detail page
   dispatches on `unit.kind` (the loaded unit's real kind, not the URL
@@ -150,6 +158,13 @@ opens `Connection::session()` on startup and exits if it fails).
   `discovery` (which skips it, `*.d`, and dot-dirs while recursing, and only
   matches the 7 quadlet extensions) and to the podman generator — keep it
   that way. The sidecar is never moved when a unit changes group.
+- `quadlet::gitsync::manager`'s poll tasks loop forever too, like the
+  status-watch/fs-watch tasks above — `main.rs` calls `git_sync.abort_all()`
+  alongside `.abort()`ing those. It deliberately does **not** call
+  `systemd.reload()` or broadcast `UnitsChanged` itself after a sync: its
+  writes land inside `quadlet_dir` exactly like an external edit, so
+  `discovery::watch` + the existing fs-watch task already reload and refresh
+  the UI for it. Don't add a second reload path here.
 
 ## Commit style
 
