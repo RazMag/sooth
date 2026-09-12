@@ -82,7 +82,7 @@ macro_rules! list_handlers {
                 &csrf,
                 &all,
                 &groups,
-                state.health,
+                state.health.get(),
             ))
         }
 

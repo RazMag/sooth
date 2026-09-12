@@ -29,9 +29,13 @@ pub async fn show(
     let known_groups = discovery::list_groups(&state.quadlet_dir);
 
     Ok(match unit.kind {
-        UnitKind::Container => {
-            templates::containers::detail_page(&unit, &status, &csrf, &known_groups, state.health)
-        }
+        UnitKind::Container => templates::containers::detail_page(
+            &unit,
+            &status,
+            &csrf,
+            &known_groups,
+            state.health.get(),
+        ),
         UnitKind::Pod => {
             let member_count = all
                 .iter()
@@ -47,7 +51,7 @@ pub async fn show(
                 &csrf,
                 member_count,
                 &known_groups,
-                state.health,
+                state.health.get(),
             )
         }
         UnitKind::Volume => {
@@ -59,7 +63,7 @@ pub async fn show(
                 &all,
                 &used_by,
                 &known_groups,
-                state.health,
+                state.health.get(),
             )
         }
         UnitKind::Network => {
@@ -71,14 +75,18 @@ pub async fn show(
                 &all,
                 &used_by,
                 &known_groups,
-                state.health,
+                state.health.get(),
             )
         }
         UnitKind::Image | UnitKind::Build => {
-            templates::images::detail_page(&unit, &status, &csrf, &known_groups, state.health)
+            templates::images::detail_page(&unit, &status, &csrf, &known_groups, state.health.get())
         }
-        UnitKind::Kube => {
-            templates::generic::detail_page(&unit, &status, &csrf, &known_groups, state.health)
-        }
+        UnitKind::Kube => templates::generic::detail_page(
+            &unit,
+            &status,
+            &csrf,
+            &known_groups,
+            state.health.get(),
+        ),
     })
 }

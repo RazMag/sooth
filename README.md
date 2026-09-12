@@ -179,6 +179,15 @@ scripts/run-dev.fish                 # prompts for a password, fresh scratch dir
 scripts/run-dev.fish --port 8123 --dir /tmp/sooth-scratch --no-seed
 ```
 
+`--fake-no-podman` and `--fake-linger-disabled` exercise the Settings "System"
+card and the dashboard warning banner (see `src/health.rs`) by running sooth
+inside a `bwrap` sandbox that hides just the relevant path -- your real
+system is never touched:
+
+```sh
+scripts/run-dev.fish --fake-no-podman --fake-linger-disabled
+```
+
 CI (`.github/workflows/ci.yml`) runs two jobs: `frontend` rebuilds the
 assets and fails if `static/` is stale (`git diff --exit-code`), and `rust`
 runs `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, and

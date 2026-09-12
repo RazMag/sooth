@@ -49,7 +49,7 @@ async fn with_rows<T>(
 }
 
 pub async fn index(State(state): State<AppState>) -> Result<impl IntoResponse, PageError> {
-    let health = state.health;
+    let health = state.health.get();
     Ok(with_rows(&state, |rows| templates::ports::ports_page(rows, health)).await?)
 }
 

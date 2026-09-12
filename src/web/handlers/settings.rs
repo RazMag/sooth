@@ -14,7 +14,7 @@ use serde::Deserialize;
 use tower_sessions::Session;
 
 use crate::config::AppState;
-use crate::error::{AppError, PageError};
+use crate::error::{AppError, FragmentError, PageError};
 use crate::web::templates::settings::{EnvLocks, FormValues};
 use crate::web::templates::{self};
 
@@ -46,7 +46,7 @@ pub async fn page(
         &csrf,
         message,
         None,
-        state.health,
+        state.health.get(),
     )
 }
 
@@ -70,7 +70,7 @@ async fn render_error(
             &csrf,
             None,
             Some(msg),
-            state.health,
+            state.health.get(),
         ),
     )
         .into_response()
@@ -235,6 +235,27 @@ pub async fn restart(
     tracing::info!("restart requested from the settings page");
     state.restart.notify_one();
     Ok(templates::settings::restarting_page().into_response())
+}
+
+#[derive(Deserialize)]
+pub struct RefreshHealthForm {
+    csrf_token: String,
+}
+
+/// The System card's Refresh button (htmx `outerHTML` swap of `#health-card`
+/// only, not a full page reload). Re-runs both host-dependency checks and
+/// stores the result back into `AppState::health`, so the banner and the
+/// sidebar's notice dot on every other page pick up the change immediately
+/// too -- not just this card.
+pub async fn refresh_health(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<RefreshHealthForm>,
+) -> Result<impl IntoResponse, FragmentError> {
+    if !crate::auth::csrf::verify(&session, &form.csrf_token).await {
+        return Err(AppError::Csrf.into());
+    }
+    Ok(templates::settings::health_card(state.health.refresh()))
 }
 
 /// Read-modify-write the config TOML: parse whatever is already on disk

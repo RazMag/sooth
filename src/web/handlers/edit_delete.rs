@@ -61,7 +61,7 @@ async fn render_edit(
             &env_body,
             &host_vars,
             error,
-            state.health,
+            state.health.get(),
         ),
     )
         .into_response())

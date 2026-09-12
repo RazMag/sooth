@@ -176,7 +176,7 @@ async fn render(
         prefill,
         notice,
         error,
-        health: state.health,
+        health: state.health.get(),
     })
     .into_response()
 }

@@ -38,7 +38,7 @@ pub async fn page(
         &csrf,
         &all,
         &groups,
-        state.health,
+        state.health.get(),
     ))
 }
 

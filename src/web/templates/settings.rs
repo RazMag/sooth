@@ -1,6 +1,6 @@
 use maud::{DOCTYPE, Markup, html};
 
-use super::{BannerKind, NavItem, banner, csrf_input, page_header, shell};
+use super::{BannerKind, Icon, NavItem, banner, csrf_input, icon, page_header, shell};
 use crate::config::Config;
 use crate::health::Health;
 
@@ -179,7 +179,15 @@ pub fn page(
             p.field-hint { "Changes take effect on the next restart of sooth." }
         }
 
-        h2 { "System" }
+        div.section-header {
+            h2 { "System" }
+            div.actions {
+                form.inline-form hx-post="/settings/health/refresh" hx-target="#health-card" hx-swap="outerHTML" {
+                    (csrf_input(csrf))
+                    button.btn.btn-sm type="submit" { (icon(Icon::Refresh)) span { "Refresh" } }
+                }
+            }
+        }
         (health_card(health))
 
         h2 { "Restart" }
@@ -236,9 +244,9 @@ pub fn page(
 /// (sooth can't be running this page without it), so it's not re-checked
 /// here -- just the two dependencies that degrade gracefully instead. See
 /// `crate::health` and `health_banners` for the checks themselves.
-fn health_card(health: Health) -> Markup {
+pub fn health_card(health: Health) -> Markup {
     html! {
-        div.card {
+        div.card #health-card {
             table.kv-table {
                 tr {
                     td { "systemd user session" }

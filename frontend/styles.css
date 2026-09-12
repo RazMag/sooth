@@ -591,6 +591,22 @@
     margin-bottom: 0.5rem;
   }
   .page-header .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  /* A subsection heading (h2) with an inline action, e.g. Settings' "System"
+     heading and its Refresh button -- same idea as `.page-header`, but
+     `.page-header` pairs with `h1` (zeroed by the Tailwind reset) so reusing
+     it here would need an override; this keeps the h2's usual top margin
+     (matching the plain `h2` rule) instead of `.page-header`'s own spacing,
+     which assumes it opens the page. */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0 0.5rem;
+  }
+  .section-header h2 { margin: 0; }
+  .section-header .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .page-meta { color: var(--color-muted); font-size: 0.85rem; margin: 0.15rem 0 0; }
   .toolbar { display: flex; align-items: center; gap: 0.5rem; margin: 1rem 0 0.5rem; flex-wrap: wrap; }
   .filter-box { flex: 1 1 12rem; max-width: 20rem; }
