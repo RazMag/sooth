@@ -24,8 +24,17 @@ cargo clippy --all-targets
 cargo fmt --check
 npm ci && npm run build   # rebuild static/style.css + static/app.js after a frontend/** edit
 npm run watch             # sub-second static/ rebuilds while iterating; debug server re-reads per request
-scripts/run-dev.fish      # run against a throwaway scratch quadlet dir
+scripts/run-dev.sh      # run against a throwaway scratch quadlet dir
 ```
+
+`justfile` wraps these as `just build|release|test|fmt|fmt-check|lint|check`,
+`just frontend|watch-frontend`, `just dev [args...]` (forwards to
+`scripts/run-dev.sh`), and `just ci` (reproduces
+`.github/workflows/ci.yml` locally). `just --list` shows them all. It's a
+convenience wrapper only — the raw commands above are still what actually
+runs and remain valid with no `just` installed. `rust-toolchain.toml` pins
+`stable` + `rustfmt`/`clippy`, so a bare `rustup`-managed `cargo` already
+resolves the right toolchain.
 
 Requires a working `systemctl --user` session bus at runtime (the server
 opens `Connection::session()` on startup and exits if it fails).
