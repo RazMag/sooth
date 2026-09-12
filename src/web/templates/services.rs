@@ -5,7 +5,7 @@
 
 use maud::{Markup, html};
 
-use super::list::{Column, ListSpec, RowCtx, kind_cell};
+use super::list::{Column, GroupLists, ListSpec, RowCtx, kind_cell};
 use super::{Icon, NavItem, icon, ports_cell_live, shell};
 use crate::health::Health;
 use crate::quadlet::QuadletUnit;
@@ -68,7 +68,7 @@ pub fn services_page(
     stats: &Stats,
     csrf: &str,
     all_units: &[QuadletUnit],
-    known_groups: &[String],
+    groups: &GroupLists,
     health: Health,
 ) -> Markup {
     let create = html! {
@@ -81,7 +81,7 @@ pub fn services_page(
             hx-trigger="sse:units-changed, sse:any-status delay:300ms" hx-swap="innerHTML" {
             (stats_bar(stats))
         }
-        (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units, known_groups, create))
+        (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units, groups, create))
     };
     shell("Services", Some(NavItem::Services), Some(health), body)
 }

@@ -1,6 +1,7 @@
 pub mod autoupdate;
 pub mod discovery;
 pub mod envfile;
+pub mod gitsync;
 pub mod install;
 pub mod model;
 pub mod naming;

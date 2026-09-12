@@ -82,6 +82,15 @@ async fn run() -> anyhow::Result<()> {
 
     let (events_tx, _rx) = broadcast::channel(256);
 
+    // Git-synced groups: one poll task per configured entry, kept live
+    // (add/remove don't need a restart) rather than just a config snapshot.
+    // Deliberately doesn't touch `systemd_client`/`events_tx` for reload --
+    // its writes into the quadlet tree are picked up by the fs-watch task
+    // below exactly like an external edit.
+    let git_sync =
+        quadlet::gitsync::GitSyncManager::new(Arc::new(config_path.clone()), events_tx.clone());
+    git_sync.start_all(&config.git_syncs, Arc::from(quadlet_dir.as_path()));
+
     // Live status updates: forward systemd PropertiesChanged signals onto
     // the dashboard's event channel.
     let watch_task = systemd::watch::spawn(
@@ -129,6 +138,7 @@ async fn run() -> anyhow::Result<()> {
         events: events_tx,
         shutdown: shutdown_rx,
         restart: restart.clone(),
+        git_sync: git_sync.clone(),
     };
 
     let app = web::build_router(state);
@@ -154,6 +164,7 @@ async fn run() -> anyhow::Result<()> {
     // logged that it shut down.
     watch_task.abort();
     fs_watch_task.abort();
+    git_sync.abort_all();
 
     if restart_requested.load(Ordering::SeqCst) {
         // The listener is dropped by now, so the port is free for the fresh

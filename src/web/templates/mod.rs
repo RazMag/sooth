@@ -6,6 +6,7 @@ pub mod containers;
 pub mod detail;
 pub mod environment;
 pub mod generic;
+pub mod gitsync;
 pub mod icons;
 pub mod images;
 pub mod list;
@@ -41,6 +42,7 @@ pub enum NavItem {
     Images,
     Ports,
     Environment,
+    GitSync,
     /// Not part of `all()` -- rendered as its own control in the sidebar
     /// footer, not the main nav list.
     Settings,
@@ -55,6 +57,7 @@ impl NavItem {
             NavItem::Images => "/images",
             NavItem::Ports => "/ports",
             NavItem::Environment => "/environment",
+            NavItem::GitSync => "/git-sync",
             NavItem::Settings => "/settings",
         }
     }
@@ -67,6 +70,7 @@ impl NavItem {
             NavItem::Images => "Images",
             NavItem::Ports => "Ports",
             NavItem::Environment => "Environment",
+            NavItem::GitSync => "Git Sync",
             NavItem::Settings => "Settings",
         }
     }
@@ -79,11 +83,12 @@ impl NavItem {
             NavItem::Images => Icon::Images,
             NavItem::Ports => Icon::Ports,
             NavItem::Environment => Icon::Environment,
+            NavItem::GitSync => Icon::GitSync,
             NavItem::Settings => Icon::Settings,
         }
     }
 
-    fn all() -> [NavItem; 6] {
+    fn all() -> [NavItem; 7] {
         [
             NavItem::Services,
             NavItem::Volumes,
@@ -91,6 +96,7 @@ impl NavItem {
             NavItem::Images,
             NavItem::Ports,
             NavItem::Environment,
+            NavItem::GitSync,
         ]
     }
 
@@ -595,7 +601,7 @@ pub fn group_kebab(path: &str, csrf: &str) -> Markup {
         details.menu.group-menu {
             summary aria-label="Group actions" { (icon(Icon::More)) }
             div.menu-panel
-                hx-on::response-error="alert('That group change was rejected — the name may be taken, invalid, or the group still has units.')" {
+                hx-on::response-error="alert('That group change was rejected — the name may be taken, invalid, the group still has units, or it is synced from git (see the Git Sync page).')" {
                 form.group-menu-form hx-post="/groups" hx-swap="none" {
                     (csrf_input(csrf))
                     input type="hidden" name="parent" value=(path);

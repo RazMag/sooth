@@ -13,6 +13,13 @@ pub enum DashboardEvent {
     /// The set of quadlet files on disk changed -- created, edited, or
     /// deleted, whether through the app or externally.
     UnitsChanged,
+    /// A git-sync's status changed (cloning, checking, synced, errored) or
+    /// the set of configured syncs changed (added/removed). Separate from
+    /// `UnitsChanged`: a sync's own writes into the quadlet tree already
+    /// drive that event through the ordinary fs-watch path (see
+    /// `quadlet::gitsync`), this one is just for the Git Sync page's own
+    /// status table.
+    GitSyncChanged,
 }
 
 pub type EventSender = tokio::sync::broadcast::Sender<DashboardEvent>;

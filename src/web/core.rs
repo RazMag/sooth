@@ -212,6 +212,9 @@ pub async fn create_unit(
             crate::quadlet::QuadletError::Validation(format!("invalid group '{group}'")).into(),
         );
     }
+    if let Some(synced) = synced_destination(state, group) {
+        return Err(git_sync_conflict(&synced));
+    }
     // Podman keys the generated service off the bare file name, so it must be
     // unique across the whole group tree -- not just the target directory.
     if discovery::find_in_tree(&state.quadlet_dir, file_name).is_some() {
@@ -299,6 +302,9 @@ pub async fn move_unit(
     if unit.group == new_group {
         return Ok(unit);
     }
+    if let Some(synced) = synced_destination(state, new_group) {
+        return Err(git_sync_conflict(&synced));
+    }
     let to_rel = naming::compose_rel_path(new_group, file_name);
     writer::move_file(&state.quadlet_dir, &unit.rel_path(), &to_rel)?;
     state.systemd.reload().await?;
@@ -339,6 +345,12 @@ pub async fn move_group_dir(
         )
         .into());
     }
+    if let Some(synced) = synced_source(state, group) {
+        return Err(git_sync_conflict(&synced));
+    }
+    if let Some(synced) = synced_destination(state, new_parent) {
+        return Err(git_sync_conflict(&synced));
+    }
     let to = naming::compose_rel_path(new_parent, naming::basename(group));
     if to == group {
         return Ok(()); // already at this parent
@@ -353,6 +365,53 @@ pub async fn move_group_dir(
 fn bad_group(g: &str) -> AppError {
     crate::quadlet::QuadletError::Validation(format!(
         "invalid group '{g}': use path segments of letters, digits, '_', '-', '.'; no '..'"
+    ))
+    .into()
+}
+
+/// Whether `group` names a destination a configured git-sync already
+/// manages -- exactly its directory, or somewhere inside it. Guards every
+/// place a unit or group can land: the next sync's `reset --hard` would
+/// just discard anything dropped there by hand. Returns the overlapping
+/// sync's group path (for the error message) rather than a bare bool.
+fn synced_destination(state: &AppState, group: &str) -> Option<String> {
+    destination_overlap(&state.git_sync.synced_groups(), group)
+}
+
+/// Whether relocating or renaming `group` itself would disturb a configured
+/// git-sync's path tracking: `group` *is* a sync's directory, sits inside
+/// one, or contains one as a descendant (any of which would carry the
+/// synced checkout to a new path that `GitSyncConfig.group` no longer
+/// names, so the next poll can't find it).
+fn synced_source(state: &AppState, group: &str) -> Option<String> {
+    source_overlap(&state.git_sync.synced_groups(), group)
+}
+
+/// The pure check behind [`synced_destination`], split out so it's testable
+/// without an `AppState` (which needs a live D-Bus session to construct).
+fn destination_overlap(synced_groups: &[String], group: &str) -> Option<String> {
+    synced_groups
+        .iter()
+        .find(|synced| group == synced.as_str() || group.starts_with(&format!("{synced}/")))
+        .cloned()
+}
+
+/// The pure check behind [`synced_source`]; see [`destination_overlap`].
+fn source_overlap(synced_groups: &[String], group: &str) -> Option<String> {
+    synced_groups
+        .iter()
+        .find(|synced| {
+            group == synced.as_str()
+                || group.starts_with(&format!("{synced}/"))
+                || synced.starts_with(&format!("{group}/"))
+        })
+        .cloned()
+}
+
+fn git_sync_conflict(synced_group: &str) -> AppError {
+    crate::quadlet::QuadletError::Validation(format!(
+        "'{synced_group}' is synced from a git repository (see the Git Sync page) and is \
+         managed by the remote -- it can't be used as a move/create target, or moved/renamed itself"
     ))
     .into()
 }
@@ -386,6 +445,9 @@ pub async fn rename_group(
     let to = naming::compose_rel_path(parent, new_name);
     if to == group {
         return Ok(());
+    }
+    if let Some(synced) = synced_source(state, group) {
+        return Err(git_sync_conflict(&synced));
     }
     writer::move_dir(&state.quadlet_dir, group, &to)?;
     state.systemd.reload().await?;
@@ -438,5 +500,45 @@ mod tests {
         assert_eq!(section_index_path(UnitKind::Image), "/images");
         assert_eq!(section_index_path(UnitKind::Build), "/images");
         assert_eq!(section_index_path(UnitKind::Kube), "/units");
+    }
+
+    fn synced(groups: &[&str]) -> Vec<String> {
+        groups.iter().map(|g| g.to_string()).collect()
+    }
+
+    #[test]
+    fn destination_overlap_flags_the_synced_dir_and_its_subdirs() {
+        let s = synced(&["media/arr"]);
+        assert_eq!(
+            destination_overlap(&s, "media/arr").as_deref(),
+            Some("media/arr")
+        );
+        assert_eq!(
+            destination_overlap(&s, "media/arr/hd").as_deref(),
+            Some("media/arr")
+        );
+        // A sibling that merely shares a prefix is not "inside" it.
+        assert_eq!(destination_overlap(&s, "media/arr-extra"), None);
+        assert_eq!(destination_overlap(&s, "media"), None);
+        assert_eq!(destination_overlap(&s, ""), None);
+    }
+
+    #[test]
+    fn source_overlap_also_catches_moving_an_ancestor_of_a_synced_dir() {
+        let s = synced(&["media/arr"]);
+        // Relocating the synced dir itself.
+        assert_eq!(
+            source_overlap(&s, "media/arr").as_deref(),
+            Some("media/arr")
+        );
+        // Relocating something inside it.
+        assert_eq!(
+            source_overlap(&s, "media/arr/hd").as_deref(),
+            Some("media/arr")
+        );
+        // Relocating an ancestor would carry the synced dir along with it.
+        assert_eq!(source_overlap(&s, "media").as_deref(), Some("media/arr"));
+        // An unrelated group is untouched.
+        assert_eq!(source_overlap(&s, "other"), None);
     }
 }
