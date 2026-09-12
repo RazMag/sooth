@@ -57,5 +57,8 @@ fn render_event(event: DashboardEvent) -> Vec<Result<Event, Infallible>> {
             ]
         }
         DashboardEvent::UnitsChanged => vec![Ok(Event::default().event("units-changed").data("1"))],
+        DashboardEvent::GitSyncChanged => {
+            vec![Ok(Event::default().event("git-sync-changed").data("1"))]
+        }
     }
 }

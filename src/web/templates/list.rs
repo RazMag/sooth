@@ -18,6 +18,18 @@ use crate::web::core;
 /// the `data-filter-target` of the filter box. One value everywhere.
 pub const ROWS_ID: &str = "unit-rows";
 
+/// The two group-name lists every list render needs, bundled into one
+/// parameter (keeps `list_table` under clippy's argument-count lint):
+/// `known` is every existing group directory (drop target / "move to"
+/// autocomplete source), `synced` is the subset of those git-sync already
+/// manages -- see `web::core`'s `synced_destination` / `synced_source`,
+/// the authoritative version of the same check this only previews for the
+/// drag-and-drop guard in `dragdrop.js` and the "synced" chip below.
+pub struct GroupLists<'a> {
+    pub known: &'a [String],
+    pub synced: &'a [String],
+}
+
 /// What a column cell can draw on: the row's own unit and live status, plus
 /// every quadlet on disk (all kinds) for columns that resolve cross-unit
 /// references -- the Volumes/Networks "Used by" column. `all_units` is an
@@ -145,7 +157,7 @@ fn nested_unit_count(units: &[(QuadletUnit, UnitStatus)], group: &str) -> usize 
 /// `aria-expanded="false"`; `groups.js` reconciles it against the per-browser
 /// remembered state, and member rows carry `is-collapsed` so the no-JS /
 /// pre-JS view starts collapsed.
-fn group_header_row(path: &str, count: usize, colspan: usize, csrf: &str) -> Markup {
+fn group_header_row(path: &str, count: usize, colspan: usize, csrf: &str, synced: bool) -> Markup {
     let depth = path.matches('/').count();
     let (parent, last) = match path.rsplit_once('/') {
         Some((p, l)) => (Some(p), l),
@@ -155,9 +167,14 @@ fn group_header_row(path: &str, count: usize, colspan: usize, csrf: &str) -> Mar
         tr.group-row data-group=(path) data-depth=(depth) {
             td.group-head-cell colspan=(colspan - 1) {
                 div.group-row-inner style=(format!("--depth:{depth}")) {
-                    span.drag-handle.group-drag draggable="true"
-                        title="Drag to move this group under another" aria-hidden="true" {
-                        (icon(Icon::Grip))
+                    // A synced group's own directory shouldn't be re-parented
+                    // by hand -- see `web::core::synced_source` -- so it gets
+                    // no drag grip of its own, just the chip below.
+                    @if !synced {
+                        span.drag-handle.group-drag draggable="true"
+                            title="Drag to move this group under another" aria-hidden="true" {
+                            (icon(Icon::Grip))
+                        }
                     }
                     button.group-toggle type="button" aria-expanded="false" title=(path) {
                         span.group-chevron aria-hidden="true" { (icon(Icon::ChevronDown)) }
@@ -168,6 +185,12 @@ fn group_header_row(path: &str, count: usize, colspan: usize, csrf: &str) -> Mar
                             (last)
                         }
                         span.group-count { (count) }
+                    }
+                    @if synced {
+                        a.chip.chip-synced href="/git-sync"
+                            title="Synced from a git repository -- managed by the remote, see the Git Sync page" {
+                            (icon(Icon::GitSync)) "synced"
+                        }
                     }
                 }
             }
@@ -181,10 +204,11 @@ pub fn list_rows(
     units: &[(QuadletUnit, UnitStatus)],
     csrf: &str,
     all_units: &[QuadletUnit],
-    known_groups: &[String],
+    groups: &GroupLists,
 ) -> Markup {
-    let groups = section_groups(units, known_groups);
-    if units.is_empty() && groups.is_empty() {
+    let known_groups = groups.known;
+    let sections = section_groups(units, known_groups);
+    if units.is_empty() && sections.is_empty() {
         return html! {
             tr { td colspan=(spec.columns.len() + 3) .empty { (spec.empty_hint) } }
         };
@@ -196,11 +220,12 @@ pub fn list_rows(
             (row(unit, status, spec.columns, csrf, all_units, known_groups, None))
         }
         // Then one collapsible section per group directory.
-        @for grp in groups {
+        @for grp in sections {
             @let members: Vec<&(QuadletUnit, UnitStatus)> =
                 units.iter().filter(|(u, _)| u.group == grp).collect();
             @let nested = nested_unit_count(units, grp);
-            (group_header_row(grp, nested, colspan, csrf))
+            @let synced = groups.synced.iter().any(|g| g == grp);
+            (group_header_row(grp, nested, colspan, csrf, synced))
             @if members.is_empty() && nested == 0 {
                 @let d = grp.matches('/').count() + 1;
                 tr.group-empty.is-collapsed data-group-member=(grp) data-depth=(d) {
@@ -258,11 +283,11 @@ pub fn list_table(
     csrf: &str,
     rows_route: &str,
     all_units: &[QuadletUnit],
-    known_groups: &[String],
+    groups: &GroupLists,
     create: Markup,
 ) -> Markup {
     html! {
-        (known_groups_datalist(known_groups))
+        (known_groups_datalist(groups.known))
         div.toolbar {
             input.input.input-sm.filter-box type="search" data-filter-target=(ROWS_ID) placeholder="Filter…";
             div.toolbar-actions {
@@ -271,7 +296,17 @@ pub fn list_table(
             }
         }
         div.table-wrap {
-            table.data-table {
+            // `data-synced-groups` -- the drag-and-drop guard in
+            // `dragdrop.js` reads this once to refuse dropping a unit or
+            // group into (or moving/renaming) a git-synced directory; the
+            // server-side checks in `web::core` (`synced_destination` /
+            // `synced_source`) are the authoritative gate either way, this
+            // is just instant feedback instead of a rejected round trip.
+            // Lives on `table-wrap`, outside the `tbody` htmx swaps, so it
+            // survives a `units-changed` row refresh; it only goes stale if
+            // a sync is added/removed while this page is already open --
+            // reloading the page picks up the change.
+            table.data-table data-synced-groups=(groups.synced.join(",")) {
                 thead {
                     tr {
                         th { "File" }
@@ -288,7 +323,7 @@ pub fn list_table(
                 // menu) in place -- swapping the whole `<tbody>` here would
                 // slam shut any menu the user has open.
                 tbody id=(ROWS_ID) hx-get=(rows_route) hx-trigger="sse:units-changed" hx-swap="innerHTML" {
-                    (list_rows(spec, units, csrf, all_units, known_groups))
+                    (list_rows(spec, units, csrf, all_units, groups))
                 }
             }
         }
@@ -300,12 +335,14 @@ pub fn list_page(
     units: &[(QuadletUnit, UnitStatus)],
     csrf: &str,
     all_units: &[QuadletUnit],
-    known_groups: &[String],
+    groups: &GroupLists,
     health: Health,
 ) -> Markup {
     let body = html! {
         (page_header(spec.title, html! {}))
-        (list_table(spec, units, csrf, &rows_route(spec), all_units, known_groups, new_actions(spec)))
+        (list_table(
+            spec, units, csrf, &rows_route(spec), all_units, groups, new_actions(spec),
+        ))
     };
     shell(spec.title, spec.active_nav, Some(health), body)
 }

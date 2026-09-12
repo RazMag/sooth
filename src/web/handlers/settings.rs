@@ -5,7 +5,6 @@
 //! touched settings screen.
 
 use std::net::SocketAddr;
-use std::path::Path;
 
 use axum::Form;
 use axum::extract::{Query, State};
@@ -152,7 +151,7 @@ pub async fn save(
         ),
     ];
 
-    patch_config_toml(&state.config_path, &updates).map_err(|e| {
+    crate::config::patch_config_toml(&state.config_path, &updates).map_err(|e| {
         AppError::Internal(anyhow::anyhow!(
             "failed to write {}: {e}",
             state.config_path.display()
@@ -201,7 +200,7 @@ pub async fn change_password(
     }
 
     let hash = crate::auth::hash_password(&form.new_password).map_err(AppError::Internal)?;
-    patch_config_toml(
+    crate::config::patch_config_toml(
         &state.config_path,
         &[("auth_password_hash", toml::Value::String(hash))],
     )
@@ -258,88 +257,8 @@ pub async fn refresh_health(
     Ok(templates::settings::health_card(state.health.refresh()))
 }
 
-/// Read-modify-write the config TOML: parse whatever is already on disk
-/// (empty if absent), apply `updates`, and write the whole table back. This
-/// preserves keys the Settings form doesn't manage -- most importantly
-/// `auth_password_hash`, which a plain "rewrite the five form fields" save
-/// would otherwise drop.
-fn patch_config_toml(path: &Path, updates: &[(&str, toml::Value)]) -> std::io::Result<()> {
-    let mut table: toml::Table = match std::fs::read_to_string(path) {
-        Ok(text) => text.parse().map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("existing config is not valid TOML: {e}"),
-            )
-        })?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
-        Err(e) => return Err(e),
-    };
-    for (key, value) in updates {
-        table.insert((*key).to_string(), value.clone());
-    }
-    let text = toml::to_string_pretty(&table)
-        .map_err(|e| std::io::Error::other(format!("failed to serialize config: {e}")))?;
-    write_atomic(path, &text)
-}
-
-fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!(".sooth-settings-{}", uuid::Uuid::new_v4()));
-    std::fs::write(&tmp, contents)?;
-    std::fs::rename(&tmp, path)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn patch_preserves_unmanaged_keys() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(
-            &path,
-            "auth_password_hash = \"$argon2id$abc\"\nbind_addr = \"127.0.0.1:8420\"\n",
-        )
-        .unwrap();
-
-        patch_config_toml(
-            &path,
-            &[("bind_addr", toml::Value::String("0.0.0.0:9000".to_string()))],
-        )
-        .unwrap();
-
-        let reparsed: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
-        assert_eq!(reparsed["bind_addr"].as_str(), Some("0.0.0.0:9000"));
-        assert_eq!(
-            reparsed["auth_password_hash"].as_str(),
-            Some("$argon2id$abc"),
-            "a general settings save must not drop the password hash"
-        );
-    }
-
-    #[test]
-    fn patch_creates_a_missing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nested/config.toml");
-
-        patch_config_toml(
-            &path,
-            &[(
-                "auth_password_hash",
-                toml::Value::String("$argon2id$xyz".to_string()),
-            )],
-        )
-        .unwrap();
-
-        let reparsed: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
-        assert_eq!(
-            reparsed["auth_password_hash"].as_str(),
-            Some("$argon2id$xyz")
-        );
-    }
-
     #[test]
     fn hash_then_verify_round_trips() {
         let hash = crate::auth::hash_password("correct horse battery staple").unwrap();

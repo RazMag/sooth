@@ -148,6 +148,25 @@
   .btn:disabled { opacity: 0.55; cursor: default; }
   .btn svg { width: 1rem; height: 1rem; flex: none; }
 
+  /* A submit button mid-request whose result isn't instant (see
+     gitsync.rs's add form: the request blocks on a real `git clone`) --
+     the label hides and a small spinner takes its place, so waiting reads
+     as "working" rather than "did my click register?". */
+  @keyframes btn-spin { to { transform: rotate(360deg); } }
+  .btn-loading { position: relative; color: transparent; pointer-events: none; }
+  .btn-loading::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    width: 0.9rem;
+    height: 0.9rem;
+    border: 2px solid var(--color-muted);
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: btn-spin 0.6s linear infinite;
+  }
+
   .btn-primary {
     background: var(--color-accent);
     border-color: var(--color-accent);
@@ -284,6 +303,9 @@
     letter-spacing: 0.02em;
   }
   .chip-muted { background: var(--color-raised); color: var(--color-muted); }
+  .chip-synced { gap: 0.25rem; text-decoration: none; }
+  .chip-synced svg { width: 0.75rem; height: 0.75rem; }
+  .chip-synced:hover { background: var(--color-accent); color: var(--color-surface); }
 
   /* Surfaces ------------------------------------------------- */
   .card {
@@ -607,7 +629,13 @@
   }
   .section-header h2 { margin: 0; }
   .section-header .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-  .page-meta { color: var(--color-muted); font-size: 0.85rem; margin: 0.15rem 0 0; }
+  /* The bottom margin matters more than it looks: a subtitle with nothing
+     under it but a card/list (no intervening toolbar/heading of its own --
+     see environment.rs and gitsync.rs) would otherwise sit right on top of
+     it, since `.card` carries no margin of its own. Adjacent margins
+     collapse to their max, so this is a no-op wherever the next element
+     (e.g. `.toolbar`) already supplies at least this much top margin. */
+  .page-meta { color: var(--color-muted); font-size: 0.85rem; margin: 0.15rem 0 1rem; }
   .toolbar { display: flex; align-items: center; gap: 0.5rem; margin: 1rem 0 0.5rem; flex-wrap: wrap; }
   .filter-box { flex: 1 1 12rem; max-width: 20rem; }
   /* Create actions ("New", or "Container"/"Pod") sit inline with the filter
@@ -617,6 +645,32 @@
   .action-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.9rem 0; }
   .detail-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.75rem 0 0.5rem; }
   .inline-form { display: inline; }
+
+  /* A git-sync card's routine actions (Sync now / Force resync / the "Edit"
+     disclosure). Like `.action-row`, but `align-items: flex-start` so an
+     expanded Edit form (tall) doesn't stretch the plain buttons beside it
+     to match its height -- `.action-row` itself is left alone since its
+     other user (the detail page) has no such expanding sibling. */
+  .gitsync-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: flex-start; margin: 0.9rem 0; }
+
+  /* A `<details>` whose summary reads as a plain button (no marker/list
+     styling) and whose revealed content is a normal block below it, same
+     technique as `.add-group`/`.add-group-form` -- used for both the "Edit"
+     and "Remove" disclosures on a git-sync card. */
+  .gitsync-disclosure > summary { list-style: none; cursor: pointer; }
+  .gitsync-disclosure > summary::-webkit-details-marker { display: none; }
+  .gitsync-disclosure-body { margin-top: 0.6rem; max-width: 26rem; }
+  .gitsync-disclosure-body > .field:last-of-type { margin-bottom: 0.6rem; }
+
+  /* The one destructive disclosure, set apart from the routine actions above
+     it with a rule so a checkbox/confirm-input/button trio never reads as
+     just another button next to "Sync now". */
+  .gitsync-danger {
+    display: block;
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--color-line);
+  }
 
   /* Auto-update policy picker in the detail action row. One uniform surface --
      a muted "Auto-update" caption and a borderless <select>, split by a hair
@@ -732,6 +786,24 @@
   .data-table tr.dragging { opacity: 0.45; }
   .data-table tr.drag-over > td { box-shadow: inset 0 2px 0 var(--color-accent); }
   .data-table tr.group-row.drag-over > td { background: var(--color-accent-soft); box-shadow: none; }
+  /* A drop target sooth's own `quadlet::gitsync` manages -- see dragdrop.js's
+     `isSyncedTarget` -- flags as forbidden instead of accepted. */
+  .data-table tr.drag-forbidden > td { box-shadow: inset 0 2px 0 var(--color-danger); cursor: not-allowed; }
+  .data-table tr.group-row.drag-forbidden > td { background: var(--color-danger-soft); box-shadow: none; }
+  /* The row highlight above says "not here"; this floating banner (created
+     on demand by dragdrop.js's `showForbiddenHint`) says *why* -- the red
+     inset alone doesn't explain itself, especially the first time someone
+     hits it. */
+  .drag-forbidden-hint {
+    position: fixed;
+    top: 0.75rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    margin: 0;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    pointer-events: none;
+  }
 
   /* Collapsible group sections in the list tables ------ *
    * Nesting is shown three ways: the header spells out the parent path
@@ -775,6 +847,10 @@
   .data-table tbody tr.drag-over .row-indent,
   .data-table tbody tr.group-row.drag-over .group-row-inner {
     border-left-color: var(--color-accent);
+  }
+  .data-table tbody tr.drag-forbidden .row-indent,
+  .data-table tbody tr.group-row.drag-forbidden .group-row-inner {
+    border-left-color: var(--color-danger);
   }
   .group-toggle {
     display: flex;

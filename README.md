@@ -57,6 +57,16 @@ CSS/JS embedded, so it runs from any directory.
   first, then one section per group; collapsed state is remembered per
   browser). `.d/` drop-in directories and the `env/` sidecar dir are still
   skipped.
+- **Git Sync** — point a group directory at a git repository from the Git
+  Sync page and sooth keeps it up to date on its own: it checks the remote
+  on a per-sync interval, and fast-forwards the local checkout whenever it
+  moves (adding/removing a sync applies immediately, no restart). Auth is
+  whatever already works for this user's own `git` — SSH agent,
+  `~/.ssh/config`, a credential helper — sooth stores no credentials of its
+  own. A checkout that has diverged from the remote is reported as an error
+  rather than silently overwritten; a "Force resync" action is there to
+  discard the divergence on purpose. Files inside a synced group are managed
+  by the remote and get overwritten on the next sync, so don't hand-edit them.
 - Writes are atomic (temp file + `rename`) and validated up front — including
   a best-effort dry-run against the real podman quadlet generator — so a
   reader never sees a partial file and an invalid submission never lands.
@@ -78,6 +88,10 @@ CSS/JS embedded, so it runs from any directory.
   (`/usr/lib/systemd/user-generators/podman-user-generator`) is used for
   dry-run validation when present; sooth still works without it, relying on
   its own structural checks.
+- **`git` on `PATH`** only if you use Git Sync — sooth shells out to it
+  (clone/fetch/reset), running as this same user, so whatever `git` setup
+  already works for that user (SSH agent, credential helper, …) is what
+  Git Sync gets too.
 - **A Rust stable toolchain**, 2024 edition (rustc 1.85 or newer), to build.
   `rust-toolchain.toml` pins `stable` with `rustfmt`/`clippy`; `rustup` picks
   it up automatically, no manual `rustup default` needed.

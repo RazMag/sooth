@@ -9,8 +9,8 @@ use crate::auth;
 use crate::config::AppState;
 
 use super::handlers::{
-    detail, edit_delete, environment, groups, list, logs, ports, raw_create, services, settings,
-    unit_ops, validate,
+    detail, edit_delete, environment, gitsync, groups, list, logs, ports, raw_create, services,
+    settings, unit_ops, validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
@@ -120,6 +120,12 @@ pub fn build_router(state: AppState) -> Router {
             get(environment::index).post(environment::add),
         )
         .route("/environment/delete", post(environment::remove))
+        .route("/git-sync", get(gitsync::page).post(gitsync::add))
+        .route("/git-sync/rows", get(gitsync::rows))
+        .route("/git-sync/edit", post(gitsync::edit))
+        .route("/git-sync/sync", post(gitsync::sync_now))
+        .route("/git-sync/force", post(gitsync::force_resync))
+        .route("/git-sync/delete", post(gitsync::delete))
         .route("/settings", get(settings::page).post(settings::save))
         .route("/settings/password", post(settings::change_password))
         .route("/settings/restart", post(settings::restart))

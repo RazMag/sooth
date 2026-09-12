@@ -1,6 +1,7 @@
 pub mod detail;
 pub mod edit_delete;
 pub mod environment;
+pub mod gitsync;
 pub mod groups;
 pub mod list;
 pub mod logs;
