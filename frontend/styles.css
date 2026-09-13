@@ -454,6 +454,46 @@
   .settings-form > .btn-primary { margin-top: 1.25rem; }
   .settings-form > .field-hint { margin-top: 0.4rem; }
 
+  /* Settings page: Updates card */
+  .selfupdate-version { margin: 0 0 0.75rem; color: var(--color-muted); font-size: 0.85rem; }
+  .selfupdate-status > .field-hint { margin: 0 0 1rem; }
+  .selfupdate-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0 0 1.25rem; }
+  .selfupdate-mode-hints {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 0.6rem;
+    row-gap: 0.3rem;
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--color-faint);
+  }
+  .selfupdate-mode-hints dt { white-space: nowrap; }
+  .selfupdate-mode-hints dd { margin: 0; }
+
+  /* Segmented (three-way) toggle -- radio inputs styled as one connected
+     button row, each label being the visible "button" for its hidden input. */
+  .segmented { display: inline-flex; border: 1px solid var(--color-line-strong); border-radius: 0.5rem; overflow: hidden; width: fit-content; }
+  .segmented input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+  }
+  .segmented label {
+    padding: 0.4rem 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--color-muted);
+    background: var(--color-surface);
+    cursor: pointer;
+    user-select: none;
+  }
+  .segmented label:not(:last-of-type) { border-right: 1px solid var(--color-line-strong); }
+  .segmented input:not(:checked) + label:hover { background: var(--color-raised); }
+  .segmented input:checked + label { background: var(--color-accent); color: var(--color-on-accent); }
+  .segmented input:focus-visible { outline: none; }
+  .segmented input:focus-visible + label { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+
   .validate-status { display: flex; align-items: flex-start; gap: 0.3rem; font-size: 0.82rem; margin-top: 0.4rem; min-height: 1.2em; }
   .validate-status:empty { display: none; }
   .validate-status svg { width: 0.95rem; height: 0.95rem; flex: none; margin-top: 0.1rem; }

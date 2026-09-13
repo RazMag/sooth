@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+jobs:
+  # Guarantees the version `selfupdate` compares against (baked into the
+  # binary via `env!("CARGO_PKG_VERSION")`) always matches the tag the
+  # release is published under.
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(sed -nE 's/^version = "(.*)"$/\1/p' Cargo.toml | head -1)
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag does not match Cargo.toml version $pkg" >&2
+            exit 1
+          fi
+
+  # One native build per target -- no cross-compilation (a GitHub-hosted ARM64
+  # runner builds the ARM64 target directly), which keeps this job as simple
+  # as `ci.yml`'s `rust` job. Ships the raw binary, no archive: sooth already
+  # embeds its own static assets, and `self_update`'s asset matching only
+  # needs the target triple as a substring of the file name.
+  build:
+    needs: check-version
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # No Node here, same reasoning as `ci.yml`'s `rust` job: build.rs falls
+    # back to the committed static/ assets, which the `frontend` CI job
+    # already verifies are fresh on every push.
+    env:
+      SOOTH_SKIP_FRONTEND_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }}
+      - run: |
+          out="sooth-${{ matrix.target }}"
+          cp "target/${{ matrix.target }}/release/sooth" "$out"
+          chmod +x "$out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sooth-${{ matrix.target }}
+          path: sooth-${{ matrix.target }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      # Not required for `selfupdate`'s own verification (it checks GitHub's
+      # published per-asset digest instead), but cheap to include for anyone
+      # who wants to verify a download by hand.
+      - run: (cd dist && sha256sum * > SHA256SUMS)
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

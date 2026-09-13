@@ -46,12 +46,13 @@ opens `Connection::session()` on startup and exits if it fails).
 | `main.rs` | Startup: load config, connect D-Bus, spawn the status watch + fs watch tasks, serve, cancel tasks on shutdown. Also the `--hash-password` CLI. |
 | `config.rs` | `Config` (figment: defaults → TOML → `SOOTH_` env) and `AppState` (the `Arc`-wrapped handles every handler gets). |
 | `error.rs` | `AppError` + `PageError` (full-page) / `FragmentError` (htmx inline) wrappers. The **only** place an error becomes an HTTP response; every handler returns `Result<_, PageError|FragmentError>` and uses `?`. |
-| `events.rs` | `DashboardEvent` (`Status { service, status }` / `UnitsChanged` / `GitSyncChanged`) on an app-wide `broadcast` channel. Independent of `systemd`/`web`. |
+| `events.rs` | `DashboardEvent` (`Status { service, status }` / `UnitsChanged` / `GitSyncChanged` / `SelfUpdateChanged`) on an app-wide `broadcast` channel. Independent of `systemd`/`web`. |
 | `quadlet/` | Disk side. `discovery` (**recursive** enumerate/parse/load, `find_in_tree`/`list_groups`, recursive fs watch), `parser` (INI → ordered `Section`s, keeps duplicate keys), `model` (`QuadletUnit` incl. `group` + `rel_path()`, `UnitKind`), `naming` (file name ↔ service name, `valid_stem`, `valid_group`, `compose_rel_path`, `basename`), `writer` (validate + atomic write + generator dry-run, `move_file` / `move_dir` / `delete_dir` — groups are **not** auto-pruned when emptied), `ports` (`PublishPort=` parse + collision detection), `envfile` (`env/<stem>.env` sidecar + managed `EnvironmentFile=` line patching — **group-independent**, always keyed by stem under `env/`), `install` (`[Install]` section = rootless "enable": `set_enabled` raw-text patch of `WantedBy=default.target`), `gitsync` (a group directory mirrored from a git remote: `git` holds the shell-out wrappers, `manager` holds `GitSyncManager` — one poll task per configured sync, live add/remove, see its Gotchas note below). |
+| `selfupdate/` | Checks GitHub Releases for a newer `sooth` binary and downloads it. `mod.rs` holds the config/status types (`UpdateMode::Off\|Notify\|Auto`); `manager` holds `SelfUpdateManager` — one poll task (there's only ever one target: sooth itself), live-reconfigurable, "Check now"/"Download update" wake it early exactly like git-sync's "Sync now". `Notify` mode stops at `UpdateState::ReadyToRestart` once downloaded; installing it is just the Settings page's ordinary Restart button, not a distinct self-update action. `Auto` mode notifies `restart` itself right after downloading. The GitHub API listing, checksum verification, download, and the actual binary swap are all delegated to the `self_update` crate (which uses `self-replace` internally); this module only decides *when* to check and *whether* to download what it finds. See its Gotchas note below on `current_exe`/re-exec. |
 | `systemd/` | D-Bus side. `client` (`org.freedesktop.systemd1.Manager` proxy: start/stop/restart/reload/status + environment get/set/unset), `status` (fetch `UnitStatus` via `Properties.GetAll`), `watch` (subscribe to `PropertiesChanged` for every unit, filter to sooth-managed, re-fetch + broadcast). **No enable/disable D-Bus call**: podman's `.service` units live under a systemd generator dir, which `EnableUnitFiles` rejects ("transient or generated"). "Enable"/"disable" is `quadlet::install::set_enabled` patching the file's `[Install]` section + `client.reload()`. "Enabled" state is **not** read from the file (it can name a target that doesn't exist / isn't in the login path) but from systemd's computed `WantedBy=`/`RequiredBy=` reverse deps — `UnitStatus::is_autostart_enabled` is true iff `default.target` is among them. `UnitFileState` is unusable here: systemd always reports `generated` for these. |
 | `hostenv.rs` | The user manager's `${NAME}` environment. Owns `~/.config/environment.d/50-sooth.conf`; reads other `*.conf` there read-only. |
 | `journal.rs` | Shells out to `journalctl --user -u <service>` for the log tail + live follow. (`quadlet::gitsync::git` is the app's other shell-out, to `git`.) |
-| `web/routes.rs` | Router assembly. `mount_unit_routes` registers the shared per-unit routes (detail/actions/start/…/edit/delete/**move**/logs) at **six** prefixes: `/containers /pods /volumes /networks /images /units`. Plus the group-directory routes (`handlers::groups` → `core::*group*`): `POST /groups` (`mkdir` an empty group, or a subgroup with a `parent` field), `/groups/move` (re-parent), `/groups/rename` (rename the leaf), `/groups/delete` (rmdir — refused while any unit lives under it). And the Git Sync routes (`handlers::gitsync` → `GitSyncManager`): `GET /git-sync` (page) + `POST` (add), `/git-sync/rows` (status fragment), `/git-sync/{sync,force,delete}` — each takes its target `group` from the POST body, not a `{group}` path segment, since a nested group's `/` can't live in one. |
+| `web/routes.rs` | Router assembly. `mount_unit_routes` registers the shared per-unit routes (detail/actions/start/…/edit/delete/**move**/logs) at **six** prefixes: `/containers /pods /volumes /networks /images /units`. Plus the group-directory routes (`handlers::groups` → `core::*group*`): `POST /groups` (`mkdir` an empty group, or a subgroup with a `parent` field), `/groups/move` (re-parent), `/groups/rename` (rename the leaf), `/groups/delete` (rmdir — refused while any unit lives under it). And the Git Sync routes (`handlers::gitsync` → `GitSyncManager`): `GET /git-sync` (page) + `POST` (add), `/git-sync/rows` (status fragment), `/git-sync/{sync,force,delete}` — each takes its target `group` from the POST body, not a `{group}` path segment, since a nested group's `/` can't live in one. The self-update routes (`handlers::selfupdate` → `SelfUpdateManager`) live under `/settings/self-update` instead of a dedicated page (there's exactly one target, unlike git-sync's arbitrary-many groups): `GET`/`POST` (card fragment + save), `/self-update/check`, `/self-update/download`. Installing a downloaded update posts to the existing `/settings/restart`, not a self-update-specific route. |
 | `web/core.rs` | Kind-agnostic business logic (`execute_action`, `create_unit`, `edit_unit`, `delete_unit`, `move_unit`, `load_units_for_kinds`) + `section_path` / `section_index_path` / `unit_url` — the single source of truth for turning a unit into a URL. |
 | `web/handlers/` | Thin Axum handlers. Most kinds share one implementation; only `services` (the `/` home = Containers + Pods) and `list` (Volumes/Networks/Images/all) differ, and only by a `ListSpec`. `raw_create` is the one create path for every section. |
 | `web/sse.rs` | `/events` stream: renders `DashboardEvent`s as named SSE events (`status-{service}` carries a badge fragment; `units-changed` / `any-status` are `"1"` pings that trigger htmx re-fetches). |
@@ -165,6 +166,29 @@ opens `Connection::session()` on startup and exits if it fails).
   writes land inside `quadlet_dir` exactly like an external edit, so
   `discovery::watch` + the existing fs-watch task already reload and refresh
   the UI for it. Don't add a second reload path here.
+- `main::run` captures `std::env::current_exe()` **exactly once**, at
+  startup, into `exe_path`, and `reexec` takes that same value as a
+  parameter instead of calling `current_exe()` itself. Never change this back
+  to re-deriving the path at re-exec time: once `selfupdate` has renamed a
+  freshly downloaded binary over the running binary's own path,
+  `/proc/self/exe` for *this* still-running (now-unlinked) process resolves
+  to `"<path> (deleted)"` — a string naming no real file. This is real, not
+  theoretical — verified directly on this host: a plain `mv` over a running
+  process's own executable makes `std::env::current_exe()` return the
+  `(deleted)` form immediately. `reexec` re-resolving the path at shutdown
+  time would then fail outright after every self-update, even though the
+  file actually sitting at `exe_path` is perfectly fine to exec.
+  `selfupdate` itself doesn't need this same care for its *own* swap: the
+  `self_update`/`self-replace` crates resolve `current_exe()` internally, but
+  do so before any swap has happened in this process's lifetime, which is
+  the one case where a fresh resolution is still correct.
+- `selfupdate::manager`'s poll task loops forever too, like the others above
+  — `main.rs` calls `self_update.abort()` alongside them. Unlike git-sync, a
+  successful download doesn't touch `quadlet_dir` at all. Only `Auto` mode
+  calls `restart.notify_one()` itself; `Notify` mode stops at
+  `ReadyToRestart` and the card's "Install and restart" button posts
+  straight to the existing `/settings/restart` action -- there is no
+  separate self-update-specific restart mechanism either way.
 
 ## Commit style
 

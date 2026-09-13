@@ -67,6 +67,14 @@ CSS/JS embedded, so it runs from any directory.
   rather than silently overwritten; a "Force resync" action is there to
   discard the divergence on purpose. Files inside a synced group are managed
   by the remote and get overwritten on the next sync, so don't hand-edit them.
+- **Self-update** — checks GitHub Releases for a newer `sooth` binary on a
+  schedule, from the Updates card on the Settings page: *Off* (the default),
+  *Notify* (surface an "update available" banner, then let a human download
+  it and separately install it when ready), or *Auto* (download and install
+  without asking). Installing always restarts sooth (same as the Restart
+  button: in-memory sessions are cleared and the dashboard is briefly
+  unavailable). Point it at a fork's own repo via the Updates card's "GitHub
+  repository" field if it publishes its own releases.
 - Writes are atomic (temp file + `rename`) and validated up front — including
   a best-effort dry-run against the real podman quadlet generator — so a
   reader never sees a partial file and an invalid submission never lands.
@@ -92,6 +100,10 @@ CSS/JS embedded, so it runs from any directory.
   (clone/fetch/reset), running as this same user, so whatever `git` setup
   already works for that user (SSH agent, credential helper, …) is what
   Git Sync gets too.
+- **Outbound HTTPS to GitHub** only if you enable self-update — it checks
+  `api.github.com` and downloads from GitHub's release CDN, matching only an
+  asset built for the exact host architecture (`x86_64`/`aarch64`
+  `linux-gnu`).
 - **A Rust stable toolchain**, 2024 edition (rustc 1.85 or newer), to build.
   `rust-toolchain.toml` pins `stable` with `rustfmt`/`clippy`; `rustup` picks
   it up automatically, no manual `rustup default` needed.

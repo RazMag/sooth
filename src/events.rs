@@ -20,6 +20,10 @@ pub enum DashboardEvent {
     /// `quadlet::gitsync`), this one is just for the Git Sync page's own
     /// status table.
     GitSyncChanged,
+    /// Sooth's self-update status changed (checking, update available,
+    /// applying, errored) or its settings changed -- see
+    /// `crate::selfupdate`. Drives the Settings page's Updates card.
+    SelfUpdateChanged,
 }
 
 pub type EventSender = tokio::sync::broadcast::Sender<DashboardEvent>;

@@ -13,6 +13,7 @@ mod hostenv;
 mod journal;
 mod logging;
 mod quadlet;
+mod selfupdate;
 mod systemd;
 mod web;
 
@@ -51,6 +52,15 @@ fn hash_password_cli() -> anyhow::Result<()> {
 }
 
 async fn run() -> anyhow::Result<()> {
+    // Captured once, here, before anything else runs -- see the Gotchas note
+    // in `AGENTS.md` on why `reexec` must reuse this exact value rather than
+    // calling `current_exe()` again later. Once `selfupdate` has renamed a
+    // freshly downloaded binary over this path, `current_exe()` (which reads
+    // `/proc/self/exe`) resolves to `"<path> (deleted)"` for this
+    // still-running process -- a string naming no real file.
+    let exe_path = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("failed to resolve the running executable's path: {e}"))?;
+
     let config_path = std::env::var_os("SOOTH_CONFIG")
         .map(Into::into)
         .unwrap_or_else(config::default_config_path);
@@ -81,6 +91,9 @@ async fn run() -> anyhow::Result<()> {
     let health = health::HealthCell::new(initial_health);
 
     let (events_tx, _rx) = broadcast::channel(256);
+    // Created here (rather than just before `AppState`, as previously) so it
+    // already exists when `self_update` is constructed below.
+    let restart = Arc::new(Notify::new());
 
     // Git-synced groups: one poll task per configured entry, kept live
     // (add/remove don't need a restart) rather than just a config snapshot.
@@ -90,6 +103,17 @@ async fn run() -> anyhow::Result<()> {
     let git_sync =
         quadlet::gitsync::GitSyncManager::new(Arc::new(config_path.clone()), events_tx.clone());
     git_sync.start_all(&config.git_syncs, Arc::from(quadlet_dir.as_path()));
+
+    // Self-update: one poll task, live-reconfigurable exactly like
+    // `git_sync` above. A successful apply replaces the binary at `exe_path`
+    // on disk and then notifies `restart` -- the same restart/re-exec
+    // plumbing the Settings page's "Restart" button uses.
+    let self_update = selfupdate::SelfUpdateManager::new(
+        Arc::new(config_path.clone()),
+        events_tx.clone(),
+        restart.clone(),
+    );
+    self_update.start(&config.self_update);
 
     // Live status updates: forward systemd PropertiesChanged signals onto
     // the dashboard's event channel.
@@ -127,7 +151,6 @@ async fn run() -> anyhow::Result<()> {
     };
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let restart = Arc::new(Notify::new());
 
     let state = AppState {
         config: Arc::new(config.clone()),
@@ -139,6 +162,7 @@ async fn run() -> anyhow::Result<()> {
         shutdown: shutdown_rx,
         restart: restart.clone(),
         git_sync: git_sync.clone(),
+        self_update: self_update.clone(),
     };
 
     let app = web::build_router(state);
@@ -165,28 +189,36 @@ async fn run() -> anyhow::Result<()> {
     watch_task.abort();
     fs_watch_task.abort();
     git_sync.abort_all();
+    self_update.abort();
 
     if restart_requested.load(Ordering::SeqCst) {
         // The listener is dropped by now, so the port is free for the fresh
         // process to rebind. `exec` only returns on failure.
-        return reexec();
+        return reexec(&exe_path);
     }
 
     info!("shut down cleanly");
     Ok(())
 }
 
-/// Replace the current process with a fresh `sooth`, inheriting argv and the
-/// environment. This is how the in-app "Restart" button reloads config: it
-/// works the same whether sooth runs under systemd, the dev script, or a
-/// bare shell, none of which a `systemctl restart` or a plain exit would.
+/// Replace the current process with a fresh `sooth` at `exe`, inheriting argv
+/// and the environment. This is how the in-app "Restart" button reloads
+/// config, and how `selfupdate` applies an update: it works the same whether
+/// sooth runs under systemd, the dev script, or a bare shell, none of which a
+/// `systemctl restart` or a plain exit would.
+///
+/// `exe` must be the path captured by `run` at startup, not a fresh
+/// `std::env::current_exe()` call here -- see the Gotchas note in
+/// `AGENTS.md`. If `selfupdate` has replaced the binary at that path, this
+/// process is still running from the now-unlinked original file, and
+/// re-deriving the path at this point would resolve to `"<path> (deleted)"`
+/// instead of the fresh binary actually sitting at `exe`.
 #[cfg(unix)]
-fn reexec() -> anyhow::Result<()> {
+fn reexec(exe: &std::path::Path) -> anyhow::Result<()> {
     use std::os::unix::process::CommandExt;
 
-    let exe = std::env::current_exe()?;
     info!(exe = %exe.display(), "restarting: re-executing");
-    let err = std::process::Command::new(&exe)
+    let err = std::process::Command::new(exe)
         .args(std::env::args_os().skip(1))
         .exec();
     Err(anyhow::anyhow!(
@@ -196,7 +228,7 @@ fn reexec() -> anyhow::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn reexec() -> anyhow::Result<()> {
+fn reexec(_exe: &std::path::Path) -> anyhow::Result<()> {
     anyhow::bail!("in-app restart is only supported on Unix")
 }
 
