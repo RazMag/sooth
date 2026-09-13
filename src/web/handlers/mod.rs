@@ -7,6 +7,7 @@ pub mod list;
 pub mod logs;
 pub mod ports;
 pub mod raw_create;
+pub mod selfupdate;
 pub mod services;
 pub mod settings;
 pub mod unit_ops;

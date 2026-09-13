@@ -38,6 +38,8 @@ pub async fn page(
         Some(_) => Some("Saved. Restart sooth for changes to take effect."),
         None => None,
     };
+    let self_update_config = state.self_update.config_snapshot();
+    let self_update_status = state.self_update.snapshot();
     templates::settings::page(
         &values,
         &EnvLocks::detect(),
@@ -45,7 +47,11 @@ pub async fn page(
         &csrf,
         message,
         None,
-        state.health.get(),
+        templates::settings::LiveStatus {
+            health: state.health.get(),
+            self_update_config: &self_update_config,
+            self_update_status: &self_update_status,
+        },
     )
 }
 
@@ -60,6 +66,8 @@ async fn render_error(
     let csrf = crate::auth::csrf::current(session)
         .await
         .unwrap_or_default();
+    let self_update_config = state.self_update.config_snapshot();
+    let self_update_status = state.self_update.snapshot();
     (
         axum::http::StatusCode::UNPROCESSABLE_ENTITY,
         templates::settings::page(
@@ -69,7 +77,11 @@ async fn render_error(
             &csrf,
             None,
             Some(msg),
-            state.health.get(),
+            templates::settings::LiveStatus {
+                health: state.health.get(),
+                self_update_config: &self_update_config,
+                self_update_status: &self_update_status,
+            },
         ),
     )
         .into_response()

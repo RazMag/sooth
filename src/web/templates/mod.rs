@@ -14,6 +14,7 @@ pub mod logs;
 pub mod networks;
 pub mod pods;
 pub mod ports;
+pub mod selfupdate;
 pub mod services;
 pub mod settings;
 pub mod volumes;

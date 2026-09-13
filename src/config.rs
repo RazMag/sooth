@@ -10,6 +10,7 @@ use crate::events::EventSender;
 use crate::health::HealthCell;
 use crate::quadlet::QuadletError;
 use crate::quadlet::gitsync::{GitSyncConfig, GitSyncManager};
+use crate::selfupdate::{SelfUpdateConfig, SelfUpdateManager};
 use crate::systemd::Client;
 
 /// App configuration, layered (later wins) as: compiled-in defaults -> an
@@ -39,6 +40,12 @@ pub struct Config {
     /// rather than the rest of this struct's "edit and restart" fields.
     #[serde(default)]
     pub git_syncs: Vec<GitSyncConfig>,
+    /// Whether/how sooth checks GitHub Releases for a newer version of
+    /// itself -- see `crate::selfupdate`. A `[self_update]` table, managed
+    /// live (no restart needed) by its Settings card, same reasoning as
+    /// `git_syncs` above.
+    #[serde(default)]
+    pub self_update: SelfUpdateConfig,
 }
 
 fn default_idle_timeout() -> u64 {
@@ -55,6 +62,7 @@ impl Default for Config {
             log_filter: None,
             session_idle_timeout_secs: default_idle_timeout(),
             git_syncs: Vec::new(),
+            self_update: SelfUpdateConfig::default(),
         }
     }
 }
@@ -170,6 +178,28 @@ pub(crate) fn patch_git_syncs(
     write_config_toml(path, &table)
 }
 
+/// Read-modify-write the whole `self_update` table: deserializes it into a
+/// `SelfUpdateConfig` (defaulted if the key is absent), lets `mutate` change
+/// it, then writes it back. Same shape as `patch_git_syncs`, just for a
+/// single struct rather than a list.
+pub(crate) fn patch_self_update(
+    path: &Path,
+    mutate: impl FnOnce(&mut SelfUpdateConfig),
+) -> std::io::Result<()> {
+    let mut table = read_config_toml(path)?;
+    let mut config: SelfUpdateConfig = match table.remove("self_update") {
+        Some(value) => value.try_into().map_err(|e: toml::de::Error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+        })?,
+        None => SelfUpdateConfig::default(),
+    };
+    mutate(&mut config);
+    let value = toml::Value::try_from(&config)
+        .map_err(|e| std::io::Error::other(format!("failed to serialize self_update: {e}")))?;
+    table.insert("self_update".to_string(), value);
+    write_config_toml(path, &table)
+}
+
 /// Shared application state handed to every Axum handler.
 #[derive(Clone)]
 pub struct AppState {
@@ -205,6 +235,11 @@ pub struct AppState {
     /// syncs are added/removed at runtime (no restart), so this is a handle
     /// to running background tasks, not just a config snapshot.
     pub git_sync: GitSyncManager,
+    /// Live supervisor for sooth's own self-update -- see
+    /// `crate::selfupdate`. Same reasoning as `git_sync`: a handle to a
+    /// running background poll task, not just a config snapshot, since its
+    /// settings apply live.
+    pub self_update: SelfUpdateManager,
 }
 
 #[cfg(test)]
@@ -297,5 +332,45 @@ mod tests {
 
         let reloaded = Config::load(Some(path)).unwrap();
         assert!(reloaded.git_syncs.is_empty());
+    }
+
+    #[test]
+    fn patch_self_update_preserves_other_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "bind_addr = \"127.0.0.1:8420\"\n").unwrap();
+
+        patch_self_update(&path, |c| {
+            c.mode = crate::selfupdate::UpdateMode::Auto;
+            c.poll_interval_secs = 3600;
+            c.repo = "someone/fork".to_string();
+        })
+        .unwrap();
+
+        let reloaded = Config::load(Some(path.clone())).unwrap();
+        assert_eq!(
+            reloaded.self_update.mode,
+            crate::selfupdate::UpdateMode::Auto
+        );
+        assert_eq!(reloaded.self_update.poll_interval_secs, 3600);
+        assert_eq!(reloaded.self_update.repo, "someone/fork");
+        assert_eq!(reloaded.bind_addr.to_string(), "127.0.0.1:8420");
+    }
+
+    #[test]
+    fn patch_self_update_round_trips_through_config_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        patch_self_update(&path, |c| c.mode = crate::selfupdate::UpdateMode::Notify).unwrap();
+        patch_self_update(&path, |c| c.poll_interval_secs = 120).unwrap();
+
+        let reloaded = Config::load(Some(path)).unwrap();
+        assert_eq!(
+            reloaded.self_update.mode,
+            crate::selfupdate::UpdateMode::Notify,
+            "earlier patch must survive a later one"
+        );
+        assert_eq!(reloaded.self_update.poll_interval_secs, 120);
     }
 }

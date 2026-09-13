@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::auth::AuthError;
 use crate::quadlet::QuadletError;
 use crate::quadlet::gitsync::GitSyncError;
+use crate::selfupdate::SelfUpdateError;
 use crate::systemd::SystemdError;
 use crate::web::templates;
 
@@ -28,6 +29,8 @@ pub enum AppError {
     Quadlet(#[from] QuadletError),
     #[error(transparent)]
     GitSync(#[from] GitSyncError),
+    #[error(transparent)]
+    SelfUpdate(#[from] SelfUpdateError),
     #[error(transparent)]
     Systemd(#[from] SystemdError),
     #[error(transparent)]
@@ -46,6 +49,8 @@ impl AppError {
             AppError::Quadlet(QuadletError::Io(_)) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::GitSync(e) if e.is_client_error() => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::GitSync(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::SelfUpdate(e) if e.is_client_error() => StatusCode::UNPROCESSABLE_ENTITY,
+            AppError::SelfUpdate(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::Systemd(_) => StatusCode::BAD_GATEWAY,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -65,6 +70,9 @@ impl AppError {
                 warn!(error_id = %id, error = %self, "request failed");
             }
             AppError::GitSync(e) if e.is_client_error() => {
+                warn!(error_id = %id, error = %self, "request failed");
+            }
+            AppError::SelfUpdate(e) if e.is_client_error() => {
                 warn!(error_id = %id, error = %self, "request failed");
             }
             _ => {
@@ -91,6 +99,7 @@ impl AppError {
                 "Could not read or write the quadlet directory.".into()
             }
             AppError::GitSync(e) => e.to_string(),
+            AppError::SelfUpdate(e) => e.to_string(),
             AppError::Systemd(_) => "systemd did not accept that action.".into(),
             AppError::Internal(_) => "Something went wrong.".into(),
         }

@@ -1,8 +1,9 @@
 use maud::{DOCTYPE, Markup, html};
 
-use super::{BannerKind, Icon, NavItem, banner, csrf_input, icon, page_header, shell};
+use super::{BannerKind, Icon, NavItem, banner, csrf_input, icon, page_header, selfupdate, shell};
 use crate::config::Config;
 use crate::health::Health;
+use crate::selfupdate::{SelfUpdateConfig, UpdateStatus};
 
 /// The values a settings form round-trips as plain strings (so a rejected
 /// submission can be redisplayed exactly as typed, same pattern as the
@@ -91,6 +92,14 @@ fn text_field(
     }
 }
 
+/// The page's live (as opposed to persisted-config) status, bundled into one
+/// argument so `page`'s parameter count stays sane.
+pub struct LiveStatus<'a> {
+    pub health: Health,
+    pub self_update_config: &'a SelfUpdateConfig,
+    pub self_update_status: &'a UpdateStatus,
+}
+
 pub fn page(
     values: &FormValues,
     locks: &EnvLocks,
@@ -98,8 +107,13 @@ pub fn page(
     csrf: &str,
     message: Option<&str>,
     error: Option<&str>,
-    health: Health,
+    live: LiveStatus,
 ) -> Markup {
+    let LiveStatus {
+        health,
+        self_update_config,
+        self_update_status,
+    } = live;
     let body = html! {
         (page_header("Settings", html! {}))
         p.page-meta { "Written to " code { (config_path) } }
@@ -189,6 +203,9 @@ pub fn page(
             }
         }
         (health_card(health))
+
+        h2 { "Updates" }
+        (selfupdate::card(self_update_config, self_update_status, csrf))
 
         h2 { "Restart" }
         div.card {

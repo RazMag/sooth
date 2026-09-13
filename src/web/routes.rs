@@ -9,8 +9,8 @@ use crate::auth;
 use crate::config::AppState;
 
 use super::handlers::{
-    detail, edit_delete, environment, gitsync, groups, list, logs, ports, raw_create, services,
-    settings, unit_ops, validate,
+    detail, edit_delete, environment, gitsync, groups, list, logs, ports, raw_create, selfupdate,
+    services, settings, unit_ops, validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
@@ -130,6 +130,15 @@ pub fn build_router(state: AppState) -> Router {
         .route("/settings/password", post(settings::change_password))
         .route("/settings/restart", post(settings::restart))
         .route("/settings/health/refresh", post(settings::refresh_health))
+        .route(
+            "/settings/self-update",
+            get(selfupdate::card).post(selfupdate::save),
+        )
+        .route("/settings/self-update/check", post(selfupdate::check_now))
+        .route(
+            "/settings/self-update/download",
+            post(selfupdate::download_now),
+        )
         .route("/validate", post(validate::check))
         .route("/events", get(super::sse::events_stream))
         .route("/logout", post(auth::session::logout));

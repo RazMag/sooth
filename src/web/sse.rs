@@ -60,5 +60,8 @@ fn render_event(event: DashboardEvent) -> Vec<Result<Event, Infallible>> {
         DashboardEvent::GitSyncChanged => {
             vec![Ok(Event::default().event("git-sync-changed").data("1"))]
         }
+        DashboardEvent::SelfUpdateChanged => {
+            vec![Ok(Event::default().event("self-update-changed").data("1"))]
+        }
     }
 }
