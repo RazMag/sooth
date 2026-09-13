@@ -73,8 +73,11 @@ jobs:
       # published per-asset digest instead), but cheap to include for anyone
       # who wants to verify a download by hand.
       - run: (cd dist && sha256sum * > SHA256SUMS)
+      # `generate_release_notes` is deliberately left off: GitHub's
+      # generate-release-notes endpoint 500s unreliably, especially on a
+      # repo's first-ever release (nothing to diff against) -- not worth the
+      # flakiness for what's just a nice-to-have body.
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
           fail_on_unmatched_files: true
