@@ -190,6 +190,48 @@ opens `Connection::session()` on startup and exits if it fails).
   straight to the existing `/settings/restart` action -- there is no
   separate self-update-specific restart mechanism either way.
 
+## Releasing
+
+Trigger is a push to the protected `release` branch (or a manual "Run
+workflow" against it, to retry) -- never a tag push, and never an ordinary
+push/merge to `main`. The only path onto `release` is a PR from `main`;
+never commit to it directly, and never target it from anywhere but `main`,
+or the two branches can end up with the same content merged in a different
+order.
+
+`.github/workflows/release.yml` jobs, in dependency order:
+- `test`: fmt/clippy/test, mirroring `ci.yml`'s `rust` job. Redundant with
+  branch protection requiring `ci.yml` green before a merge, deliberately --
+  never trust protection alone (misconfigurable, admin-bypassable) to gate
+  what ships.
+- `version`: reads `Cargo.toml`'s `version` (no tag to type by hand -- this
+  is what a push to `release` replaces `git tag && git push` with) and GETs
+  `/repos/<owner>/<repo>/releases/tags/v<version>`; a 200 sets
+  `already_released`, making the run a **safe no-op** (e.g. a version-bump-less
+  merge, or a retry after a partial failure) rather than a re-publish or a
+  failure.
+- `build`: two native jobs, no cross-compilation (a GitHub-hosted ARM64
+  runner builds that target directly), shipping the raw `sooth` binary per
+  target -- no archive, since `self_update` (see `crate::selfupdate`)
+  matches an asset by the target triple as a substring of its name.
+- `publish`: uploads the binaries plus a `SHA256SUMS` file via
+  `softprops/action-gh-release`, passing `tag_name`/`target_commitish`
+  explicitly (this action creates the tag itself, against the exact commit
+  that triggered the run -- no separate `git tag` step needed).
+  `generate_release_notes` is deliberately left off -- GitHub's
+  generate-release-notes endpoint 500s unreliably, especially with no prior
+  tag to diff against (this bit the very first release; see the
+  `fix(release)` commit that removed it).
+
+**One-time setup this repo needs** (Settings -> Branches -> Add branch
+protection rule -> pattern `release`): require a pull request before
+merging, require status checks to pass before merging (select `ci.yml`'s
+`frontend` and `rust` jobs), and leave force-pushes/deletions disallowed.
+Doable via the `PUT /repos/{owner}/{repo}/branches/release/protection` REST
+endpoint (or `gh api` against it) instead of the UI -- check GitHub's
+current branch-protection API docs for the exact JSON shape rather than
+assuming a remembered one, since this isn't something to get subtly wrong.
+
 ## Commit style
 
 Conventional commits with a scope: `feat(web): …`, `fix(web): …`,

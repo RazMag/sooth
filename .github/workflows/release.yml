@@ -1,24 +1,60 @@
 name: Release
 
+# Pushing to `release` is the trigger -- protect that branch (see AGENTS.md's
+# Releasing section) so only a merge that already passed `ci.yml`'s checks
+# can land there. `workflow_dispatch` exists only to retry a run by hand
+# (e.g. after fixing this file itself) without needing an empty push.
 on:
   push:
-    tags: ["v*.*.*"]
+    branches: [release]
   workflow_dispatch:
 
 jobs:
-  # Guarantees the version `selfupdate` compares against (baked into the
-  # binary via `env!("CARGO_PKG_VERSION")`) always matches the tag the
-  # release is published under.
-  check-version:
+  # Redundant with branch protection requiring `ci.yml` to pass before a
+  # merge, deliberately: never trust that alone (protection can be
+  # misconfigured, or bypassed by an admin) to gate what actually ships.
+  test:
     runs-on: ubuntu-latest
+    env:
+      SOOTH_SKIP_FRONTEND_BUILD: "1"
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          tag="${GITHUB_REF_NAME#v}"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  # The tag is derived from `Cargo.toml`, not typed by hand: this is what
+  # lets a push replace `git tag && git push` as the release trigger. A
+  # push to `release` with no version bump since the last release (e.g. a
+  # docs-only merge, or retrying via `workflow_dispatch`) is a no-op, not a
+  # failure -- `build`/`publish` are skipped via `already_released`.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: v${{ steps.read.outputs.version }}
+      already_released: ${{ steps.check.outputs.exists }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
           pkg=$(sed -nE 's/^version = "(.*)"$/\1/p' Cargo.toml | head -1)
-          if [ "$tag" != "$pkg" ]; then
-            echo "tag v$tag does not match Cargo.toml version $pkg" >&2
-            exit 1
+          echo "version=$pkg" >> "$GITHUB_OUTPUT"
+      - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${{ steps.read.outputs.version }}")
+          if [ "$status" = "200" ]; then
+            echo "v${{ steps.read.outputs.version }} is already released -- nothing to do" >&2
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
   # One native build per target -- no cross-compilation (a GitHub-hosted ARM64
@@ -27,7 +63,8 @@ jobs:
   # embeds its own static assets, and `self_update`'s asset matching only
   # needs the target triple as a substring of the file name.
   build:
-    needs: check-version
+    needs: [test, version]
+    if: needs.version.outputs.already_released != 'true'
     strategy:
       matrix:
         include:
@@ -60,7 +97,7 @@ jobs:
           path: sooth-${{ matrix.target }}
 
   publish:
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -76,8 +113,13 @@ jobs:
       # `generate_release_notes` is deliberately left off: GitHub's
       # generate-release-notes endpoint 500s unreliably, especially on a
       # repo's first-ever release (nothing to diff against) -- not worth the
-      # flakiness for what's just a nice-to-have body.
+      # flakiness for what's just a nice-to-have body. `tag_name`/
+      # `target_commitish` are explicit rather than relying on this being a
+      # tag push (it isn't anymore): this creates the tag against the exact
+      # commit that triggered the run.
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: dist/*
           fail_on_unmatched_files: true

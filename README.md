@@ -266,3 +266,28 @@ sequence locally (see the table above).
    the counts update without a reload.
 7. Submit an intentionally invalid file (e.g. missing `[Container]`); confirm
    a clear error with entered content preserved and no partial write.
+
+## Releasing
+
+Pushing to `main` never publishes anything by itself. A **protected `release`
+branch** is the trigger: merging into it runs `.github/workflows/release.yml`,
+which derives the version straight from `Cargo.toml` (no tag to type by
+hand), re-runs the full test suite as its own gate, builds x86_64/aarch64
+Linux binaries, and publishes them as a GitHub Release — the same one the
+Settings page's self-update check looks for.
+
+1. Bump `version` in `Cargo.toml`, PR that to `main` as usual, merge.
+2. Open a PR from `main` into `release`. `ci.yml` runs on it like any other
+   PR; `release` is branch-protected to require it green (and typically a
+   review) before the merge button unlocks — see [AGENTS.md](AGENTS.md) if
+   you're setting that protection rule up for the first time.
+3. Merge it. That push to `release` builds and publishes `vX.Y.Z`
+   automatically — watch the Actions tab.
+
+Re-running the workflow (or merging a docs-only PR into `release` with no
+version bump) is a safe no-op: it checks whether `vX.Y.Z` is already
+released and skips the build if so, rather than re-publishing or failing.
+
+Never push to `release` directly — always through a PR from `main`, so the
+two branches never drift into having different content merged in a
+different order.
