@@ -1,79 +1,28 @@
-//! The Settings page's "Updates" card: current version, self-update
-//! settings, and live status -- see `crate::selfupdate`.
-
+//! The Settings page's "Updates" section: the live status fragment (current
+//! version, check/download/install actions) -- see `crate::selfupdate`. The
+//! editable settings (mode, poll interval, repo) are built with
+//! `mode_toggle()` / `interval_options()` below but live in the main
+//! settings form now, not a form of their own -- see
+//! `crate::web::handlers::settings::save`, which persists and live-applies
+//! them together with the rest of the page in one request.
 use std::time::SystemTime;
 
 use maud::{Markup, html};
 
-use super::{BannerKind, banner, csrf_input};
-use crate::selfupdate::{SelfUpdateConfig, UpdateMode, UpdateState, UpdateStatus};
+use super::{BannerKind, banner};
+use crate::selfupdate::{UpdateState, UpdateStatus};
 
-/// Re-rendered whole on `sse:self-update-changed` (the self-update analogue
-/// of `gitsync::rows`) -- both the settings form and the status line always
-/// agree, e.g. after an edit through another tab, or once the background
-/// poll task finds an update.
-pub fn card(config: &SelfUpdateConfig, status: &UpdateStatus, csrf: &str) -> Markup {
-    render(config, status, csrf, None)
-}
-
-/// The save form's own htmx target re-renders with a 422 and an inline error
-/// banner when the submitted settings don't validate, so the form stays put
-/// (and keeps whatever else the user typed) instead of vanishing behind a
-/// generic error fragment.
-pub fn card_with_error(
-    config: &SelfUpdateConfig,
-    status: &UpdateStatus,
-    csrf: &str,
-    error: &str,
-) -> Markup {
-    render(config, status, csrf, Some(error))
-}
-
-fn render(
-    config: &SelfUpdateConfig,
-    status: &UpdateStatus,
-    csrf: &str,
-    error: Option<&str>,
-) -> Markup {
+/// Re-rendered on `sse:self-update-changed` (the self-update analogue of
+/// `gitsync::rows`) -- the status line always reflects the latest check/
+/// download progress, e.g. once the background poll task finds an update.
+pub fn status_fragment(status: &UpdateStatus, csrf: &str) -> Markup {
     html! {
-        div.card #self-update-card
+        div #self-update-status
             hx-get="/settings/self-update" hx-trigger="sse:self-update-changed delay:300ms" hx-swap="outerHTML" {
 
             p.selfupdate-version { "Current version: " code { (env!("CARGO_PKG_VERSION")) } }
 
             (status_line(status, csrf))
-
-            @if let Some(msg) = error { (banner(BannerKind::Error, msg)) }
-
-            form.settings-form
-                hx-post="/settings/self-update" hx-target="#self-update-card" hx-swap="outerHTML" {
-                (csrf_input(csrf))
-                div.field {
-                    label { "Update checks" }
-                    (mode_toggle(config.mode))
-                    dl.selfupdate-mode-hints {
-                        dt { code { "Off" } } dd { "Never checks." }
-                        dt { code { "Notify" } }
-                        dd { "Shows a banner here when a newer version exists, then lets you "
-                             "download and install it on your own schedule." }
-                        dt { code { "Auto" } }
-                        dd { "Downloads and installs automatically, restarting sooth when it does." }
-                    }
-                }
-                div.field {
-                    label for="self_update_poll_interval_secs" { "Check every" }
-                    select.input id="self_update_poll_interval_secs" name="poll_interval_secs" {
-                        (interval_options(config.poll_interval_secs))
-                    }
-                }
-                div.field {
-                    label for="self_update_repo" { "GitHub repository" }
-                    input.input type="text" id="self_update_repo" name="repo" value=(config.repo)
-                        placeholder="owner/name";
-                    p.field-hint { "Point this at your own fork if it publishes its own releases." }
-                }
-                button.btn.btn-primary type="submit" { "Save" }
-            }
         }
     }
 }
@@ -92,34 +41,36 @@ const INTERVAL_PRESETS: &[(u64, &str)] = &[
 /// plain radio inputs (each visually hidden, its `<label>` styled as the
 /// segment -- see `.segmented` in `styles.css`), not a `<select>`, so all
 /// three choices are visible and one click away instead of hidden behind a
-/// dropdown.
-fn mode_toggle(current: UpdateMode) -> Markup {
-    let segment = |value: &'static str, id: &'static str, mode: UpdateMode, label: &'static str| {
+/// dropdown. `current` is the raw form value ("off"/"notify"/"auto"), same
+/// round-trip-as-a-string convention as every other field on the page.
+pub(crate) fn mode_toggle(current: &str) -> Markup {
+    let segment = |value: &'static str, id: &'static str, label: &'static str| {
         html! {
-            input type="radio" id=(id) name="mode" value=(value) checked[current == mode];
+            input type="radio" id=(id) name="mode" value=(value) checked[current == value];
             label for=(id) { (label) }
         }
     };
     html! {
         div.segmented role="radiogroup" aria-label="Update checks" {
-            (segment("off", "self_update_mode_off", UpdateMode::Off, "Off"))
-            (segment("notify", "self_update_mode_notify", UpdateMode::Notify, "Notify"))
-            (segment("auto", "self_update_mode_auto", UpdateMode::Auto, "Auto"))
+            (segment("off", "self_update_mode_off", "Off"))
+            (segment("notify", "self_update_mode_notify", "Notify"))
+            (segment("auto", "self_update_mode_auto", "Auto"))
         }
     }
 }
 
-/// The interval `<select>`'s options. When `current` doesn't match any
-/// preset (e.g. a value hand-edited into the TOML file, or a future preset
-/// list that no longer includes it), an extra option holding that exact
-/// value is appended and selected, so saving the form without touching this
-/// field can never silently change it.
-fn interval_options(current: u64) -> Markup {
+/// The interval `<select>`'s options. `current` is the raw form value; when
+/// it doesn't match any preset (e.g. a value hand-edited into the TOML file,
+/// a future preset list that no longer includes it, or a rejected
+/// submission redisplaying exactly what was typed), an extra option holding
+/// that exact value is appended and selected, so saving the form without
+/// touching this field can never silently change it.
+pub(crate) fn interval_options(current: &str) -> Markup {
     html! {
         @for &(secs, label) in INTERVAL_PRESETS {
-            option value=(secs) selected[secs == current] { "Every " (label) }
+            option value=(secs) selected[secs.to_string() == current] { "Every " (label) }
         }
-        @if !INTERVAL_PRESETS.iter().any(|&(secs, _)| secs == current) {
+        @if !INTERVAL_PRESETS.iter().any(|&(secs, _)| secs.to_string() == current) {
             option value=(current) selected { "Custom (every " (current) "s)" }
         }
     }
@@ -150,30 +101,45 @@ fn status_line(status: &UpdateStatus, csrf: &str) -> Markup {
         div.selfupdate-actions {
             @match &status.state {
                 UpdateState::UpdateAvailable { .. } => {
-                    form.inline-form hx-post="/settings/self-update/download" hx-swap="none" {
-                        (csrf_input(csrf))
-                        button.btn.btn-primary type="submit" { "Download update" }
-                    }
+                    // A plain button, not a `form.inline-form` -- this status
+                    // fragment now renders inside the main settings `<form>`
+                    // (see `templates::settings::page`), and a nested `<form>`
+                    // would be dropped by the HTML parser, silently breaking
+                    // this action. `hx-params` whitelists just the `hx-vals`
+                    // csrf token: htmx would otherwise also pick up every
+                    // field in the enclosing form (harmless server-side, since
+                    // the handler ignores unknown fields, but pointless to
+                    // send) -- and "none" would strip `hx-vals` too, not just
+                    // the form's fields, so it has to be a named whitelist.
+                    button.btn.btn-primary type="button"
+                        hx-post="/settings/self-update/download" hx-swap="none"
+                        hx-params="csrf_token" hx-vals=(csrf_vals(csrf)) { "Download update" }
                 }
                 UpdateState::ReadyToRestart { .. } => {
                     // Installing a downloaded update is just an ordinary
-                    // restart -- same action as the Restart card further
-                    // down the page, not a distinct self-update step.
-                    form.inline-form method="post" action="/settings/restart" {
-                        (csrf_input(csrf))
-                        button.btn.btn-primary type="submit" { "Install and restart" }
+                    // restart -- same action, and the same actual `<form>`
+                    // (by id, since this button isn't a descendant of it), as
+                    // the Restart card further down the page, not a distinct
+                    // self-update step.
+                    button.btn.btn-primary type="submit" form="restart-form" {
+                        "Install and restart"
                     }
                 }
                 UpdateState::Checking | UpdateState::Downloading => {}
                 _ => {
-                    form.inline-form hx-post="/settings/self-update/check" hx-swap="none" {
-                        (csrf_input(csrf))
-                        button.btn.btn-sm type="submit" { "Check now" }
-                    }
+                    button.btn.btn-sm type="button"
+                        hx-post="/settings/self-update/check" hx-swap="none"
+                        hx-params="csrf_token" hx-vals=(csrf_vals(csrf)) { "Check now" }
                 }
             }
         }
     }
+}
+
+/// The `hx-vals` JSON for a CSRF-only htmx request -- the plain-button
+/// replacement for a `csrf_input()` hidden field inside a `form.inline-form`.
+fn csrf_vals(csrf: &str) -> String {
+    format!(r#"{{"csrf_token":"{csrf}"}}"#)
 }
 
 /// A coarse "how long ago" for the last check -- same rough formatting as
