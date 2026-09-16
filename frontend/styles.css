@@ -446,13 +446,37 @@
   .input[readonly] { background: var(--color-raised); color: var(--color-muted); cursor: not-allowed; }
   .checkbox-line { display: flex; align-items: center; gap: 0.5rem; }
 
-  /* Settings page: h2-labelled card sections */
-  .settings-form .card + h2,
-  .settings-form h2 { margin-top: 1.5rem; }
-  .settings-form > h2:first-of-type { margin-top: 0.75rem; }
+  /* Settings page: the unsaved-changes banner (toggled by settings.js) pins
+     to the top of the viewport while dirty, since the Save button it mirrors
+     is all the way past every section by the time there's something to
+     save -- scroll down to edit a field and the reminder should scroll back
+     into view with you, not get left behind above the fold. A higher
+     z-index than `.content-topbar`'s (mobile's sticky header, also pinned
+     at top:0) means this sits on top of it rather than the two fighting
+     over the same strip -- seeing there's something unsaved matters more
+     here than the topbar underneath it. */
+  #settings-unsaved-banner { position: sticky; top: 0; z-index: 25; }
+
+  /* Settings page: each labelled h2 + card is a `.settings-section`, used
+     both inside the main form and for the System/Restart/Password cards
+     below it. A rule between sections (skipped on the first) reads as a
+     clearer break than spacing alone once several sections share one page --
+     margin *and* padding on both sides of it so the line has breathing room
+     from the cards above and below, rather than sitting flush against them. */
+  .settings-section { margin-top: 1.75rem; padding-top: 1.75rem; border-top: 1px solid var(--color-line); }
+  .settings-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+  .settings-section h2 { margin: 0 0 0.6rem; }
   .card > .field:last-child { margin-bottom: 0; }
-  .settings-form > .btn-primary { margin-top: 1.25rem; }
-  .settings-form > .field-hint { margin-top: 0.4rem; }
+
+  /* The Save action: a card like every other section's, not a bespoke bar,
+     so it carries the same visual weight instead of standing out as an odd
+     floating strip. The button itself is the "unsaved changes" indicator --
+     `settings.js` disables it on load and re-enables it only once the form
+     actually differs from how the page loaded (reusing the plain `.btn`
+     disabled look), so there's no separate badge/label competing for
+     attention, and nothing to click when there's genuinely nothing to save. */
+  .settings-save-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+  .settings-save-card .field-hint { max-width: 34rem; }
 
   /* Settings page: Updates card */
   .selfupdate-version { margin: 0 0 0.75rem; color: var(--color-muted); font-size: 0.85rem; }
