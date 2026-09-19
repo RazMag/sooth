@@ -73,4 +73,13 @@ export function initGroups() {
     saveExpanded(set);
     apply(table, set);
   });
+
+  // The "Add group" popup (`details.add-group`) is a plain disclosure with
+  // no other close affordance -- clicking anywhere outside it dismisses it,
+  // same as a native dropdown.
+  document.addEventListener("click", (e) => {
+    for (const details of document.querySelectorAll("details.add-group[open]")) {
+      if (!details.contains(e.target)) details.open = false;
+    }
+  });
 }
