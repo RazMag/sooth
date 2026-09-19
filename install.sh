@@ -14,17 +14,19 @@
 #
 #   SOOTH_VERSION=v0.1.0 curl -fsSL .../install.sh | sh
 #
-# Re-run anytime to update: it re-downloads the binary, rewrites the unit,
-# and restarts the service. An existing password hash in sooth.env is kept
-# unless --hash/--reset-password (or SOOTH_HASH/SOOTH_RESET_PASSWORD) is given.
+# Re-run anytime to update (or just to change a flag like --bind-addr): it
+# rewrites the unit and restarts the service, and re-downloads the binary
+# only if the installed one doesn't already match the target release's
+# checksum. An existing password hash in sooth.env is kept unless
+# --hash/--reset-password (or SOOTH_HASH/SOOTH_RESET_PASSWORD) is given.
 #
 # To remove everything it installed:
 #
 #   curl -fsSL .../install.sh | sh -s -- --uninstall          # keeps sooth.env
 #   curl -fsSL .../install.sh | sh -s -- --uninstall --purge  # also deletes it
 #
-# POSIX sh, no fish required. Needs curl or wget, and sha256sum (or shasum
-# or openssl) to verify the download.
+# POSIX sh. Needs curl or wget, and sha256sum (or shasum or openssl) to
+# verify the download.
 #
 set -u
 
@@ -238,40 +240,51 @@ fi
 work_dir=$(mktemp -d) || exit 1
 trap 'rm -rf -- "$work_dir"' EXIT INT TERM
 
-echo "==> downloading $asset ($version from $repo)"
-fetch "$base_url/$asset" "$work_dir/sooth" || {
-    echo "error: failed to download $base_url/$asset" >&2
-    exit 1
+hash_of() {
+    # hash_of <path> -- prints its sha256, or nothing if no hasher is found
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 "$1" | awk '{print $NF}'
+    fi
 }
 
-echo "==> verifying checksum"
+expected=
 if fetch "$base_url/SHA256SUMS" "$work_dir/SHA256SUMS" 2>/dev/null && [ -s "$work_dir/SHA256SUMS" ]; then
     expected=$(grep -E "[[:space:]]\\*?$asset\$" "$work_dir/SHA256SUMS" | awk '{print $1}' | head -n1)
-    if command -v sha256sum >/dev/null 2>&1; then
-        actual=$(sha256sum "$work_dir/sooth" | awk '{print $1}')
-    elif command -v shasum >/dev/null 2>&1; then
-        actual=$(shasum -a 256 "$work_dir/sooth" | awk '{print $1}')
-    elif command -v openssl >/dev/null 2>&1; then
-        actual=$(openssl dgst -sha256 "$work_dir/sooth" | awk '{print $NF}')
-    else
-        echo "warning: no sha256sum/shasum/openssl found, skipping checksum verification" >&2
-        actual=
-    fi
-    if [ -n "$expected" ] && [ -n "$actual" ]; then
-        if [ "$expected" != "$actual" ]; then
-            echo "error: checksum mismatch for $asset (expected $expected, got $actual)" >&2
-            exit 1
-        fi
-        echo "==> checksum OK"
-    fi
-else
-    echo "warning: SHA256SUMS not available for this release, skipping checksum verification" >&2
 fi
 
-mkdir -p -- "$install_dir" || exit 1
-chmod +x "$work_dir/sooth" || exit 1
-mv -- "$work_dir/sooth" "$install_dir/sooth" || exit 1
-echo "==> installed $bin"
+if [ -n "$expected" ] && [ -x "$bin" ] && [ "$(hash_of "$bin")" = "$expected" ]; then
+    echo "==> $bin already matches $version, skipping download"
+else
+    echo "==> downloading $asset ($version from $repo)"
+    fetch "$base_url/$asset" "$work_dir/sooth" || {
+        echo "error: failed to download $base_url/$asset" >&2
+        exit 1
+    }
+
+    if [ -n "$expected" ]; then
+        echo "==> verifying checksum"
+        actual=$(hash_of "$work_dir/sooth")
+        if [ -z "$actual" ]; then
+            echo "warning: no sha256sum/shasum/openssl found, skipping checksum verification" >&2
+        elif [ "$actual" != "$expected" ]; then
+            echo "error: checksum mismatch for $asset (expected $expected, got $actual)" >&2
+            exit 1
+        else
+            echo "==> checksum OK"
+        fi
+    else
+        echo "warning: SHA256SUMS not available for this release, skipping checksum verification" >&2
+    fi
+
+    mkdir -p -- "$install_dir" || exit 1
+    chmod +x "$work_dir/sooth" || exit 1
+    mv -- "$work_dir/sooth" "$install_dir/sooth" || exit 1
+    echo "==> installed $bin"
+fi
 
 case ":$PATH:" in
     *":$install_dir:"*) ;;
