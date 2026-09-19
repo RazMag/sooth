@@ -167,7 +167,7 @@ async fn run() -> anyhow::Result<()> {
 
     let app = web::build_router(state);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
-    info!(addr = %config.bind_addr, "sooth listening");
+    info!(addr = %config.bind_addr, url = %format!("http://{}", config.bind_addr), "sooth listening");
 
     // Set by `shutdown_signal` when the wind-down was triggered by the
     // Settings "Restart" button rather than a real signal.
