@@ -87,6 +87,36 @@ CSS/JS embedded, so it runs from any directory.
 
 ## Install
 
+### Quick install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/RazMag/sooth/main/install.sh | sh
+```
+
+Downloads the latest release binary for your architecture, installs it to
+`~/.local/bin`, generates a password hash (prompted once, hidden input), and
+sets it up as a `systemd --user` service (`~/.config/systemd/user/sooth.service`,
+enabled and started) with its config in `~/.config/sooth/sooth.env`. Re-run
+the same command anytime to update — it re-downloads the binary, rewrites the
+unit, and restarts the service, keeping the existing password hash unless
+`--reset-password` is given.
+
+Flags (or matching env vars, for piped invocations that would rather not deal
+with `sh -s --`): `--repo <owner/name>` to install from a fork's own
+releases, `--version <tag>` to pin a release, `--install-dir <dir>`,
+`--hash <argon2-hash>` / `--reset-password`, `--bind-addr <addr:port>`,
+`--no-start` to install without enabling/starting the service, and
+`--uninstall [--purge]` to remove everything it installed. See
+`install.sh --help` for the full list. Requires curl or wget, `sha256sum`
+(or `shasum`/`openssl`) to verify the download, and a working
+`systemctl --user` session (enable lingering, or run it from an active login
+session) — see [Requirements](#requirements) below for what sooth itself
+needs at runtime.
+
+To build from source instead — for local development, a platform without a
+prebuilt release, or `just`-driven workflows — see
+[Build from source](#build-from-source).
+
 ### Requirements
 
 - **Linux with systemd**, used as a normal (non-root) user with a working
@@ -114,7 +144,7 @@ CSS/JS embedded, so it runs from any directory.
   the repo root wraps the commands below for local development. See
   [Development](#development).
 
-### Build and run
+### Build from source
 
 ```sh
 cargo build --release
@@ -156,6 +186,10 @@ place (same argv and environment) so those saved changes take effect without
 shell access — it doesn't rely on a systemd `Restart=` or a known unit name.
 
 ### Run as a systemd user service
+
+The [quick install](#quick-install) script sets this up for you automatically
+against the release binary. For a binary built from source, wire it up
+manually:
 
 ```ini
 # ~/.config/systemd/user/sooth.service

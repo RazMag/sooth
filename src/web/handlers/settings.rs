@@ -1,8 +1,11 @@
-//! View and change persisted configuration. Writes go straight to the
-//! resolved config TOML file and require a restart to take effect -- no
-//! runtime-mutable `AppState`, no re-pointing the filesystem watcher or
-//! D-Bus session on the fly. Simpler and safer for what's really a rarely-
-//! touched settings screen.
+//! View and change persisted configuration. Most fields are written straight
+//! to the resolved config TOML file and require a restart to take effect --
+//! no re-pointing the filesystem watcher or D-Bus session on the fly, simpler
+//! and safer for what's really a rarely-touched settings screen. The
+//! self-update fields (`mode`/`poll_interval_secs`/`repo`) are the one
+//! exception: `save` also calls `AppState.self_update.configure(..)`, which
+//! persists them and applies them live in the same request -- see
+//! `crate::selfupdate`.
 
 use std::net::SocketAddr;
 
@@ -30,7 +33,7 @@ pub async fn page(
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    let values = FormValues::from_config(&state.config);
+    let values = FormValues::from_config(&state.config, &state.self_update.config_snapshot());
     let message = match query.saved.as_deref() {
         Some("password") => {
             Some("Password saved. Restart sooth for the new password to take effect.")
@@ -38,7 +41,6 @@ pub async fn page(
         Some(_) => Some("Saved. Restart sooth for changes to take effect."),
         None => None,
     };
-    let self_update_config = state.self_update.config_snapshot();
     let self_update_status = state.self_update.snapshot();
     templates::settings::page(
         &values,
@@ -49,7 +51,6 @@ pub async fn page(
         None,
         templates::settings::LiveStatus {
             health: state.health.get(),
-            self_update_config: &self_update_config,
             self_update_status: &self_update_status,
         },
     )
@@ -66,7 +67,6 @@ async fn render_error(
     let csrf = crate::auth::csrf::current(session)
         .await
         .unwrap_or_default();
-    let self_update_config = state.self_update.config_snapshot();
     let self_update_status = state.self_update.snapshot();
     (
         axum::http::StatusCode::UNPROCESSABLE_ENTITY,
@@ -79,7 +79,6 @@ async fn render_error(
             Some(msg),
             templates::settings::LiveStatus {
                 health: state.health.get(),
-                self_update_config: &self_update_config,
                 self_update_status: &self_update_status,
             },
         ),
@@ -96,6 +95,9 @@ pub struct SettingsForm {
     cookie_secure: Option<String>,
     log_filter: String,
     session_idle_timeout_secs: String,
+    mode: String,
+    poll_interval_secs: String,
+    repo: String,
 }
 
 pub async fn save(
@@ -115,6 +117,9 @@ pub async fn save(
         cookie_secure: form.cookie_secure.is_some(),
         log_filter: form.log_filter.clone(),
         session_idle_timeout_secs: form.session_idle_timeout_secs.clone(),
+        self_update_mode: form.mode.clone(),
+        self_update_poll_interval_secs: form.poll_interval_secs.clone(),
+        self_update_repo: form.repo.clone(),
     };
 
     let Ok(bind_addr) = form.bind_addr.trim().parse::<SocketAddr>() else {
@@ -145,6 +150,31 @@ pub async fn save(
         )
         .await);
     }
+    let Some(self_update_mode) = crate::selfupdate::UpdateMode::parse(&form.mode) else {
+        return Ok(render_error(&state, &session, &entered(), "Invalid update-check mode").await);
+    };
+    let Ok(self_update_poll_interval_secs) = form.poll_interval_secs.trim().parse::<u64>() else {
+        return Ok(render_error(&state, &session, &entered(), "Invalid check interval").await);
+    };
+    if self_update_poll_interval_secs < 60 {
+        return Ok(render_error(
+            &state,
+            &session,
+            &entered(),
+            "Check interval must be at least 60 seconds",
+        )
+        .await);
+    }
+    let self_update_repo = form.repo.trim().to_string();
+    if crate::selfupdate::split_repo(&self_update_repo).is_err() {
+        return Ok(render_error(
+            &state,
+            &session,
+            &entered(),
+            "Repository must look like \"owner/name\"",
+        )
+        .await);
+    }
 
     let updates = [
         ("bind_addr", toml::Value::String(bind_addr.to_string())),
@@ -170,6 +200,17 @@ pub async fn save(
         ))
     })?;
 
+    if let Err(e) = state
+        .self_update
+        .configure(crate::selfupdate::SelfUpdateConfig {
+            mode: self_update_mode,
+            poll_interval_secs: self_update_poll_interval_secs,
+            repo: self_update_repo,
+        })
+    {
+        return Ok(render_error(&state, &session, &entered(), &e.to_string()).await);
+    }
+
     tracing::info!(path = %state.config_path.display(), "settings saved");
     Ok(Redirect::to("/settings?saved=settings").into_response())
 }
@@ -191,7 +232,7 @@ pub async fn change_password(
         return Err(AppError::Csrf.into());
     }
 
-    let values = FormValues::from_config(&state.config);
+    let values = FormValues::from_config(&state.config, &state.self_update.config_snapshot());
     let fail = |msg: &'static str| render_error(&state, &session, &values, msg);
 
     if EnvLocks::detect().auth_password_hash {

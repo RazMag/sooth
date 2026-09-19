@@ -15,6 +15,7 @@ import { initLogs } from "./logs.js";
 import { initEditors } from "./editor.js";
 import { initEnvVars } from "./envvars.js";
 import { initPortLinks } from "./ports.js";
+import { initSettingsForm } from "./settings.js";
 
 window.htmx = htmx;
 
@@ -33,6 +34,7 @@ function boot() {
   initEditors();
   initEnvVars();
   initPortLinks();
+  initSettingsForm();
 }
 
 if (document.readyState === "loading") {
@@ -48,4 +50,5 @@ document.addEventListener("htmx:afterSwap", () => {
   initEditors();
   initEnvVars();
   initPortLinks();
+  initSettingsForm();
 });
