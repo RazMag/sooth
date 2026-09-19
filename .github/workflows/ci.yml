@@ -34,3 +34,65 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+
+  install-script:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -y && sudo apt-get install -y shellcheck; }
+          shellcheck install.sh
+
+      # Argument parsing and the root check happen before install.sh touches
+      # systemd at all, so these run before the session setup below.
+      - name: Argument parsing and root-check smoke tests
+        run: |
+          ./install.sh --help
+          ! ./install.sh --bogus-flag
+          ! sudo ./install.sh
+
+      # ubuntu-latest runners don't start a lingering systemd --user session
+      # for the runner user by default -- set one up the same way a real
+      # headless install would (see README's linger troubleshooting).
+      - name: Set up a reachable systemd --user session
+        run: |
+          sudo loginctl enable-linger "$(whoami)"
+          sudo systemctl start "user@$(id -u).service"
+          {
+            echo "XDG_RUNTIME_DIR=/run/user/$(id -u)"
+            echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus"
+          } >> "$GITHUB_ENV"
+
+      # A fixed, syntactically-valid argon2 PHC hash -- not a real password,
+      # just enough for sooth's startup validation to accept it so the
+      # install never blocks on the interactive --hash-password prompt.
+      - name: Install (downloads the latest release, verifies its checksum)
+        run: |
+          ./install.sh --no-start --hash '$argon2id$v=19$m=19456,t=2,p=1$dGVzdHNhbHQxMjM0NTY$dGVzdGhhc2hvdXRwdXQxMjM0NTY3ODkw'
+          test -x "$HOME/.local/bin/sooth"
+
+      - name: Re-run install (binary already matches -- should skip the download)
+        run: |
+          ./install.sh --no-start | tee /tmp/reinstall.log
+          grep -q "already matches" /tmp/reinstall.log
+
+      - name: Enable and start the service, confirm it actually serves
+        run: |
+          ./install.sh
+          systemctl --user is-active sooth.service
+          status=$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8420/login)
+          [ "$status" = 200 ]
+
+      - name: Uninstall, confirm cleanup (config kept without --purge)
+        run: |
+          ./install.sh --uninstall
+          [ ! -e "$HOME/.local/bin/sooth" ]
+          [ ! -e "$HOME/.config/systemd/user/sooth.service" ]
+          [ -d "$HOME/.config/sooth" ]
+
+      - name: Purge, confirm config is removed too
+        run: |
+          ./install.sh --uninstall --purge
+          [ ! -e "$HOME/.config/sooth" ]
