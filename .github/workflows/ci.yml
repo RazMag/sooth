@@ -82,7 +82,12 @@ jobs:
         run: |
           ./install.sh
           systemctl --user is-active sooth.service
-          status=$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8420/login)
+          # `is-active` flips as soon as the process starts, not once it's
+          # actually bound its HTTP listener -- poll rather than assume.
+          for i in $(seq 1 20); do
+            status=$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:8420/login 2>/dev/null) && break
+            sleep 0.5
+          done
           [ "$status" = 200 ]
 
       - name: Uninstall, confirm cleanup (config kept without --purge)
