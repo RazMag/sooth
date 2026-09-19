@@ -7,17 +7,26 @@ use crate::selfupdate::{SelfUpdateConfig, UpdateStatus};
 
 /// The values a settings form round-trips as plain strings (so a rejected
 /// submission can be redisplayed exactly as typed, same pattern as the
-/// quadlet create/edit forms).
+/// quadlet create/edit forms). Includes the self-update fields -- they're
+/// part of this one form now, not a form of their own.
 pub struct FormValues {
     pub bind_addr: String,
     pub quadlet_dir: String,
     pub cookie_secure: bool,
     pub log_filter: String,
     pub session_idle_timeout_secs: String,
+    pub self_update_mode: String,
+    pub self_update_poll_interval_secs: String,
+    pub self_update_repo: String,
 }
 
 impl FormValues {
-    pub fn from_config(config: &Config) -> Self {
+    /// `self_update` comes from `AppState.self_update`'s own live snapshot,
+    /// not `config.self_update` -- unlike the rest of `Config`, self-update
+    /// settings apply immediately rather than only on the next load, so
+    /// `state.config` (frozen at startup) would show a saved change as
+    /// reverted until a restart.
+    pub fn from_config(config: &Config, self_update: &SelfUpdateConfig) -> Self {
         let quadlet_dir = config
             .quadlet_dir
             .clone()
@@ -30,6 +39,9 @@ impl FormValues {
             cookie_secure: config.cookie_secure,
             log_filter: config.log_filter.clone().unwrap_or_default(),
             session_idle_timeout_secs: config.session_idle_timeout_secs.to_string(),
+            self_update_mode: self_update.mode.as_str().to_string(),
+            self_update_poll_interval_secs: self_update.poll_interval_secs.to_string(),
+            self_update_repo: self_update.repo.clone(),
         }
     }
 }
@@ -96,7 +108,6 @@ fn text_field(
 /// argument so `page`'s parameter count stays sane.
 pub struct LiveStatus<'a> {
     pub health: Health,
-    pub self_update_config: &'a SelfUpdateConfig,
     pub self_update_status: &'a UpdateStatus,
 }
 
@@ -111,7 +122,6 @@ pub fn page(
 ) -> Markup {
     let LiveStatus {
         health,
-        self_update_config,
         self_update_status,
     } = live;
     let body = html! {
@@ -121,135 +131,202 @@ pub fn page(
         @if let Some(msg) = message { (banner(BannerKind::Success, msg)) }
         @if let Some(msg) = error { (banner(BannerKind::Error, msg)) }
 
-        form.settings-form method="post" action="/settings" {
+        // Shown/hidden by `initSettingsForm` in settings.js, same dirty
+        // check that gates the Save button -- this just makes that state
+        // visible up here too, since the button itself is all the way down
+        // past every section by the time there's something to save.
+        div.banner.banner-warn #settings-unsaved-banner hidden aria-live="polite" {
+            "You have unsaved changes below."
+        }
+
+        section.settings-section {
+            div.section-header {
+                h2 { "System" }
+                div.actions {
+                    form.inline-form hx-post="/settings/health/refresh" hx-target="#health-card" hx-swap="outerHTML" {
+                        (csrf_input(csrf))
+                        button.btn.btn-sm type="submit" { (icon(Icon::Refresh)) span { "Refresh" } }
+                    }
+                }
+            }
+            (health_card(health))
+        }
+
+        // `autocomplete="off"` -- not about password managers here, but
+        // about a *different* browser feature with the same attribute:
+        // Chrome (and others) silently restore whatever a form's fields were
+        // set to before you navigated away, reapplying it on top of the
+        // freshly served page when you come back via back/forward. Without
+        // this, that's indistinguishable from the real saved config -- see
+        // the bug note on `initSettingsForm` in `settings.js` for the other
+        // half of this fix (bfcache doing the same thing a different way).
+        form #settings-form autocomplete="off" method="post" action="/settings" {
             (csrf_input(csrf))
 
-            h2 { "Server" }
-            div.card {
-                (text_field(
-                    "bind_addr", "Bind address", &values.bind_addr,
-                    html! {
-                        "Address and port the dashboard listens on. "
-                        code { "127.0.0.1" } " keeps it local to this machine; "
-                        code { "0.0.0.0" } " exposes it on the network."
-                    },
-                    locks.bind_addr, "SOOTH_BIND_ADDR", None,
-                ))
+            section.settings-section {
+                h2 { "Server & network" }
+                div.card {
+                    (text_field(
+                        "bind_addr", "Bind address", &values.bind_addr,
+                        html! {
+                            "Address and port the dashboard listens on. "
+                            code { "127.0.0.1" } " keeps it local to this machine; "
+                            code { "0.0.0.0" } " exposes it on the network."
+                        },
+                        locks.bind_addr, "SOOTH_BIND_ADDR", None,
+                    ))
+                }
             }
 
-            h2 { "Filesystem" }
-            div.card {
-                (text_field(
-                    "quadlet_dir", "Quadlet directory", &values.quadlet_dir,
-                    html! {
-                        "Folder sooth reads " code { ".container" } " / " code { ".pod" } " / "
-                        code { ".volume" } " / … unit files from. Leave as the default unless "
-                        "your quadlets live elsewhere."
-                    },
-                    locks.quadlet_dir, "SOOTH_QUADLET_DIR", None,
-                ))
+            section.settings-section {
+                h2 { "Filesystem" }
+                div.card {
+                    (text_field(
+                        "quadlet_dir", "Quadlet directory", &values.quadlet_dir,
+                        html! {
+                            "Folder sooth reads " code { ".container" } " / " code { ".pod" } " / "
+                            code { ".volume" } " / … unit files from. Leave as the default unless "
+                            "your quadlets live elsewhere."
+                        },
+                        locks.quadlet_dir, "SOOTH_QUADLET_DIR", None,
+                    ))
+                }
             }
 
-            h2 { "Security & sessions" }
-            div.card {
-                div.field {
-                    label.checkbox-line for="cookie_secure" {
-                        input type="checkbox" id="cookie_secure" name="cookie_secure"
-                            checked[values.cookie_secure];
-                        "Require HTTPS for the session cookie"
+            section.settings-section {
+                h2 { "Security & sessions" }
+                div.card {
+                    div.field {
+                        label.checkbox-line for="cookie_secure" {
+                            input type="checkbox" id="cookie_secure" name="cookie_secure"
+                                checked[values.cookie_secure];
+                            "Require HTTPS for the session cookie"
+                        }
+                        p.field-hint {
+                            "Adds the " code { "Secure" } " flag to the login cookie so browsers only "
+                            "send it over HTTPS. Turn on when sooth runs behind a TLS-terminating "
+                            "reverse proxy; leave off for plain-HTTP localhost."
+                        }
+                        @if locks.cookie_secure { (env_note("SOOTH_COOKIE_SECURE")) }
                     }
+                    (text_field(
+                        "session_idle_timeout_secs", "Session idle timeout (seconds)",
+                        &values.session_idle_timeout_secs,
+                        html! {
+                            "How long a login stays valid with no activity. Default "
+                            code { "43200" } " (12 hours)."
+                        },
+                        locks.session_idle_timeout_secs, "SOOTH_SESSION_IDLE_TIMEOUT_SECS", None,
+                    ))
+                }
+            }
+
+            section.settings-section {
+                h2 { "Updates" }
+                div.card {
+                    (selfupdate::status_fragment(self_update_status, csrf))
+                    div.field {
+                        label { "Update checks" }
+                        (selfupdate::mode_toggle(&values.self_update_mode))
+                        dl.selfupdate-mode-hints {
+                            dt { code { "Off" } } dd { "Never checks." }
+                            dt { code { "Notify" } }
+                            dd { "Shows a banner here when a newer version exists, then lets you "
+                                 "download and install it on your own schedule." }
+                            dt { code { "Auto" } }
+                            dd { "Downloads and installs automatically, restarting sooth when it does." }
+                        }
+                    }
+                    div.field {
+                        label for="self_update_poll_interval_secs" { "Check every" }
+                        select.input id="self_update_poll_interval_secs" name="poll_interval_secs" {
+                            (selfupdate::interval_options(&values.self_update_poll_interval_secs))
+                        }
+                    }
+                    div.field {
+                        label for="self_update_repo" { "GitHub repository" }
+                        input.input type="text" id="self_update_repo" name="repo"
+                            value=(values.self_update_repo) placeholder="owner/name";
+                        p.field-hint { "Point this at your own fork if it publishes its own releases." }
+                    }
+                    p.field-hint { "Applies immediately -- no restart needed." }
+                }
+            }
+
+            section.settings-section {
+                h2 { "Diagnostics" }
+                div.card {
+                    (text_field(
+                        "log_filter", "Log filter", &values.log_filter,
+                        html! {
+                            "A " code { "tracing" } " " code { "EnvFilter" } " directive string "
+                            "controlling log verbosity. Empty falls back to the default."
+                        },
+                        locks.log_filter, "SOOTH_LOG_FILTER",
+                        Some("sooth=info,tower_http=info,zbus=warn"),
+                    ))
+                }
+            }
+
+            section.settings-section {
+                div.card.settings-save-card {
                     p.field-hint {
-                        "Adds the " code { "Secure" } " flag to the login cookie so browsers only "
-                        "send it over HTTPS. Turn on when sooth runs behind a TLS-terminating "
-                        "reverse proxy; leave off for plain-HTTP localhost."
+                        "Everything above is saved together. Server, filesystem, security, "
+                        "and diagnostics changes take effect on the next restart of sooth; "
+                        "Updates changes apply immediately."
                     }
-                    @if locks.cookie_secure { (env_note("SOOTH_COOKIE_SECURE")) }
+                    button #settings-save.btn.btn-primary type="submit" { "Save changes" }
                 }
-                (text_field(
-                    "session_idle_timeout_secs", "Session idle timeout (seconds)",
-                    &values.session_idle_timeout_secs,
-                    html! {
-                        "How long a login stays valid with no activity. Default "
-                        code { "43200" } " (12 hours)."
-                    },
-                    locks.session_idle_timeout_secs, "SOOTH_SESSION_IDLE_TIMEOUT_SECS", None,
-                ))
             }
+        }
 
-            h2 { "Diagnostics" }
+        section.settings-section {
+            h2 { "Restart" }
             div.card {
-                (text_field(
-                    "log_filter", "Log filter", &values.log_filter,
-                    html! {
-                        "A " code { "tracing" } " " code { "EnvFilter" } " directive string "
-                        "controlling log verbosity. Empty falls back to the default."
-                    },
-                    locks.log_filter, "SOOTH_LOG_FILTER",
-                    Some("sooth=info,tower_http=info,zbus=warn"),
-                ))
-            }
-
-            button.btn.btn-primary type="submit" { "Save" }
-            p.field-hint { "Changes take effect on the next restart of sooth." }
-        }
-
-        div.section-header {
-            h2 { "System" }
-            div.actions {
-                form.inline-form hx-post="/settings/health/refresh" hx-target="#health-card" hx-swap="outerHTML" {
+                p.field-hint {
+                    "Restarts sooth in place to apply everything saved above. In-memory "
+                    "sessions are cleared (everyone signs in again) and the dashboard is "
+                    "briefly unavailable while it comes back."
+                }
+                form #restart-form method="post" action="/settings/restart" {
                     (csrf_input(csrf))
-                    button.btn.btn-sm type="submit" { (icon(Icon::Refresh)) span { "Refresh" } }
+                    button.btn.btn-restart type="submit" { "Restart sooth now" }
                 }
             }
         }
-        (health_card(health))
 
-        h2 { "Updates" }
-        (selfupdate::card(self_update_config, self_update_status, csrf))
-
-        h2 { "Restart" }
-        div.card {
-            p.field-hint {
-                "Restarts sooth in place to apply everything saved above. In-memory "
-                "sessions are cleared (everyone signs in again) and the dashboard is "
-                "briefly unavailable while it comes back."
-            }
-            form method="post" action="/settings/restart" {
-                (csrf_input(csrf))
-                button.btn.btn-restart type="submit" { "Restart sooth now" }
-            }
-        }
-
-        h2 { "Password" }
-        div.card {
-            @if locks.auth_password_hash {
-                p.field-note-env {
-                    "The login password is set by the " code { "SOOTH_AUTH_PASSWORD_HASH" }
-                    " environment variable. Change it there and restart."
-                }
-            } @else {
-                form.settings-form method="post" action="/settings/password" {
-                    (csrf_input(csrf))
-                    p.field-hint {
-                        "Sets a new dashboard login password. Saved to the config file and "
-                        "applied the next time sooth restarts."
+        section.settings-section {
+            h2 { "Password" }
+            div.card {
+                @if locks.auth_password_hash {
+                    p.field-note-env {
+                        "The login password is set by the " code { "SOOTH_AUTH_PASSWORD_HASH" }
+                        " environment variable. Change it there and restart."
                     }
-                    div.field {
-                        label for="current_password" { "Current password" }
-                        input.input type="password" id="current_password" name="current_password"
-                            autocomplete="current-password" required;
+                } @else {
+                    form method="post" action="/settings/password" {
+                        (csrf_input(csrf))
+                        p.field-hint {
+                            "Sets a new dashboard login password. Saved to the config file and "
+                            "applied the next time sooth restarts."
+                        }
+                        div.field {
+                            label for="current_password" { "Current password" }
+                            input.input type="password" id="current_password" name="current_password"
+                                autocomplete="current-password" required;
+                        }
+                        div.field {
+                            label for="new_password" { "New password" }
+                            input.input type="password" id="new_password" name="new_password"
+                                autocomplete="new-password" minlength="8" required;
+                        }
+                        div.field {
+                            label for="confirm_password" { "Confirm new password" }
+                            input.input type="password" id="confirm_password" name="confirm_password"
+                                autocomplete="new-password" minlength="8" required;
+                        }
+                        button.btn.btn-primary type="submit" { "Change password" }
                     }
-                    div.field {
-                        label for="new_password" { "New password" }
-                        input.input type="password" id="new_password" name="new_password"
-                            autocomplete="new-password" minlength="8" required;
-                    }
-                    div.field {
-                        label for="confirm_password" { "Confirm new password" }
-                        input.input type="password" id="confirm_password" name="confirm_password"
-                            autocomplete="new-password" minlength="8" required;
-                    }
-                    button.btn.btn-primary type="submit" { "Change password" }
                 }
             }
         }

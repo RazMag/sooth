@@ -130,10 +130,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/settings/password", post(settings::change_password))
         .route("/settings/restart", post(settings::restart))
         .route("/settings/health/refresh", post(settings::refresh_health))
-        .route(
-            "/settings/self-update",
-            get(selfupdate::card).post(selfupdate::save),
-        )
+        .route("/settings/self-update", get(selfupdate::card))
         .route("/settings/self-update/check", post(selfupdate::check_now))
         .route(
             "/settings/self-update/download",

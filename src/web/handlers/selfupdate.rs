@@ -1,99 +1,33 @@
-//! The Settings page's "Updates" card: view/edit self-update settings and
-//! drive "Check now"/"Download update". All mutation goes through
-//! `AppState.self_update` (`selfupdate::SelfUpdateManager`), which persists
-//! to the config file and (unlike the rest of Settings) applies live -- no
-//! restart needed. Once a download lands on `ReadyToRestart`, the card's
-//! "Install and restart" button posts to the existing
+//! The Settings page's "Updates" status: current version and
+//! "Check now"/"Download update" actions, re-fetched on
+//! `sse:self-update-changed`. The editable settings (mode, poll interval,
+//! repo) live in the main settings form now -- see
+//! `crate::web::handlers::settings::save`, which both persists them to the
+//! config file and applies them live via `AppState.self_update`
+//! (`selfupdate::SelfUpdateManager`) in the same request, unlike the rest of
+//! Settings which needs a restart. Once a download lands on
+//! `ReadyToRestart`, the "Install and restart" button posts to the existing
 //! `settings::restart` action directly -- installing a downloaded update
 //! isn't a distinct self-update action, it's just the ordinary restart.
 
 use axum::Form;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use serde::Deserialize;
 use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
-use crate::selfupdate::{SelfUpdateConfig, UpdateMode};
 use crate::web::templates;
 
-/// The card fragment only -- re-fetched by the page on
+/// The status fragment only -- re-fetched by the page on
 /// `sse:self-update-changed`, the self-update analogue of `gitsync::rows`.
 pub async fn card(State(state): State<AppState>, session: Session) -> impl IntoResponse {
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    templates::selfupdate::card(
-        &state.self_update.config_snapshot(),
-        &state.self_update.snapshot(),
-        &csrf,
-    )
-}
-
-#[derive(Deserialize)]
-pub struct SaveForm {
-    csrf_token: String,
-    mode: String,
-    poll_interval_secs: String,
-    repo: String,
-}
-
-/// Saves the settings form. htmx-only (the card's form posts with
-/// `hx-target="#self-update-card"`), so a rejected submission re-renders
-/// just the card with a 422 and an inline error, same convention as
-/// `gitsync`'s edit disclosure.
-pub async fn save(
-    State(state): State<AppState>,
-    session: Session,
-    Form(form): Form<SaveForm>,
-) -> Result<Response, FragmentError> {
-    if !crate::auth::csrf::verify(&session, &form.csrf_token).await {
-        return Err(AppError::Csrf.into());
-    }
-
-    let render_error = |msg: &str| {
-        (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            templates::selfupdate::card_with_error(
-                &state.self_update.config_snapshot(),
-                &state.self_update.snapshot(),
-                &form.csrf_token,
-                msg,
-            ),
-        )
-            .into_response()
-    };
-
-    let Some(mode) = UpdateMode::parse(&form.mode) else {
-        return Ok(render_error("Invalid mode"));
-    };
-    let Ok(poll_interval_secs) = form.poll_interval_secs.trim().parse::<u64>() else {
-        return Ok(render_error("Invalid check interval"));
-    };
-    if poll_interval_secs < 60 {
-        return Ok(render_error("Check interval must be at least 60 seconds"));
-    }
-    let repo = form.repo.trim().to_string();
-    if crate::selfupdate::split_repo(&repo).is_err() {
-        return Ok(render_error("Repository must look like \"owner/name\""));
-    }
-
-    let config = SelfUpdateConfig {
-        mode,
-        poll_interval_secs,
-        repo,
-    };
-    match state.self_update.configure(config) {
-        Ok(()) => Ok(templates::selfupdate::card(
-            &state.self_update.config_snapshot(),
-            &state.self_update.snapshot(),
-            &form.csrf_token,
-        )
-        .into_response()),
-        Err(e) => Ok(render_error(&e.to_string())),
-    }
+    templates::selfupdate::status_fragment(&state.self_update.snapshot(), &csrf)
 }
 
 #[derive(Deserialize)]
