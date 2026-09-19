@@ -849,11 +849,28 @@
   .group-picker-new { display: flex; gap: 0.3rem; padding-top: 0.35rem; margin-top: 0.1rem; border-top: 1px solid var(--color-line); }
   .group-picker-new .input { flex: 1; min-width: 0; }
 
-  /* "Add group" disclosure in the list toolbar. */
+  /* "Add group" disclosure in the list toolbar: opens a small popup next to
+     the button (same technique as `.group-picker-panel`) instead of pushing
+     the rest of the toolbar down. */
   .add-group { position: relative; }
   .add-group > summary { list-style: none; }
   .add-group > summary::-webkit-details-marker { display: none; }
-  .add-group-form { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.5rem; }
+  .add-group-form {
+    position: absolute;
+    z-index: 30;
+    top: 100%;
+    left: 0;
+    margin-top: 0.35rem;
+    padding: 0.5rem;
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    box-shadow: var(--shadow-pop);
+  }
+  .add-group-form .input { width: 12rem; }
 
   /* Drag handle on each unit row. */
   .drag-handle { display: inline-flex; vertical-align: middle; margin-right: 0.3rem; color: var(--color-faint); cursor: grab; }

@@ -73,4 +73,14 @@ export function initGroups() {
     saveExpanded(set);
     apply(table, set);
   });
+
+  // The "Add group" toolbar popup (`details.add-group`) and the group-move
+  // popup (`details.group-picker`, detail page + row kebab) are plain
+  // disclosures with no other close affordance -- clicking anywhere outside
+  // the open one dismisses it, same as a native dropdown.
+  document.addEventListener("click", (e) => {
+    for (const details of document.querySelectorAll("details.add-group[open], details.group-picker[open]")) {
+      if (!details.contains(e.target)) details.open = false;
+    }
+  });
 }
