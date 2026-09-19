@@ -126,9 +126,10 @@ pub fn section_back_target(kind: UnitKind) -> (&'static str, &'static str) {
 }
 
 /// The `<head>` shared by every full page. The bundled `app.js` carries htmx,
-/// its SSE extension, and CodeMirror; the inline script resolves an effective
-/// light/dark theme and stamps it on `<html>` before first paint (a deferred
-/// script would run too late and flash the wrong theme).
+/// its SSE extension, and CodeMirror; the inline script resolves the saved
+/// theme *preference* (`light` / `dark` / `system`) into an effective
+/// light/dark theme and stamps both on `<html>` before first paint (a
+/// deferred script would run too late and flash the wrong theme).
 fn head_tag(title: &str) -> Markup {
     html! {
         head {
@@ -137,9 +138,11 @@ fn head_tag(title: &str) -> Markup {
             title { (title) " · sooth" }
             script {
                 (maud::PreEscaped(
-                    "try{var t=localStorage.getItem('sooth-theme');\
-                     if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';\
-                     document.documentElement.dataset.theme=t;}catch(e){}"
+                    "try{var p=localStorage.getItem('sooth-theme');\
+                     if(p!=='light'&&p!=='dark'&&p!=='system')p='system';\
+                     var eff=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;\
+                     document.documentElement.dataset.theme=eff;\
+                     document.documentElement.dataset.themePref=p;}catch(e){}"
                 ))
             }
             link rel="stylesheet" href="/static/style.css";
@@ -175,6 +178,7 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                                 }
                             }
                         }
+                        div.sidebar-version { "v" (env!("CARGO_PKG_VERSION")) }
                         div.sidebar-footer {
                             a class={
                                 "btn-icon"
@@ -187,9 +191,11 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                                     "Settings"
                                 }) { (icon(Icon::Settings)) }
                             button.btn-icon.theme-toggle type="button" data-theme-toggle
-                                title="Toggle light/dark theme" aria-label="Toggle light/dark theme" {
+                                title="Theme: click to cycle Light / Dark / System"
+                                aria-label="Change theme (Light / Dark / System)" {
                                 span.i-sun { (icon(Icon::Sun)) }
                                 span.i-moon { (icon(Icon::Moon)) }
+                                span.i-monitor { (icon(Icon::Monitor)) }
                             }
                             span.spacer {}
                             form method="post" action="/logout" {

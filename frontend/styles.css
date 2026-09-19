@@ -253,12 +253,17 @@
   .back-link:hover { color: var(--color-ink); text-decoration: none; }
   .back-link svg { width: 0.95rem; height: 0.95rem; }
 
-  /* Theme toggle: show the icon for the mode you'd switch *to*. */
+  /* Theme toggle: show the icon for the current preference (cycles
+     light -> dark -> system on click); default to the system icon so a
+     missing/invalid attribute (no-JS, private-browsing storage failure)
+     still shows something sensible. */
   .theme-toggle .i-sun,
-  .theme-toggle .i-moon { display: inline-flex; }
-  .theme-toggle .i-moon { display: none; }
-  :root[data-theme="dark"] .theme-toggle .i-sun { display: none; }
-  :root[data-theme="dark"] .theme-toggle .i-moon { display: inline-flex; }
+  .theme-toggle .i-moon,
+  .theme-toggle .i-monitor { display: none; }
+  :root:not([data-theme-pref]) .theme-toggle .i-monitor,
+  :root[data-theme-pref="system"] .theme-toggle .i-monitor { display: inline-flex; }
+  :root[data-theme-pref="light"] .theme-toggle .i-sun { display: inline-flex; }
+  :root[data-theme-pref="dark"] .theme-toggle .i-moon { display: inline-flex; }
 
   /* Badges & chips -------------------------------------------- */
   .badge {
@@ -648,6 +653,13 @@
     border-top: 1px solid var(--color-line);
   }
   .sidebar-footer .spacer { flex: 1; }
+
+  .sidebar-version {
+    padding: 0 0.6rem 0.5rem;
+    font-size: 0.72rem;
+    color: var(--color-faint);
+    text-align: center;
+  }
 
   .nav-scrim { display: none; }
 
