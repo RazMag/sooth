@@ -5,6 +5,7 @@ pub mod gitsync;
 pub mod groups;
 pub mod list;
 pub mod logs;
+pub mod pods;
 pub mod ports;
 pub mod raw_create;
 pub mod selfupdate;

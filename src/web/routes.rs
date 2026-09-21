@@ -9,18 +9,28 @@ use crate::auth;
 use crate::config::AppState;
 
 use super::handlers::{
-    detail, edit_delete, environment, gitsync, groups, list, logs, ports, raw_create, selfupdate,
-    services, settings, unit_ops, validate,
+    detail, edit_delete, environment, gitsync, groups, list, logs, pods, ports, raw_create,
+    selfupdate, services, settings, unit_ops, validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
-/// actions, config fragment, edit, delete, logs -- at one URL prefix. Called
+/// actions, config fragment, delete, move, logs -- at one URL prefix. Called
 /// once per section (`/containers`, `/pods`, `/volumes`, `/networks`, `/images`,
 /// and `/units` for the generic Kube/fallback section), always pointing at
 /// the exact same handler functions: none of this logic differs by kind, so
 /// there's exactly one implementation, just reachable at six prefixes.
-fn mount_unit_routes(router: Router<AppState>, prefix: &str) -> Router<AppState> {
-    router
+///
+/// `edit` is the one exception: every other prefix gets the shared
+/// kind-agnostic raw-INI editor (`edit_delete`), but `/pods` gets its own
+/// (`pods::edit_form`/`edit_submit`, registered separately below) so editing
+/// a pod can also offer attaching already-defined containers -- the same
+/// reason pod *creation* already bypasses `raw_create`.
+fn mount_unit_routes(
+    router: Router<AppState>,
+    prefix: &str,
+    generic_edit: bool,
+) -> Router<AppState> {
+    let router = router
         .route(&format!("{prefix}/{{file_name}}"), get(detail::show))
         .route(
             &format!("{prefix}/{{file_name}}/actions"),
@@ -59,10 +69,6 @@ fn mount_unit_routes(router: Router<AppState>, prefix: &str) -> Router<AppState>
             post(unit_ops::autoupdate),
         )
         .route(
-            &format!("{prefix}/{{file_name}}/edit"),
-            get(edit_delete::edit_form).post(edit_delete::edit_submit),
-        )
-        .route(
             &format!("{prefix}/{{file_name}}/delete"),
             post(edit_delete::delete),
         )
@@ -77,7 +83,15 @@ fn mount_unit_routes(router: Router<AppState>, prefix: &str) -> Router<AppState>
         .route(
             &format!("{prefix}/{{file_name}}/logs/stream"),
             get(logs::logs_stream),
+        );
+    if generic_edit {
+        router.route(
+            &format!("{prefix}/{{file_name}}/edit"),
+            get(edit_delete::edit_form).post(edit_delete::edit_submit),
         )
+    } else {
+        router
+    }
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -90,8 +104,8 @@ pub fn build_router(state: AppState) -> Router {
         // but they still need a create entry point and POST target.
         .route("/containers", post(raw_create::create))
         .route("/containers/new", get(raw_create::containers_new_form))
-        .route("/pods", post(raw_create::create))
-        .route("/pods/new", get(raw_create::pods_new_form))
+        .route("/pods", post(pods::create))
+        .route("/pods/new", get(pods::new_form))
         // Volumes/Networks/Images: their own list page + shared raw-textarea create.
         .route("/volumes", get(list::volumes_page).post(raw_create::create))
         .route("/volumes/rows", get(list::volumes_rows))
@@ -148,8 +162,12 @@ pub fn build_router(state: AppState) -> Router {
         "/images",
         "/units",
     ] {
-        protected = mount_unit_routes(protected, prefix);
+        protected = mount_unit_routes(protected, prefix, prefix != "/pods");
     }
+    protected = protected.route(
+        "/pods/{file_name}/edit",
+        get(pods::edit_form).post(pods::edit_submit),
+    );
     protected = protected.route_layer(middleware::from_fn(auth::middleware::require_auth));
 
     let public = Router::new()

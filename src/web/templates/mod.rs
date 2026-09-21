@@ -818,8 +818,15 @@ pub enum EditorFileName<'a> {
 }
 
 /// The quadlet-content editor: a plain `<textarea>` progressively enhanced
-/// into a syntax-highlighted, live-validated CodeMirror editor by the bundle.
-pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
+/// into a syntax-highlighted, live-validated CodeMirror editor by the
+/// bundle. `field_name` is almost always `"contents"` -- the one exception is
+/// the Pod pages' inline "new container" rows, which need one independently
+/// named editor per row (see [`code_editor`] for the common case).
+pub fn code_editor_named(
+    contents: &str,
+    file_name: EditorFileName<'_>,
+    field_name: &str,
+) -> Markup {
     let (fixed, stem_input, suffix, kind_select) = match file_name {
         EditorFileName::Fixed(n) => (Some(n), None, None, None),
         EditorFileName::StemSuffix { input, suffix } => (None, Some(input), Some(suffix), None),
@@ -827,7 +834,7 @@ pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
     };
     html! {
         textarea.input
-            name="contents"
+            name=(field_name)
             rows="18"
             data-code-editor
             data-file-name=[fixed]
@@ -836,17 +843,29 @@ pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
             data-kind-select=[kind_select]
             required
             { (contents) }
-        div id="validate-status" class="validate-status" {}
+        // No `id` here -- a page can carry more than one of these (one per
+        // inline "new container" row), and `frontend/editor.js` locates each
+        // instance's own status slot positionally (the element right after
+        // its textarea), not by a document-wide id.
+        div { div.validate-status {} }
     }
 }
 
+/// [`code_editor_named`] with the one field name every page but the Pod
+/// pages' inline container rows actually uses.
+pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
+    code_editor_named(contents, file_name, "contents")
+}
+
 /// The Name/Value environment-variable editor for `.container` / `.build`
-/// units. `body` is the current `KEY=VALUE` lines (one per variable); it
-/// renders as a plain `<textarea>` that `frontend/envvars.js` progressively
-/// enhances into add/remove rows. Submitted as one `env_vars` field and
-/// written to a sidecar `env/<name>.env` referenced by a managed
-/// `EnvironmentFile=` line.
-pub fn env_var_editor(body: &str) -> Markup {
+/// units (and the Pod pages' inline "new container" rows). `body` is the
+/// current `KEY=VALUE` lines (one per variable); it renders as a plain
+/// `<textarea>` that `frontend/envvars.js` progressively enhances into
+/// add/remove rows. Written to a sidecar `env/<name>.env` referenced by a
+/// managed `EnvironmentFile=` line. `field_name` is almost always
+/// `"env_vars"` (see [`env_var_editor`]) -- a page with more than one of
+/// these (one per inline container row) needs each independently named.
+pub fn env_var_editor_named(body: &str, field_name: &str) -> Markup {
     html! {
         div.field data-envvars {
             label { "Environment variables" }
@@ -854,9 +873,15 @@ pub fn env_var_editor(body: &str) -> Markup {
                 "Saved to a sidecar " code { "env/<name>.env" }
                 " and wired into the unit with " code { "EnvironmentFile=" } "."
             }
-            textarea.input name="env_vars" rows="4" data-envvars-source { (body) }
+            textarea.input name=(field_name) rows="4" data-envvars-source { (body) }
         }
     }
+}
+
+/// [`env_var_editor_named`] with the one field name every page but the Pod
+/// pages' inline container rows actually uses.
+pub fn env_var_editor(body: &str) -> Markup {
+    env_var_editor_named(body, "env_vars")
 }
 
 /// A collapsible reference panel, shown near the editor, listing the host
@@ -868,8 +893,18 @@ pub fn host_vars_panel(vars: &[EnvVar]) -> Markup {
     html! {
         details.host-vars {
             summary {
-                "Host variables"
-                @if !vars.is_empty() { span.muted { " · " (vars.len()) } }
+                span {
+                    "Host variables"
+                    @if !vars.is_empty() { span.muted { " · " (vars.len()) } }
+                }
+                // Purely visual -- there's no separate click handler, closing
+                // relies on the native `<summary>` toggle a click anywhere in
+                // this row already triggers (see `.host-vars-close` in
+                // styles.css, shown only while `[open]`). A real nested
+                // `<button>` here would be invalid HTML (interactive content
+                // inside the implicit disclosure control `<summary>` already
+                // is), so this is a decorative icon, not a focusable control.
+                span.host-vars-close aria-hidden="true" { (icon(Icon::X)) }
             }
             div.host-vars-body {
                 @if vars.is_empty() {
@@ -899,11 +934,11 @@ pub fn host_vars_panel(vars: &[EnvVar]) -> Markup {
 }
 
 pub fn validate_ok() -> Markup {
-    html! { div id="validate-status" class="validate-status valid" { (icon(Icon::Check)) span { "Valid" } } }
+    html! { div.validate-status.valid { (icon(Icon::Check)) span { "Valid" } } }
 }
 
 pub fn validate_error(message: &str) -> Markup {
-    html! { div id="validate-status" class="validate-status invalid" { (icon(Icon::X)) span { (message) } } }
+    html! { div.validate-status.invalid { (icon(Icon::X)) span { (message) } } }
 }
 
 pub fn error_fragment(message: &str, id: Uuid) -> Markup {

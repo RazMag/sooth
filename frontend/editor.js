@@ -26,15 +26,24 @@ const theme = EditorView.theme({
   },
 });
 
-// The most recently mounted editor view (one editor per page). The host-var
-// reference panel's insert buttons dispatch into this.
-let currentView = null;
+// Where a host-var `${NAME}` reference goes when a chip is clicked: either a
+// CodeMirror instance ({kind:"codemirror", view}) or a plain insertable
+// input ({kind:"input", el}, e.g. an env-var value field). A page can now
+// carry more than one of each (one raw editor / one env editor per inline
+// "new container" row on the Pod pages), so this tracks whichever was most
+// recently *focused* rather than "whichever mounted last" -- the old
+// single `currentView` only ever worked by accident when a page happened to
+// have exactly one editor and nothing else insertable on it.
+let insertTarget = null;
 
 // Progressively enhances every `<textarea data-code-editor>` into a
 // CodeMirror 6 editor and wires a debounced live-validate against POST
-// /validate (the response HTML replaces #validate-status). The textarea stays
-// in the DOM (hidden) and is kept in sync so the normal form submit still
-// carries `contents`.
+// /validate. The textarea stays in the DOM (hidden) and is kept in sync so
+// the normal form submit still carries its field. Each instance's live
+// validate result renders into the `.validate-status` div immediately after
+// its own textarea in the markup (captured once at mount time), not a
+// document-wide id -- `code_editor()` no longer emits one, since a page can
+// carry more than one editor.
 //
 // The file name to validate against is either fixed (Edit page) or composed
 // from a stem field plus either a static extension suffix (section "New"
@@ -50,6 +59,7 @@ export function initEditors() {
     const stemEl = textarea.dataset.stemInput ? document.querySelector(textarea.dataset.stemInput) : null;
     const suffix = textarea.dataset.suffix || "";
     const kindEl = textarea.dataset.kindSelect ? document.querySelector(textarea.dataset.kindSelect) : null;
+    const statusHolder = textarea.nextElementSibling;
 
     const currentFileName = () => {
       if (fixedName) return fixedName;
@@ -64,15 +74,13 @@ export function initEditors() {
       timer = setTimeout(runValidate, 500);
     };
     const runValidate = () => {
-      const statusEl = document.getElementById("validate-status");
       const fileName = currentFileName();
-      if (!fileName || !statusEl) return;
+      if (!fileName || !statusHolder) return;
       const body = new URLSearchParams({ file_name: fileName, contents: textarea.value });
       fetch("/validate", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body })
         .then((r) => r.text())
         .then((html) => {
-          const el = document.getElementById("validate-status");
-          if (el) el.outerHTML = html;
+          statusHolder.innerHTML = html;
         })
         .catch(() => {
           /* transient hiccup -- the next keystroke retries */
@@ -102,12 +110,17 @@ export function initEditors() {
           EditorView.lineWrapping,
           theme,
           sync,
+          EditorView.domEventHandlers({
+            focus: () => {
+              insertTarget = { kind: "codemirror", view };
+            },
+          }),
         ],
       }),
     });
     view.dom.classList.add("cm-host");
     view.dom.setAttribute("data-code-editor-host", "1");
-    currentView = view;
+    if (!insertTarget) insertTarget = { kind: "codemirror", view };
 
     textarea.hidden = true;
     textarea.after(view.dom);
@@ -118,22 +131,47 @@ export function initEditors() {
   });
 }
 
-// One delegated listener for the whole document; the buttons live in the
-// host-var panel and insert a `${NAME}` reference at the editor's cursor.
+// One delegated listener for the whole document; the host-var panel's
+// buttons insert a `${NAME}` reference into whichever editor/input was last
+// focused. Plain insertable fields (env-var values) opt in with
+// `data-insertable`; CodeMirror instances register themselves via the
+// `focus` domEventHandler wired in `initEditors()` above.
 function wireInsertButtons() {
   if (window.__soothInsertRefWired) return;
   window.__soothInsertRefWired = true;
+
+  document.addEventListener(
+    "focusin",
+    (e) => {
+      if (e.target.matches && e.target.matches("[data-insertable]")) {
+        insertTarget = { kind: "input", el: e.target };
+      }
+    },
+    true,
+  );
+
   document.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-insert-ref]");
-    if (!btn || !currentView) return;
+    if (!btn || !insertTarget) return;
     e.preventDefault();
     const ref = btn.getAttribute("data-insert-ref");
-    const sel = currentView.state.selection.main;
-    currentView.dispatch({
-      changes: { from: sel.from, to: sel.to, insert: ref },
-      selection: { anchor: sel.from + ref.length },
-      scrollIntoView: true,
-    });
-    currentView.focus();
+
+    if (insertTarget.kind === "codemirror") {
+      const view = insertTarget.view;
+      const sel = view.state.selection.main;
+      view.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: ref },
+        selection: { anchor: sel.from + ref.length },
+        scrollIntoView: true,
+      });
+      view.focus();
+    } else {
+      const el = insertTarget.el;
+      const start = el.selectionStart ?? el.value.length;
+      const end = el.selectionEnd ?? el.value.length;
+      el.setRangeText(ref, start, end, "end");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.focus();
+    }
   });
 }

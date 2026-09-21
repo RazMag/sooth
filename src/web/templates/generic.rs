@@ -142,7 +142,7 @@ pub fn new_unit_page(p: NewUnitPage<'_>) -> Markup {
                     }
                 }
             }
-            (host_vars_panel(p.host_vars))
+            div.host-vars-flyout { (host_vars_panel(p.host_vars)) }
             button.btn.btn-primary type="submit" { "Create" }
         }
     };
@@ -179,7 +179,7 @@ pub fn edit_unit_page(
                     }
                 }
             }
-            (host_vars_panel(host_vars))
+            div.host-vars-flyout { (host_vars_panel(host_vars)) }
             button.btn.btn-primary type="submit" { "Save" }
         }
     };

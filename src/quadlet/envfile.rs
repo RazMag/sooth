@@ -115,76 +115,7 @@ pub fn delete(quadlet_dir: &Path, stem: &str) -> io::Result<()> {
 /// lines and matching still works (comparison is on the trimmed line), but a
 /// newly inserted line is bare-LF.
 pub fn patch_environment_file(raw: &str, section: &str, value: &str, present: bool) -> String {
-    let managed = format!("EnvironmentFile={value}");
-    let had_trailing_nl = raw.ends_with('\n');
-
-    let mut lines: Vec<String> = raw.split('\n').map(str::to_string).collect();
-    if had_trailing_nl {
-        lines.pop(); // the empty element `split` leaves after a final '\n'
-    }
-
-    let is_any_header = |l: &str| {
-        let t = l.trim();
-        t.starts_with('[') && t.ends_with(']')
-    };
-    let opens_target = |l: &str| {
-        l.trim()
-            .strip_prefix('[')
-            .and_then(|x| x.strip_suffix(']'))
-            .is_some_and(|name| name.trim().eq_ignore_ascii_case(section))
-    };
-
-    let finish = |lines: Vec<String>| {
-        let mut out = lines.join("\n");
-        if had_trailing_nl {
-            out.push('\n');
-        }
-        out
-    };
-
-    let Some(header_idx) = lines.iter().position(|l| opens_target(l)) else {
-        // The primary section is always present in practice (create/edit run
-        // `writer::validate` first). This branch is a defensive fallback.
-        if present {
-            if lines.iter().any(|l| !l.trim().is_empty()) {
-                lines.push(String::new());
-            }
-            lines.push(format!("[{section}]"));
-            lines.push(managed);
-        }
-        return finish(lines);
-    };
-
-    let body_start = header_idx + 1;
-    let body_end = lines[body_start..]
-        .iter()
-        .position(|l| is_any_header(l))
-        .map_or(lines.len(), |p| body_start + p);
-
-    let managed_idx: Vec<usize> = (body_start..body_end)
-        .filter(|&i| lines[i].trim() == managed)
-        .collect();
-
-    if present {
-        if managed_idx.is_empty() {
-            let mut ins = body_end;
-            while ins > body_start && lines[ins - 1].trim().is_empty() {
-                ins -= 1;
-            }
-            lines.insert(ins, managed);
-        } else {
-            // keep the first, drop the rest (highest index first)
-            for &i in managed_idx[1..].iter().rev() {
-                lines.remove(i);
-            }
-        }
-    } else {
-        for &i in managed_idx.iter().rev() {
-            lines.remove(i);
-        }
-    }
-
-    finish(lines)
+    super::iniedit::patch_line(raw, section, "EnvironmentFile", value, present)
 }
 
 /// Parses the editor's `KEY=VALUE` textarea into ordered pairs, the same way
