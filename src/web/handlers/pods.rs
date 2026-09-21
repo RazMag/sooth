@@ -384,6 +384,7 @@ fn parse_new_networks(fields: &HashMap<String, String>) -> Vec<NewNetworkDraft> 
 /// A validated, write-ready new network or volume -- no env vars, no `Pod=`
 /// patching, unlike [`PreparedContainer`]; shared by networks and (plus a
 /// mount-path destination) volumes.
+#[derive(Debug)]
 struct PreparedResource {
     file_name: String,
     contents: String,
@@ -495,6 +496,7 @@ fn parse_new_volumes(fields: &HashMap<String, String>) -> Vec<NewVolumeDraft> {
 /// A validated, write-ready new volume -- `dest` is folded into the pod's
 /// own `[Pod]` section as `Volume=<file_name>:<dest>` by
 /// [`apply_pod_resources`], same as an already-existing volume attach.
+#[derive(Debug)]
 struct PreparedVolume {
     file_name: String,
     contents: String,
@@ -1042,4 +1044,354 @@ async fn render_edit(
         }),
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::quadlet::model::Section;
+
+    fn unit(
+        file_name: &str,
+        kind: UnitKind,
+        section: &str,
+        entries: &[(&str, &str)],
+    ) -> QuadletUnit {
+        QuadletUnit {
+            file_name: file_name.into(),
+            group: String::new(),
+            path: format!("/tmp/{file_name}").into(),
+            kind,
+            sections: vec![Section {
+                name: section.into(),
+                entries: entries
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            }],
+            raw: String::new(),
+        }
+    }
+
+    fn fields(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    fn network_draft(id: u32, name: &str, contents: &str) -> NewNetworkDraft {
+        NewNetworkDraft {
+            id,
+            name: name.to_string(),
+            contents: contents.to_string(),
+        }
+    }
+
+    fn volume_draft(id: u32, name: &str, contents: &str, dest: &str) -> NewVolumeDraft {
+        NewVolumeDraft {
+            id,
+            name: name.to_string(),
+            contents: contents.to_string(),
+            dest: dest.to_string(),
+        }
+    }
+
+    // -- parse_existing --------------------------------------------------
+
+    #[test]
+    fn parse_existing_trims_and_skips_blank_lines() {
+        let out = parse_existing("  a.container  \n\nb.container\n   \n");
+        assert_eq!(out, vec!["a.container", "b.container"]);
+    }
+
+    #[test]
+    fn parse_existing_of_blank_input_is_empty() {
+        assert!(parse_existing("").is_empty());
+        assert!(parse_existing("   \n  \n").is_empty());
+    }
+
+    // -- parse_volume_lines ------------------------------------------------
+
+    #[test]
+    fn parse_volume_lines_parses_file_dest_pairs() {
+        let out = parse_volume_lines("data.volume=/data\ncache.volume=/cache\n").unwrap();
+        assert_eq!(
+            out,
+            vec![
+                ("data.volume".to_string(), "/data".to_string()),
+                ("cache.volume".to_string(), "/cache".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_volume_lines_skips_blank_lines() {
+        let out = parse_volume_lines("\n data.volume=/data \n\n").unwrap();
+        assert_eq!(out, vec![("data.volume".to_string(), "/data".to_string())]);
+    }
+
+    #[test]
+    fn parse_volume_lines_rejects_a_line_with_no_equals() {
+        let err = parse_volume_lines("data.volume").unwrap_err();
+        assert_eq!(err, "line 1: expected FILE=DEST");
+    }
+
+    #[test]
+    fn parse_volume_lines_rejects_an_empty_mount_path() {
+        let err = parse_volume_lines("data.volume=").unwrap_err();
+        assert_eq!(err, "line 1: 'data.volume' needs a mount path");
+    }
+
+    #[test]
+    fn parse_volume_lines_rejects_a_colon_in_the_mount_path() {
+        let err = parse_volume_lines("data.volume=/data:ro").unwrap_err();
+        assert_eq!(err, "line 1: mount path can't contain ':' or a newline");
+    }
+
+    #[test]
+    fn parse_volume_lines_error_uses_a_one_based_line_number() {
+        let err = parse_volume_lines("data.volume=/data\nbad-line\n").unwrap_err();
+        assert_eq!(err, "line 2: expected FILE=DEST");
+    }
+
+    // -- validate_existing / validate_networks / validate_volumes ----------
+
+    #[test]
+    fn validate_existing_accepts_a_real_container() {
+        let all = vec![unit("web.container", UnitKind::Container, "Container", &[])];
+        assert!(validate_existing(&all, &["web.container".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn validate_existing_rejects_a_missing_file() {
+        let err = validate_existing(&[], &["ghost.container".to_string()]).unwrap_err();
+        assert_eq!(err, "ghost.container not found");
+    }
+
+    #[test]
+    fn validate_existing_rejects_the_wrong_kind() {
+        let all = vec![unit("data.volume", UnitKind::Volume, "Volume", &[])];
+        let err = validate_existing(&all, &["data.volume".to_string()]).unwrap_err();
+        assert_eq!(err, "data.volume is not a container");
+    }
+
+    #[test]
+    fn validate_networks_rejects_the_wrong_kind() {
+        let all = vec![unit("web.container", UnitKind::Container, "Container", &[])];
+        let err = validate_networks(&all, &["web.container".to_string()]).unwrap_err();
+        assert_eq!(err, "web.container is not a network");
+    }
+
+    #[test]
+    fn validate_volumes_rejects_the_wrong_kind() {
+        let all = vec![unit("frontend.network", UnitKind::Network, "Network", &[])];
+        let err = validate_volumes(
+            &all,
+            &[("frontend.network".to_string(), "/data".to_string())],
+        )
+        .unwrap_err();
+        assert_eq!(err, "frontend.network is not a volume");
+    }
+
+    // -- apply_pod_resources -------------------------------------------------
+
+    #[test]
+    fn apply_pod_resources_adds_network_and_volume_lines() {
+        let out = apply_pod_resources(
+            "[Pod]\n",
+            &["frontend.network".to_string()],
+            &[("data.volume".to_string(), "/data".to_string())],
+        );
+        assert_eq!(
+            out,
+            "[Pod]\nNetwork=frontend.network\nVolume=data.volume:/data\n"
+        );
+    }
+
+    #[test]
+    fn apply_pod_resources_with_nothing_staged_is_unchanged() {
+        assert_eq!(apply_pod_resources("[Pod]\n", &[], &[]), "[Pod]\n");
+    }
+
+    // -- parse_new_containers / parse_new_networks / parse_new_volumes ------
+
+    #[test]
+    fn parse_new_containers_groups_by_id_in_sorted_order() {
+        let form = fields(&[
+            ("newc_2_name", "worker"),
+            ("newc_2_contents", "[Container]\nImage=b\n"),
+            ("newc_2_env", "B=1"),
+            ("newc_1_name", "web"),
+            ("newc_1_contents", "[Container]\nImage=a\n"),
+            ("newc_1_env", ""),
+            ("unrelated_field", "ignored"),
+        ]);
+        let drafts = parse_new_containers(&form);
+        assert_eq!(drafts.len(), 2);
+        assert_eq!(drafts[0].id, 1);
+        assert_eq!(drafts[0].name, "web");
+        assert_eq!(drafts[1].id, 2);
+        assert_eq!(drafts[1].env, "B=1");
+    }
+
+    #[test]
+    fn parse_new_containers_ignores_keys_belonging_to_other_kinds() {
+        let form = fields(&[("newnet_1_name", "frontend"), ("newvol_1_name", "data")]);
+        assert!(parse_new_containers(&form).is_empty());
+    }
+
+    #[test]
+    fn parse_new_containers_caps_at_the_sanity_limit() {
+        let mut form = HashMap::new();
+        for i in 0..(MAX_NEW_CONTAINERS + 5) {
+            form.insert(format!("newc_{i}_name"), format!("c{i}"));
+        }
+        assert_eq!(parse_new_containers(&form).len(), MAX_NEW_CONTAINERS);
+    }
+
+    #[test]
+    fn parse_new_networks_reads_name_and_contents() {
+        let form = fields(&[
+            ("newnet_1_name", "frontend"),
+            ("newnet_1_contents", "[Network]\n"),
+        ]);
+        let drafts = parse_new_networks(&form);
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].name, "frontend");
+        assert_eq!(drafts[0].contents, "[Network]\n");
+    }
+
+    #[test]
+    fn parse_new_volumes_reads_name_contents_and_dest() {
+        let form = fields(&[
+            ("newvol_1_name", "data"),
+            ("newvol_1_contents", "[Volume]\n"),
+            ("newvol_1_dest", "/data"),
+        ]);
+        let drafts = parse_new_volumes(&form);
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].dest, "/data");
+    }
+
+    // -- prepare_new_networks / prepare_new_volumes -------------------------
+
+    #[test]
+    fn prepare_new_networks_validates_and_names_the_file() {
+        let drafts = vec![network_draft(1, "frontend", "[Network]\nDriver=bridge\n")];
+        let prepared = prepare_new_networks(&[], &drafts).unwrap();
+        assert_eq!(prepared.len(), 1);
+        assert_eq!(prepared[0].file_name, "frontend.network");
+        assert_eq!(prepared[0].contents, "[Network]\nDriver=bridge\n");
+    }
+
+    #[test]
+    fn prepare_new_networks_rejects_a_name_that_already_exists() {
+        let all = vec![unit("frontend.network", UnitKind::Network, "Network", &[])];
+        let drafts = vec![network_draft(1, "frontend", "[Network]\n")];
+        let err = prepare_new_networks(&all, &drafts).unwrap_err();
+        assert_eq!(err, "frontend.network already exists");
+    }
+
+    #[test]
+    fn prepare_new_networks_rejects_duplicate_names_within_one_submission() {
+        let drafts = vec![
+            network_draft(1, "frontend", "[Network]\n"),
+            network_draft(2, "frontend", "[Network]\n"),
+        ];
+        let err = prepare_new_networks(&[], &drafts).unwrap_err();
+        assert_eq!(err, "frontend.network already exists");
+    }
+
+    #[test]
+    fn prepare_new_networks_rejects_an_invalid_name() {
+        let drafts = vec![network_draft(1, "../escape", "[Network]\n")];
+        assert!(prepare_new_networks(&[], &drafts).is_err());
+    }
+
+    #[test]
+    fn prepare_new_networks_rejects_structurally_invalid_contents() {
+        let drafts = vec![network_draft(1, "frontend", "Driver=bridge\n")];
+        assert!(prepare_new_networks(&[], &drafts).is_err());
+    }
+
+    #[test]
+    fn prepare_new_volumes_needs_a_mount_path() {
+        let drafts = vec![volume_draft(1, "data", "[Volume]\n", "")];
+        let err = prepare_new_volumes(&[], &drafts).unwrap_err();
+        assert_eq!(err, "data.volume needs a mount path");
+    }
+
+    #[test]
+    fn prepare_new_volumes_rejects_a_colon_in_the_mount_path() {
+        let drafts = vec![volume_draft(1, "data", "[Volume]\n", "/data:ro")];
+        let err = prepare_new_volumes(&[], &drafts).unwrap_err();
+        assert_eq!(
+            err,
+            "data.volume: mount path can't contain ':' or a newline"
+        );
+    }
+
+    #[test]
+    fn prepare_new_volumes_succeeds_with_a_valid_mount_path() {
+        let drafts = vec![volume_draft(1, "data", "[Volume]\n", "/data")];
+        let prepared = prepare_new_volumes(&[], &drafts).unwrap();
+        assert_eq!(prepared[0].file_name, "data.volume");
+        assert_eq!(prepared[0].dest, "/data");
+    }
+
+    // -- container_options / resource_options -------------------------------
+
+    #[test]
+    fn container_options_excludes_templates_and_other_kinds() {
+        let all = vec![
+            unit(
+                "web.container",
+                UnitKind::Container,
+                "Container",
+                &[("Image", "nginx")],
+            ),
+            unit("worker@.container", UnitKind::Container, "Container", &[]),
+            unit("data.volume", UnitKind::Volume, "Volume", &[]),
+        ];
+        let opts = container_options(&all, None);
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].file_name, "web.container");
+        assert_eq!(opts[0].image.as_deref(), Some("nginx"));
+        assert_eq!(opts[0].current_pod, None);
+    }
+
+    #[test]
+    fn container_options_excludes_current_members_of_the_pod_being_edited() {
+        let all = vec![
+            unit(
+                "web.container",
+                UnitKind::Container,
+                "Container",
+                &[("Pod", "app.pod")],
+            ),
+            unit(
+                "worker.container",
+                UnitKind::Container,
+                "Container",
+                &[("Pod", "other.pod")],
+            ),
+        ];
+        let opts = container_options(&all, Some("app.pod"));
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].file_name, "worker.container");
+        assert_eq!(opts[0].current_pod.as_deref(), Some("other.pod"));
+    }
+
+    #[test]
+    fn resource_options_filters_by_kind_and_excludes_given_names() {
+        let all = vec![
+            unit("frontend.network", UnitKind::Network, "Network", &[]),
+            unit("backend.network", UnitKind::Network, "Network", &[]),
+            unit("data.volume", UnitKind::Volume, "Volume", &[]),
+        ];
+        let opts = resource_options(&all, UnitKind::Network, &["frontend.network".to_string()]);
+        assert_eq!(opts.len(), 1);
+        assert_eq!(opts[0].file_name, "backend.network");
+    }
 }
