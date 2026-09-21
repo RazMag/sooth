@@ -37,19 +37,16 @@ pub async fn show(
             state.health.get(),
         ),
         UnitKind::Pod => {
-            let member_count = all
-                .iter()
-                .filter(|c| c.kind == UnitKind::Container)
-                .filter(|c| {
-                    c.section("Container").and_then(|s| s.get("Pod"))
-                        == Some(unit.file_name.as_str())
-                })
-                .count();
+            let members = refs::pod_members(&unit, &all);
+            let (networks, volumes) = refs::pod_own_refs(&unit, &all);
             templates::pods::detail_page(
                 &unit,
                 &status,
                 &csrf,
-                member_count,
+                &all,
+                &members,
+                &networks,
+                &volumes,
                 &known_groups,
                 state.health.get(),
             )

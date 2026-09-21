@@ -12,7 +12,7 @@ use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
-use crate::quadlet::{QuadletUnit, UnitKind, discovery, install, naming, writer};
+use crate::quadlet::{QuadletUnit, UnitKind, containerref, discovery, install, naming, writer};
 use crate::systemd::UnitStatus;
 
 /// The section a unit belongs to, and therefore the URL prefix all of its
@@ -232,6 +232,57 @@ pub async fn create_unit(
         state.quadlet_dir.as_path(),
         file_name,
     )?)
+}
+
+/// Points an existing `.container` quadlet at `pod_file_name` by patching its
+/// `[Container]` `Pod=` line and rewriting the file in place -- the "New Pod"
+/// and "Edit Pod" pages' follow-up step for each already-defined container
+/// the user picked to attach. Rejects non-Container kinds. No CSRF check
+/// here: this is only ever called from within a handler (`handlers::pods`)
+/// that already verified the one submitted token before running a batch of
+/// these.
+///
+/// Podman only places a container into a pod when it's (re)created, so a
+/// quadlet already running under its old `Pod=` (or none) keeps running
+/// there until it's next started -- the file change alone doesn't move it.
+/// `restart_if_running` closes that gap: when true and the container is
+/// currently active, it's restarted right after the reload so it rejoins the
+/// right pod immediately instead of on some later, unrelated restart.
+pub async fn attach_container_to_pod(
+    state: &AppState,
+    file_name: &str,
+    pod_file_name: &str,
+    restart_if_running: bool,
+) -> Result<(), AppError> {
+    let unit = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?;
+    if unit.kind != UnitKind::Container {
+        return Err(crate::quadlet::QuadletError::Validation(format!(
+            "{file_name} is not a container"
+        ))
+        .into());
+    }
+    let patched = containerref::set_pod(&unit.raw, Some(pod_file_name));
+    if patched == unit.raw {
+        return Ok(());
+    }
+    writer::write_atomic(&state.quadlet_dir, &unit.rel_path(), &patched)?;
+    state.systemd.reload().await?;
+    let _ = state.events.send(DashboardEvent::UnitsChanged);
+    tracing::info!(file = %unit.file_name, pod = pod_file_name, "container attached to pod");
+
+    if restart_if_running {
+        let service = unit.service_name();
+        let status = state.systemd.status(&service).await?;
+        if status.is_active() {
+            state.systemd.restart(&service).await?;
+            let status = state.systemd.status(&service).await?;
+            let _ = state
+                .events
+                .send(DashboardEvent::Status { service, status });
+            tracing::info!(file = %unit.file_name, pod = pod_file_name, "container restarted to join pod");
+        }
+    }
+    Ok(())
 }
 
 /// Same tail as `create_unit`, but overwrites an existing file -- used by

@@ -79,17 +79,6 @@ pub struct PodQuery {
     pod: Option<String>,
 }
 
-pub async fn pods_new_form(State(state): State<AppState>, session: Session) -> impl IntoResponse {
-    new_form(
-        &state,
-        session,
-        Some(NavItem::Services),
-        "/pods",
-        KindChoice::Fixed(UnitKind::Pod),
-        "[Pod]\n",
-    )
-    .await
-}
 pub async fn volumes_new_form(
     State(state): State<AppState>,
     session: Session,
