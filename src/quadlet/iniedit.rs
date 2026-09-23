@@ -23,33 +23,9 @@
 /// newly inserted line is bare-LF.
 pub fn patch_line(raw: &str, section: &str, key: &str, value: &str, present: bool) -> String {
     let managed = format!("{key}={value}");
-    let had_trailing_nl = raw.ends_with('\n');
+    let (mut lines, had_trailing_nl) = split_lines(raw);
 
-    let mut lines: Vec<String> = raw.split('\n').map(str::to_string).collect();
-    if had_trailing_nl {
-        lines.pop(); // the empty element `split` leaves after a final '\n'
-    }
-
-    let is_any_header = |l: &str| {
-        let t = l.trim();
-        t.starts_with('[') && t.ends_with(']')
-    };
-    let opens_target = |l: &str| {
-        l.trim()
-            .strip_prefix('[')
-            .and_then(|x| x.strip_suffix(']'))
-            .is_some_and(|name| name.trim().eq_ignore_ascii_case(section))
-    };
-
-    let finish = |lines: Vec<String>| {
-        let mut out = lines.join("\n");
-        if had_trailing_nl {
-            out.push('\n');
-        }
-        out
-    };
-
-    let Some(header_idx) = lines.iter().position(|l| opens_target(l)) else {
+    let Some(header_idx) = lines.iter().position(|l| opens_section(l, section)) else {
         // The primary section is always present in practice (create/edit run
         // `writer::validate` first). This branch is a defensive fallback.
         if present {
@@ -59,25 +35,18 @@ pub fn patch_line(raw: &str, section: &str, key: &str, value: &str, present: boo
             lines.push(format!("[{section}]"));
             lines.push(managed);
         }
-        return finish(lines);
+        return join_lines(lines, had_trailing_nl);
     };
 
-    let body_start = header_idx + 1;
-    let body_end = lines[body_start..]
-        .iter()
-        .position(|l| is_any_header(l))
-        .map_or(lines.len(), |p| body_start + p);
-
-    let managed_idx: Vec<usize> = (body_start..body_end)
+    let body = section_body(&lines, header_idx);
+    let managed_idx: Vec<usize> = body
+        .clone()
         .filter(|&i| lines[i].trim() == managed)
         .collect();
 
     if present {
         if managed_idx.is_empty() {
-            let mut ins = body_end;
-            while ins > body_start && lines[ins - 1].trim().is_empty() {
-                ins -= 1;
-            }
+            let ins = insert_pos(&lines, body);
             lines.insert(ins, managed);
         } else {
             // keep the first, drop the rest (highest index first)
@@ -91,7 +60,71 @@ pub fn patch_line(raw: &str, section: &str, key: &str, value: &str, present: boo
         }
     }
 
-    finish(lines)
+    join_lines(lines, had_trailing_nl)
+}
+
+/// Splits `raw` on `\n` into a mutable line vector, dropping the empty
+/// trailing element `split` leaves after a final newline, alongside whether
+/// that trailing newline was present. Pair with [`join_lines`] to
+/// round-trip; shared scaffolding for [`patch_line`] and the sibling
+/// raw-text patchers in [`super::install`] and [`super::autoupdate`], whose
+/// matching/replace semantics differ enough that they can't just call
+/// `patch_line` itself.
+pub(crate) fn split_lines(raw: &str) -> (Vec<String>, bool) {
+    let had_trailing_nl = raw.ends_with('\n');
+    let mut lines: Vec<String> = raw.split('\n').map(str::to_string).collect();
+    if had_trailing_nl {
+        lines.pop();
+    }
+    (lines, had_trailing_nl)
+}
+
+/// Inverse of [`split_lines`]: rejoins `lines` and restores the trailing
+/// newline if the original had one.
+pub(crate) fn join_lines(lines: Vec<String>, had_trailing_nl: bool) -> String {
+    let mut out = lines.join("\n");
+    if had_trailing_nl {
+        out.push('\n');
+    }
+    out
+}
+
+/// True when `l` is any `[section]` header line.
+pub(crate) fn is_any_header(l: &str) -> bool {
+    let t = l.trim();
+    t.starts_with('[') && t.ends_with(']')
+}
+
+/// True when `l` is a `[section]` header naming `section` specifically
+/// (case-insensitive, leading/trailing whitespace on the name tolerated).
+pub(crate) fn opens_section(l: &str, section: &str) -> bool {
+    l.trim()
+        .strip_prefix('[')
+        .and_then(|x| x.strip_suffix(']'))
+        .is_some_and(|name| name.trim().eq_ignore_ascii_case(section))
+}
+
+/// The `[body_start, body_end)` line-index range owned by the section whose
+/// header is at `header_idx` -- from just after the header to the next
+/// header line (any section) or EOF.
+pub(crate) fn section_body(lines: &[String], header_idx: usize) -> std::ops::Range<usize> {
+    let body_start = header_idx + 1;
+    let body_end = lines[body_start..]
+        .iter()
+        .position(|l| is_any_header(l))
+        .map_or(lines.len(), |p| body_start + p);
+    body_start..body_end
+}
+
+/// The index within `body` to insert a new key line at, so it lands after
+/// the section's existing keys but before any trailing blank separator
+/// lines at the end of the section.
+pub(crate) fn insert_pos(lines: &[String], body: std::ops::Range<usize>) -> usize {
+    let mut ins = body.end;
+    while ins > body.start && lines[ins - 1].trim().is_empty() {
+        ins -= 1;
+    }
+    ins
 }
 
 #[cfg(test)]

@@ -22,7 +22,6 @@ time = "0.3.55"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "fs", "signal", "process", "io-util", "sync"] }
 toml = "0.8"
 tokio-stream = { version = "0.1.19", features = ["io-util", "sync"] }
-tower = "0.5.3"
 tower-http = { version = "0.7.1", features = ["trace", "timeout"] }
 tower-sessions = { version = "0.15.0", default-features = false, features = ["axum-core", "memory-store"] }
 tracing = "0.1.44"

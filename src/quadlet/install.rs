@@ -62,22 +62,10 @@ fn install_target_line(line: &str) -> Option<(&str, Vec<&str>)> {
 /// lines (matching is on the trimmed line) but a newly inserted line is
 /// bare-LF, mirroring `envfile::patch_environment_file`.
 pub fn set_enabled(raw: &str, enabled: bool) -> String {
-    let had_trailing_nl = raw.ends_with('\n');
-    let mut lines: Vec<String> = raw.split('\n').map(str::to_string).collect();
-    if had_trailing_nl {
-        lines.pop(); // the empty element `split` leaves after a final '\n'
-    }
+    use super::iniedit::{insert_pos, join_lines, opens_section, section_body, split_lines};
 
-    let is_any_header = |l: &str| {
-        let t = l.trim();
-        t.starts_with('[') && t.ends_with(']')
-    };
-    let opens_install = |l: &str| {
-        l.trim()
-            .strip_prefix('[')
-            .and_then(|x| x.strip_suffix(']'))
-            .is_some_and(|name| name.trim().eq_ignore_ascii_case(SECTION))
-    };
+    let (mut lines, had_trailing_nl) = split_lines(raw);
+
     let names_login = |l: &str| {
         install_target_line(l).is_some_and(|(_, targets)| targets.contains(&LOGIN_TARGET))
     };
@@ -86,31 +74,16 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
         t.is_empty() || t.starts_with('#') || t.starts_with(';')
     };
 
-    let finish = |lines: Vec<String>| {
-        let mut out = lines.join("\n");
-        if had_trailing_nl {
-            out.push('\n');
-        }
-        out
-    };
-
-    let header_idx = lines.iter().position(|l| opens_install(l));
+    let header_idx = lines.iter().position(|l| opens_section(l, SECTION));
 
     if enabled {
         match header_idx {
             Some(h) => {
-                let body_start = h + 1;
-                let body_end = lines[body_start..]
-                    .iter()
-                    .position(|l| is_any_header(l))
-                    .map_or(lines.len(), |p| body_start + p);
-                if (body_start..body_end).any(|i| names_login(&lines[i])) {
-                    return finish(lines); // already wanted by default.target
+                let body = section_body(&lines, h);
+                if body.clone().any(|i| names_login(&lines[i])) {
+                    return join_lines(lines, had_trailing_nl); // already wanted by default.target
                 }
-                let mut ins = body_end;
-                while ins > body_start && lines[ins - 1].trim().is_empty() {
-                    ins -= 1;
-                }
+                let ins = insert_pos(&lines, body);
                 lines.insert(ins, MANAGED_LINE.to_string());
             }
             None => {
@@ -121,20 +94,18 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
                 lines.push(MANAGED_LINE.to_string());
             }
         }
-        return finish(lines);
+        return join_lines(lines, had_trailing_nl);
     }
 
     // disable: drop `default.target` wherever it's listed, but leave any
     // other target (a hand-written `multi-user.target`, a `RequiredBy=`) as
     // the user wrote it.
     let Some(h) = header_idx else {
-        return finish(lines); // no [Install] section -- already disabled
+        return join_lines(lines, had_trailing_nl); // no [Install] section -- already disabled
     };
-    let body_start = h + 1;
-    let mut body_end = lines[body_start..]
-        .iter()
-        .position(|l| is_any_header(l))
-        .map_or(lines.len(), |p| body_start + p);
+    let body = section_body(&lines, h);
+    let body_start = body.start;
+    let mut body_end = body.end;
 
     enum Act {
         Keep,
@@ -179,7 +150,7 @@ pub fn set_enabled(raw: &str, enabled: bool) -> String {
         }
     }
 
-    finish(lines)
+    join_lines(lines, had_trailing_nl)
 }
 
 #[cfg(test)]
