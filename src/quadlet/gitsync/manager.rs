@@ -228,6 +228,74 @@ impl GitSyncManager {
         Ok(())
     }
 
+    /// Re-parents or renames a synced group in place: moves its checked-out
+    /// directory on disk (`writer::move_dir`, dragging its `.git` along) and
+    /// updates the persisted `GitSyncConfig.group` to match, so every later
+    /// lookup by that string -- `sync_now`/`force_resync`/`remove`, and the
+    /// next poll's own `quadlet_dir.join(&config.group)` -- keeps finding it
+    /// instead of silently re-cloning into a stale path. Distinct from
+    /// `edit`, which deliberately leaves `group` alone; this is the one
+    /// place it, the manager's own lookup key, and the on-disk path all
+    /// change together.
+    ///
+    /// Pauses the entry's poll task first so it can't race the rename, and
+    /// restores it -- under the *original* config -- if either the disk move
+    /// or the config write fails, rather than leaving the sync stopped or
+    /// disk/config disagreeing about where it lives.
+    ///
+    /// Doesn't touch `systemd` or broadcast `UnitsChanged` itself, same
+    /// division of responsibility as the rest of this module -- that's
+    /// `web::core::move_group_dir`/`rename_group`'s job, the only callers.
+    pub async fn move_group(
+        &self,
+        old_group: &str,
+        new_group: &str,
+        quadlet_dir: &Path,
+    ) -> Result<(), GitSyncError> {
+        if !naming::valid_group(new_group) {
+            return Err(GitSyncError::Validation(format!(
+                "invalid group '{new_group}'"
+            )));
+        }
+        let Some(entry) = self
+            .entries
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(old_group)
+        else {
+            return Err(GitSyncError::NotFound(old_group.to_string()));
+        };
+        entry.abort.abort();
+        let config = entry.config;
+
+        if let Err(e) = crate::quadlet::writer::move_dir(quadlet_dir, old_group, new_group) {
+            // The directory never moved -- put the entry back exactly as it
+            // was so the sync keeps running rather than silently vanishing.
+            self.spawn(config, Arc::from(quadlet_dir));
+            return Err(GitSyncError::Failed(e.to_string()));
+        }
+
+        let mut new_config = config.clone();
+        new_config.group = new_group.to_string();
+        if let Err(e) = crate::config::patch_git_syncs(&self.config_path, |list| {
+            if let Some(c) = list.iter_mut().find(|c| c.group == old_group) {
+                c.group = new_group.to_string();
+            }
+        }) {
+            // Config didn't take -- move the directory back and restore the
+            // entry under its original config rather than leaving disk and
+            // config disagreeing about where this sync lives.
+            let _ = crate::quadlet::writer::move_dir(quadlet_dir, new_group, old_group);
+            self.spawn(config, Arc::from(quadlet_dir));
+            return Err(GitSyncError::Failed(format!("failed to save config: {e}")));
+        }
+
+        info!(from = old_group, to = new_group, "git-sync group moved");
+        self.spawn(new_config, Arc::from(quadlet_dir));
+        let _ = self.events.send(DashboardEvent::GitSyncChanged);
+        Ok(())
+    }
+
     /// Wakes the entry's poll loop immediately rather than waiting for its
     /// interval -- the "Sync now" button. Still subject to the same
     /// fast-forward-only check as a routine poll; a diverged checkout needs
@@ -728,5 +796,92 @@ mod tests {
             std::fs::read_to_string(quadlet_dir.path().join("synced/web.container")).unwrap(),
             "[Container]\nImage=staging\n"
         );
+    }
+
+    #[tokio::test]
+    async fn move_group_relocates_the_checkout_and_updates_the_key() {
+        let origin = make_origin();
+        let quadlet_dir = tempfile::tempdir().unwrap();
+        let (mgr, config_dir) = manager();
+        mgr.add(
+            "synced".to_string(),
+            origin.path().display().to_string(),
+            Some("main".to_string()),
+            60,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap();
+
+        mgr.move_group("synced", "media/synced", quadlet_dir.path())
+            .await
+            .unwrap();
+
+        assert!(!quadlet_dir.path().join("synced").exists());
+        assert!(
+            quadlet_dir
+                .path()
+                .join("media/synced/web.container")
+                .is_file()
+        );
+
+        let snap = mgr.snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].0.group, "media/synced");
+
+        // The old key is gone, the new one works -- both persisted and live.
+        assert!(matches!(
+            mgr.sync_now("synced"),
+            Err(GitSyncError::NotFound(_))
+        ));
+        mgr.sync_now("media/synced").unwrap();
+
+        let reloaded =
+            crate::config::Config::load(Some(config_dir.path().join("config.toml"))).unwrap();
+        assert_eq!(reloaded.git_syncs.len(), 1);
+        assert_eq!(reloaded.git_syncs[0].group, "media/synced");
+    }
+
+    #[tokio::test]
+    async fn move_group_of_an_unknown_group_errors_without_touching_disk() {
+        let quadlet_dir = tempfile::tempdir().unwrap();
+        let (mgr, _config_dir) = manager();
+
+        let err = mgr
+            .move_group("nope", "elsewhere", quadlet_dir.path())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GitSyncError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn move_group_restores_the_entry_when_the_destination_is_taken() {
+        let origin = make_origin();
+        let quadlet_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(quadlet_dir.path().join("taken")).unwrap();
+        std::fs::write(quadlet_dir.path().join("taken/x.container"), "").unwrap();
+        let (mgr, _config_dir) = manager();
+        mgr.add(
+            "synced".to_string(),
+            origin.path().display().to_string(),
+            Some("main".to_string()),
+            60,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap();
+
+        let err = mgr
+            .move_group("synced", "taken", quadlet_dir.path())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, GitSyncError::Failed(_)));
+
+        // Still tracked under its original path, not just left for dead.
+        assert!(quadlet_dir.path().join("synced/web.container").is_file());
+        let snap = mgr.snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].0.group, "synced");
+        mgr.sync_now("synced").unwrap();
     }
 }

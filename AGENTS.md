@@ -83,15 +83,23 @@ opens `Connection::session()` on startup and exits if it fails).
   drive `/groups/{move,rename,delete}` (delete refused while units remain).
   `writer::move_dir` renames the directory with every unit inside keeping its
   service name; `core::move_group_dir` rejects a move into the group itself or
-  a subgroup. A git-synced group (`quadlet::gitsync`) is the one exception to
-  "user-managed": `core::synced_destination`/`synced_source` reject filing a
-  unit into one, and reject moving/renaming the synced directory itself (or
-  an ancestor/descendant of it), since either would fight the next sync or
-  break `GitSyncConfig.group`'s path tracking. `templates::list::GroupLists`
-  carries both the full group list and the synced subset into the list
-  templates so the table can preview the same rule client-side (no drag
-  handle on a synced group's header, `dragdrop.js`'s `isSyncedTarget` guard) —
-  the server check is still the authoritative one.
+  a subgroup. A git-synced group (`quadlet::gitsync`) is a partial exception
+  to "user-managed": `core::synced_destination`/`synced_source` still reject
+  filing a unit into one, or moving/renaming an *ancestor or descendant* of
+  one (either would fight the next sync or orphan `GitSyncConfig.group`'s
+  path tracking) — but the synced directory itself **can** be moved/renamed,
+  via `core::is_synced_group` routing `move_group_dir`/`rename_group` through
+  `GitSyncManager::move_group` instead of a bare `writer::move_dir`: it pauses
+  the sync's poll task, moves the checkout, updates the persisted
+  `GitSyncConfig.group` to match (restoring the original config on any
+  failure, rather than leaving the sync stopped or disk/config disagreeing),
+  then respawns it under the new key. `templates::list::GroupLists` carries
+  both the full group list and the synced subset into the list templates so
+  the table can preview the "can't file into / can't move a non-owning
+  ancestor" rule client-side (`dragdrop.js`'s `isSyncedTarget` guard, which
+  only ever gates *drop targets* — a synced group's own header still gets a
+  drag grip like any other, since dragging it *is* now allowed) — the server
+  check is still the authoritative one.
 - **One implementation, six mount points.** Per-unit behavior does not vary
   by kind — don't add kind-specific handler modules. The detail page
   dispatches on `unit.kind` (the loaded unit's real kind, not the URL
