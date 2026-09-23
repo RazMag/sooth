@@ -2,8 +2,8 @@ use maud::{Markup, html};
 
 use super::{
     BannerKind, EditorFileName, Icon, NavItem, back_link, banner, code_editor, code_editor_named,
-    csrf_input, detail, env_var_editor_named, host_vars_panel, icon, known_groups_datalist,
-    page_header, shell,
+    csrf_input, detail, env_var_editor_named, group_field, host_vars_panel, icon, page_header,
+    shell,
 };
 use crate::health::Health;
 use crate::hostenv::EnvVar;
@@ -179,7 +179,7 @@ pub fn new_page(p: NewPodPage<'_>) -> Markup {
                     span.stem-suffix { ".pod" }
                 }
             }
-            (group_field(p.group_prefill, p.known_groups))
+            (group_field(p.group_prefill, p.known_groups, false))
             div.host-vars-flyout { (host_vars_panel(p.host_vars)) }
             div.pod-sections {
                 (resource_card("Containers",
@@ -389,51 +389,6 @@ pub fn edit_page(p: EditPodPage<'_>) -> Markup {
         Some(p.health),
         body,
     )
-}
-
-/// The Group field: a plain text input with a `<datalist>` (the no-JS
-/// fallback -- pick a suggestion or type any new path) progressively
-/// enhanced into the same picker-with-an-add-field control the detail page's
-/// group control (`group_picker` in `templates::mod`) already uses, so
-/// choosing an existing group or filing under a brand-new one both stay
-/// one click away. Not that same function reused directly -- this one has
-/// no unit to move, just a local field value to set -- but it shares its
-/// CSS classes (`.group-picker`, `.group-opt`, …) for an identical look, and
-/// its open disclosure gets the same outside-click-to-close handling from
-/// `frontend/groups.js` for free.
-fn group_field(prefill: &str, known: &[String]) -> Markup {
-    html! {
-        div.field data-group-field {
-            label for="group" { "Group " span.field-hint { "(optional subdirectory)" } }
-            input.input type="text" id="group" name="group" list="known-groups"
-                value=(prefill) placeholder="e.g. media/arr"
-                autocomplete="off" autocapitalize="off" spellcheck="false"
-                data-group-source;
-            (known_groups_datalist(known))
-            details.group-picker hidden data-group-picker {
-                summary.btn.btn-ghost.btn-sm {
-                    (icon(Icon::Folder))
-                    span data-group-picker-label {
-                        @if prefill.is_empty() { "root" } @else { (prefill) }
-                    }
-                    (icon(Icon::ChevronDown))
-                }
-                div.group-picker-panel {
-                    div.group-picker-list {
-                        button.group-opt type="button" data-group-choice="" { "root" }
-                        @for g in known {
-                            button.group-opt type="button" data-group-choice=(g) { (g) }
-                        }
-                    }
-                    div.group-picker-new {
-                        input.input.input-sm type="text" placeholder="new group…" data-group-new-input
-                            autocomplete="off" autocapitalize="off" spellcheck="false";
-                        button.btn.btn-sm type="button" data-group-new-add { "Add" }
-                    }
-                }
-            }
-        }
-    }
 }
 
 /// Wraps one resource kind's `existing`/`new` field pair in a titled

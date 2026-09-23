@@ -142,6 +142,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/git-sync/delete", post(gitsync::delete))
         .route("/settings", get(settings::page).post(settings::save))
         .route("/settings/password", post(settings::change_password))
+        .route("/settings/github-token", post(settings::save_github_token))
         .route("/settings/restart", post(settings::restart))
         .route("/settings/health/refresh", post(settings::refresh_health))
         .route("/settings/self-update", get(selfupdate::card))

@@ -372,6 +372,14 @@ pub async fn move_unit(
 /// with it and keeps its service name (podman keys off the bare file name).
 /// A rename + `daemon-reload`; a no-op when the parent is unchanged. Rejects
 /// moving a group into itself or one of its own descendants.
+///
+/// When `group` is itself a git-synced directory, the move goes through
+/// `GitSyncManager::move_group` instead of a bare `writer::move_dir`, so
+/// `GitSyncConfig.group` -- the manager's own lookup key, and what every
+/// later poll re-derives the on-disk path from -- moves with it rather than
+/// being left pointing at a path that no longer exists. Moving a group that
+/// merely sits inside, or is an ancestor of, a synced directory is still
+/// rejected: only the sync's own directory can be moved this way.
 pub async fn move_group_dir(
     state: &AppState,
     session: &Session,
@@ -396,7 +404,8 @@ pub async fn move_group_dir(
         )
         .into());
     }
-    if let Some(synced) = synced_source(state, group) {
+    let is_synced_group = is_synced_group(state, group);
+    if !is_synced_group && let Some(synced) = synced_source(state, group) {
         return Err(git_sync_conflict(&synced));
     }
     if let Some(synced) = synced_destination(state, new_parent) {
@@ -406,7 +415,14 @@ pub async fn move_group_dir(
     if to == group {
         return Ok(()); // already at this parent
     }
-    writer::move_dir(&state.quadlet_dir, group, &to)?;
+    if is_synced_group {
+        state
+            .git_sync
+            .move_group(group, &to, &state.quadlet_dir)
+            .await?;
+    } else {
+        writer::move_dir(&state.quadlet_dir, group, &to)?;
+    }
     state.systemd.reload().await?;
     let _ = state.events.send(DashboardEvent::UnitsChanged);
     tracing::info!(from = group, to = %to, "group directory moved");
@@ -433,9 +449,21 @@ fn synced_destination(state: &AppState, group: &str) -> Option<String> {
 /// git-sync's path tracking: `group` *is* a sync's directory, sits inside
 /// one, or contains one as a descendant (any of which would carry the
 /// synced checkout to a new path that `GitSyncConfig.group` no longer
-/// names, so the next poll can't find it).
+/// names, so the next poll can't find it). Callers special-case the "*is*
+/// a sync's directory" case via [`is_synced_group`] -- that one's allowed,
+/// routed through `GitSyncManager::move_group` instead of rejected outright.
 fn synced_source(state: &AppState, group: &str) -> Option<String> {
     source_overlap(&state.git_sync.synced_groups(), group)
+}
+
+/// Whether `group` is exactly a configured git-sync's own directory -- not
+/// one of its subdirectories, and not an ancestor merely containing one.
+/// The specific `synced_source` overlap that `move_group_dir`/`rename_group`
+/// are allowed to act on, by moving/renaming it through
+/// `GitSyncManager::move_group` (which keeps `GitSyncConfig.group` pointed
+/// at the right path) rather than a bare `writer::move_dir`.
+fn is_synced_group(state: &AppState, group: &str) -> bool {
+    state.git_sync.synced_groups().iter().any(|g| g == group)
 }
 
 /// The pure check behind [`synced_destination`], split out so it's testable
@@ -462,14 +490,19 @@ fn source_overlap(synced_groups: &[String], group: &str) -> Option<String> {
 fn git_sync_conflict(synced_group: &str) -> AppError {
     crate::quadlet::QuadletError::Validation(format!(
         "'{synced_group}' is synced from a git repository (see the Git Sync page) and is \
-         managed by the remote -- it can't be used as a move/create target, or moved/renamed itself"
+         managed by the remote -- it can't be used as a move/create target, and a directory \
+         inside it or containing it can't be moved or renamed either. Move '{synced_group}' \
+         itself instead."
     ))
     .into()
 }
 
 /// Renames a group's last path segment, keeping it under the same parent:
 /// `media/arr` + `series` -> `media/series`. A `rename` on disk (contents
-/// move with it) + `daemon-reload`; a no-op when the name is unchanged.
+/// move with it) + `daemon-reload`; a no-op when the name is unchanged. Like
+/// [`move_group_dir`], a git-synced group's own directory is allowed to be
+/// renamed this way (via `GitSyncManager::move_group`); one that merely sits
+/// inside or contains a sync is still rejected.
 pub async fn rename_group(
     state: &AppState,
     session: &Session,
@@ -497,10 +530,18 @@ pub async fn rename_group(
     if to == group {
         return Ok(());
     }
-    if let Some(synced) = synced_source(state, group) {
+    let is_synced_group = is_synced_group(state, group);
+    if !is_synced_group && let Some(synced) = synced_source(state, group) {
         return Err(git_sync_conflict(&synced));
     }
-    writer::move_dir(&state.quadlet_dir, group, &to)?;
+    if is_synced_group {
+        state
+            .git_sync
+            .move_group(group, &to, &state.quadlet_dir)
+            .await?;
+    } else {
+        writer::move_dir(&state.quadlet_dir, group, &to)?;
+    }
     state.systemd.reload().await?;
     let _ = state.events.send(DashboardEvent::UnitsChanged);
     tracing::info!(from = group, to = %to, "group renamed");

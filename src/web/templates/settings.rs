@@ -18,6 +18,15 @@ pub struct FormValues {
     pub self_update_mode: String,
     pub self_update_poll_interval_secs: String,
     pub self_update_repo: String,
+    /// Whether a GitHub access token is currently saved -- never the token
+    /// itself, which (unlike every other field here) is never round-tripped
+    /// into the rendered page. See `github_token_last4`.
+    pub github_token_set: bool,
+    /// The saved token's last 4 characters, for on-screen identification
+    /// only (e.g. "confirm this is the token I meant to save") -- the same
+    /// tradeoff most services make showing a card's last 4 digits. Empty
+    /// when no token is saved.
+    pub github_token_last4: String,
 }
 
 impl FormValues {
@@ -42,8 +51,18 @@ impl FormValues {
             self_update_mode: self_update.mode.as_str().to_string(),
             self_update_poll_interval_secs: self_update.poll_interval_secs.to_string(),
             self_update_repo: self_update.repo.clone(),
+            github_token_set: !config.github_token.trim().is_empty(),
+            github_token_last4: last4(config.github_token.trim()),
         }
     }
+}
+
+/// The last 4 characters of `token`, or the whole thing if it's shorter than
+/// that -- for the "which token is this" hint next to the Settings page's
+/// GitHub token field. Empty in, empty out.
+fn last4(token: &str) -> String {
+    let len = token.chars().count();
+    token.chars().skip(len.saturating_sub(4)).collect()
 }
 
 /// Which settings are currently pinned by a `SOOTH_*` environment variable.
@@ -58,6 +77,7 @@ pub struct EnvLocks {
     pub log_filter: bool,
     pub session_idle_timeout_secs: bool,
     pub auth_password_hash: bool,
+    pub github_token: bool,
 }
 
 impl EnvLocks {
@@ -70,6 +90,7 @@ impl EnvLocks {
             log_filter: set("SOOTH_LOG_FILTER"),
             session_idle_timeout_secs: set("SOOTH_SESSION_IDLE_TIMEOUT_SECS"),
             auth_password_hash: set("SOOTH_AUTH_PASSWORD_HASH"),
+            github_token: set("SOOTH_GITHUB_TOKEN"),
         }
     }
 }
@@ -291,6 +312,43 @@ pub fn page(
                 form #restart-form method="post" action="/settings/restart" {
                     (csrf_input(csrf))
                     button.btn.btn-restart type="submit" { "Restart sooth now" }
+                }
+            }
+        }
+
+        section.settings-section {
+            h2 { "Git access" }
+            div.card {
+                p.field-hint {
+                    "A GitHub personal access token, used to clone/fetch a "
+                    a href="/git-sync" { "git-synced" } " group's remote when it's a private "
+                    code { "https://github.com/..." } " repository. Public repos and non-GitHub "
+                    "remotes don't need this -- and this token is only ever sent to "
+                    code { "github.com" } ", never to some other host a sync happens to point at."
+                }
+                @if locks.github_token {
+                    (env_note("SOOTH_GITHUB_TOKEN"))
+                } @else {
+                    @if values.github_token_set {
+                        p.field-hint {
+                            "Currently saved, ending in " code { "…" (values.github_token_last4) } "."
+                        }
+                    } @else {
+                        p.field-hint { "No token currently saved." }
+                    }
+                    form autocomplete="off" method="post" action="/settings/github-token" {
+                        (csrf_input(csrf))
+                        div.field {
+                            label for="github_token" { "GitHub access token" }
+                            input.input type="password" id="github_token" name="github_token"
+                                autocomplete="off" placeholder="ghp_…";
+                            p.field-hint {
+                                "Leave blank and save to remove the saved token. Applied the "
+                                "next time sooth restarts."
+                            }
+                        }
+                        button.btn.btn-primary type="submit" { "Save token" }
+                    }
                 }
             }
         }

@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use maud::{Markup, html};
 
-use super::{BannerKind, NavItem, banner, csrf_input, page_header, shell};
+use super::{BannerKind, NavItem, banner, csrf_input, group_field, page_header, shell};
 use crate::health::Health;
 use crate::quadlet::gitsync::{GitSyncConfig, SyncState, SyncStatus};
 
@@ -27,24 +27,38 @@ impl Default for AddFormValues {
     }
 }
 
-pub fn page(entries: &[(GitSyncConfig, SyncStatus)], csrf: &str, health: Health) -> Markup {
-    render(entries, csrf, &AddFormValues::default(), None, health)
+pub fn page(
+    entries: &[(GitSyncConfig, SyncStatus)],
+    csrf: &str,
+    known_groups: &[String],
+    health: Health,
+) -> Markup {
+    render(
+        entries,
+        csrf,
+        &AddFormValues::default(),
+        known_groups,
+        None,
+        health,
+    )
 }
 
 pub fn page_with_add_error(
     entries: &[(GitSyncConfig, SyncStatus)],
     csrf: &str,
     values: &AddFormValues,
+    known_groups: &[String],
     error: &str,
     health: Health,
 ) -> Markup {
-    render(entries, csrf, values, Some(error), health)
+    render(entries, csrf, values, known_groups, Some(error), health)
 }
 
 fn render(
     entries: &[(GitSyncConfig, SyncStatus)],
     csrf: &str,
     values: &AddFormValues,
+    known_groups: &[String],
     add_error: Option<&str>,
     health: Health,
 ) -> Markup {
@@ -67,14 +81,10 @@ fn render(
             @if let Some(msg) = add_error { (banner(BannerKind::Error, msg)) }
             form.settings-form method="post" action="/git-sync" id="git-sync-add-form" {
                 (csrf_input(csrf))
-                div.field {
-                    label for="group" { "Group" }
-                    p.field-hint {
-                        "A new or empty subdirectory of the quadlet directory, e.g. "
-                        code { "media" } " or " code { "infra/monitoring" } "."
-                    }
-                    input.input type="text" id="group" name="group" value=(values.group)
-                        placeholder="media" required;
+                (group_field(&values.group, known_groups, true))
+                p.field-hint {
+                    "Must be a new or empty subdirectory -- git-sync clones directly into it, "
+                    "e.g. " code { "media" } " or " code { "infra/monitoring" } "."
                 }
                 div.field {
                     label for="remote" { "Remote URL" }

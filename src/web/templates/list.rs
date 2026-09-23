@@ -167,14 +167,13 @@ fn group_header_row(path: &str, count: usize, colspan: usize, csrf: &str, synced
         tr.group-row data-group=(path) data-depth=(depth) {
             td.group-head-cell colspan=(colspan - 1) {
                 div.group-row-inner style=(format!("--depth:{depth}")) {
-                    // A synced group's own directory shouldn't be re-parented
-                    // by hand -- see `web::core::synced_source` -- so it gets
-                    // no drag grip of its own, just the chip below.
-                    @if !synced {
-                        span.drag-handle.group-drag draggable="true"
-                            title="Drag to move this group under another" aria-hidden="true" {
-                            (icon(Icon::Grip))
-                        }
+                    // A synced group's own directory can be dragged to a new
+                    // parent too -- see `web::core::move_group_dir`, which
+                    // keeps `GitSyncConfig.group` pointed at wherever it
+                    // ends up -- so it gets the same grip as any other group.
+                    span.drag-handle.group-drag draggable="true"
+                        title="Drag to move this group under another" aria-hidden="true" {
+                        (icon(Icon::Grip))
                     }
                     button.group-toggle type="button" aria-expanded="false" title=(path) {
                         span.group-chevron aria-hidden="true" { (icon(Icon::ChevronDown)) }

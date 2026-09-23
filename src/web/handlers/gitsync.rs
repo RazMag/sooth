@@ -13,6 +13,7 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError, PageError};
+use crate::quadlet::discovery;
 use crate::quadlet::gitsync::GitSyncError;
 use crate::web::templates::gitsync::AddFormValues;
 use crate::web::templates::{self};
@@ -32,7 +33,13 @@ pub async fn page(State(state): State<AppState>, session: Session) -> impl IntoR
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    templates::gitsync::page(&state.git_sync.snapshot(), &csrf, state.health.get())
+    let known_groups = discovery::list_groups(&state.quadlet_dir);
+    templates::gitsync::page(
+        &state.git_sync.snapshot(),
+        &csrf,
+        &known_groups,
+        state.health.get(),
+    )
 }
 
 /// The status-table rows only -- re-fetched by the page on
@@ -71,12 +78,14 @@ pub async fn add(
     };
     let render_error = |msg: &str| {
         let csrf = &form.csrf_token;
+        let known_groups = discovery::list_groups(&state.quadlet_dir);
         (
             StatusCode::UNPROCESSABLE_ENTITY,
             templates::gitsync::page_with_add_error(
                 &state.git_sync.snapshot(),
                 csrf,
                 &entered,
+                &known_groups,
                 msg,
                 state.health.get(),
             ),
