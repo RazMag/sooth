@@ -4,6 +4,15 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-09-23
+
+### Fixed
+
+- Long values in a unit's detail-page Overview card (file path, a nested
+  group's name, secret and host variable names with their "missing" badges)
+  no longer spill past the card's edge. Secrets and host variables are now
+  listed one per line.
+
 ## [0.3.3] - 2026-09-23
 
 ### Added
@@ -90,6 +99,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.3.4]: https://github.com/RazMag/sooth/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/RazMag/sooth/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/RazMag/sooth/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/RazMag/sooth/compare/v0.3.0...v0.3.1
