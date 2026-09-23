@@ -396,8 +396,12 @@ fn prepare_member_edits(
         let pairs = envfile::parse_editor_lines(&draft.env)
             .map_err(|msg| (draft.file_name.clone(), msg))?;
         let refval = envfile::reference_value(&state.quadlet_dir, &stem);
-        let contents =
-            envfile::patch_environment_file(&draft.contents, "Container", &refval, !pairs.is_empty());
+        let contents = envfile::patch_environment_file(
+            &draft.contents,
+            "Container",
+            &refval,
+            !pairs.is_empty(),
+        );
         writer::validate(&draft.file_name, &contents)
             .map_err(|e| (draft.file_name.clone(), e.to_string()))?;
         prepared.push(PreparedMemberEdit {
@@ -430,8 +434,7 @@ async fn apply_member_edits(
             tracing::warn!(file = m.file_name, error = %e, "failed to write env sidecar for pod member edit");
             continue;
         }
-        if let Err(e) =
-            core::edit_unit(state, session, csrf_token, &m.file_name, &m.contents).await
+        if let Err(e) = core::edit_unit(state, session, csrf_token, &m.file_name, &m.contents).await
         {
             tracing::warn!(file = m.file_name, error = %e, "failed to save pod member edit");
             let res = match prev_env {
@@ -1422,7 +1425,10 @@ mod tests {
         let form = fields(&[
             ("memberc_web.container_contents", "[Container]\nImage=a\n"),
             ("memberc_web.container_env", "A=1"),
-            ("memberc_worker.container_contents", "[Container]\nImage=b\n"),
+            (
+                "memberc_worker.container_contents",
+                "[Container]\nImage=b\n",
+            ),
             ("unrelated_field", "ignored"),
         ]);
         let members = vec!["web.container".to_string(), "worker.container".to_string()];
