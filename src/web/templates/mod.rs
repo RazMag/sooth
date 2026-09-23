@@ -559,7 +559,7 @@ fn group_move_menu(
     html! {
         details.group-picker {
             summary.btn.btn-ghost.btn-sm {
-                (icon(Icon::Folder)) span { (label) } (icon(Icon::ChevronDown))
+                (icon(Icon::Folder)) span title=(label) { (label) } (icon(Icon::ChevronDown))
             }
             div.group-picker-panel {
                 (form_attrs(html! {
