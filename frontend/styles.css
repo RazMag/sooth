@@ -479,6 +479,8 @@
   .settings-section { margin-top: 1.75rem; padding-top: 1.75rem; border-top: 1px solid var(--color-line); }
   .settings-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
   .settings-section h2 { margin: 0 0 0.6rem; }
+  .settings-section .card + .card { margin-top: 1rem; }
+  .settings-section .card h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
   .card > .field:last-child { margin-bottom: 0; }
 
   /* The Save action: a card like every other section's, not a bespoke bar,
@@ -859,6 +861,7 @@
   .group-picker > summary { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; list-style: none; }
   .group-picker > summary::-webkit-details-marker { display: none; }
   .group-picker > summary svg:last-child { width: 0.8rem; height: 0.8rem; }
+  .group-picker > summary.group-picker-invalid { outline: 2px solid var(--color-danger); outline-offset: 1px; }
   .group-picker-panel {
     position: absolute;
     z-index: 30;

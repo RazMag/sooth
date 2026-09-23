@@ -16,6 +16,7 @@ use crate::error::{AppError, FragmentError, PageError};
 use crate::quadlet::gitsync::{GitSyncConfig, GitSyncError, SyncStatus};
 use crate::quadlet::{discovery, refs};
 use crate::web::templates::gitsync::{AddFormValues, SyncEntry};
+use crate::web::templates::settings::GithubTokenStatus;
 use crate::web::templates::{self};
 
 /// `204` for an htmx caller (relies on the `sse:git-sync-changed` row
@@ -70,6 +71,7 @@ pub async fn page(State(state): State<AppState>, session: Session) -> impl IntoR
         &entries(&state).await,
         &csrf,
         &known_groups,
+        &GithubTokenStatus::detect(&state.config, &state.config_path),
         state.health.get(),
     )
 }
@@ -118,6 +120,7 @@ pub async fn add(
                 csrf,
                 &entered,
                 &known_groups,
+                &GithubTokenStatus::detect(&state.config, &state.config_path),
                 msg,
                 state.health.get(),
             ),
