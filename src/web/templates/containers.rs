@@ -1,7 +1,6 @@
 use maud::{Markup, html};
 
-use super::detail;
-use crate::health::Health;
+use super::detail::{self, DetailCtx};
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 
@@ -12,8 +11,7 @@ pub fn detail_page(
     status: &UnitStatus,
     csrf: &str,
     secrets: &[(String, Option<bool>)],
-    known_groups: &[String],
-    health: Health,
+    ctx: &DetailCtx,
 ) -> Markup {
     let image = unit
         .section("Container")
@@ -29,8 +27,7 @@ pub fn detail_page(
             ("Secrets", secrets_cell(secrets)),
         ],
         None,
-        known_groups,
-        health,
+        ctx,
     )
 }
 

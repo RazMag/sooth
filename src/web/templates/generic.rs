@@ -5,7 +5,7 @@
 
 use maud::{Markup, html};
 
-use super::detail;
+use super::detail::{self, DetailCtx};
 use super::{
     BannerKind, EditorFileName, NavItem, back_link, banner, code_editor, csrf_input,
     env_var_editor, host_vars_panel, known_groups_datalist, page_header, shell,
@@ -17,14 +17,8 @@ use crate::systemd::UnitStatus;
 
 /// A plain, kind-branch-free detail page -- used for any kind without a
 /// dedicated section template (today, just Kube).
-pub fn detail_page(
-    unit: &QuadletUnit,
-    status: &UnitStatus,
-    csrf: &str,
-    known_groups: &[String],
-    health: Health,
-) -> Markup {
-    detail::detail_page(unit, status, csrf, &[], None, known_groups, health)
+pub fn detail_page(unit: &QuadletUnit, status: &UnitStatus, csrf: &str, ctx: &DetailCtx) -> Markup {
+    detail::detail_page(unit, status, csrf, &[], None, ctx)
 }
 
 /// How the "New" page's file-name field behaves: a stem plus a fixed

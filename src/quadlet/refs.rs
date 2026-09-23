@@ -6,7 +6,9 @@
 //! Pure and unit-testable -- `&[QuadletUnit]` in, referencing file names
 //! out; no D-Bus, no filesystem. Also which podman secrets a Container
 //! consumes via `Secret=` (`secret_refs` / `secret_consumers` /
-//! `missing_secrets`) -- the existence check itself lives in `crate::secrets`.
+//! `missing_secrets`) -- the existence check itself lives in `crate::secrets`
+//! -- and which host `${NAME}` variables a unit interpolates (`env_refs` /
+//! `missing_env`), checked against the user manager's live environment.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -175,9 +177,80 @@ pub fn missing_secrets<'a>(
     units: impl IntoIterator<Item = &'a QuadletUnit>,
     existing: &HashSet<String>,
 ) -> BTreeMap<String, Vec<String>> {
+    missing_by(units, existing, secret_refs)
+}
+
+/// The host variables a unit interpolates as `${NAME}` (any section, any
+/// kind) -- the ones the systemd user manager has to supply, so minus any
+/// the unit defines itself in `[Service] Environment=`. `$$` is systemd's
+/// escaped literal `$` and never starts a reference. Sorted and deduplicated.
+pub fn env_refs(unit: &QuadletUnit) -> Vec<String> {
+    let local = local_env_names(unit);
+    let mut out: Vec<String> = unit
+        .sections
+        .iter()
+        .flat_map(|s| s.entries.iter())
+        .flat_map(|(_, v)| interpolated_names(v))
+        .filter(|n| !local.contains(n))
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Every `${NAME}` referenced by some unit in `units` that isn't in
+/// `existing` (the manager's live environment), mapped to the (sorted) file
+/// names referencing it -- the env analogue of [`missing_secrets`].
+pub fn missing_env<'a>(
+    units: impl IntoIterator<Item = &'a QuadletUnit>,
+    existing: &HashSet<String>,
+) -> BTreeMap<String, Vec<String>> {
+    missing_by(units, existing, env_refs)
+}
+
+/// What one unit references that doesn't exist -- the list-table badge.
+/// Each half is empty when its store couldn't be read, rather than flagging
+/// every reference.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct MissingRefs {
+    pub secrets: Vec<String>,
+    pub env: Vec<String>,
+}
+
+impl MissingRefs {
+    /// `secrets` / `env`: the names that exist, or `None` when unknown.
+    pub fn of(
+        unit: &QuadletUnit,
+        secrets: Option<&HashSet<String>>,
+        env: Option<&HashSet<String>>,
+    ) -> Self {
+        let absent = |refs: Vec<String>, existing: Option<&HashSet<String>>| match existing {
+            Some(e) => refs.into_iter().filter(|n| !e.contains(n)).collect(),
+            None => Vec::new(),
+        };
+        Self {
+            secrets: absent(secret_refs(unit), secrets),
+            env: absent(env_refs(unit), env),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.secrets.is_empty() && self.env.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.secrets.len() + self.env.len()
+    }
+}
+
+fn missing_by<'a>(
+    units: impl IntoIterator<Item = &'a QuadletUnit>,
+    existing: &HashSet<String>,
+    refs: fn(&QuadletUnit) -> Vec<String>,
+) -> BTreeMap<String, Vec<String>> {
     let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for unit in units {
-        for name in secret_refs(unit) {
+        for name in refs(unit) {
             if !existing.contains(&name) {
                 out.entry(name).or_default().push(unit.file_name.clone());
             }
@@ -187,6 +260,49 @@ pub fn missing_secrets<'a>(
         users.sort();
     }
     out
+}
+
+/// Every well-formed `${NAME}` in `value`, in order. `$$` is skipped as an
+/// escape; an unterminated or non-identifier `${…}` is ignored.
+fn interpolated_names(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some(i) = rest.find('$') {
+        let after = &rest[i + 1..];
+        if let Some(tail) = after.strip_prefix('$') {
+            rest = tail;
+        } else if let Some(body) = after.strip_prefix('{') {
+            match body.find('}') {
+                Some(end) => {
+                    let name = &body[..end];
+                    if crate::hostenv::valid_name(name) {
+                        out.push(name.to_string());
+                    }
+                    rest = &body[end + 1..];
+                }
+                None => break,
+            }
+        } else {
+            rest = after;
+        }
+    }
+    out
+}
+
+/// Names the unit's own `[Service] Environment=` lines define (systemd uses
+/// them when expanding `${NAME}` too). Each line is space-separated
+/// `KEY=VALUE` assignments, optionally quoted.
+fn local_env_names(unit: &QuadletUnit) -> HashSet<String> {
+    unit.section("Service")
+        .into_iter()
+        .flat_map(|s| s.entries.iter())
+        .filter(|(k, _)| k.as_str() == "Environment")
+        .flat_map(|(_, v)| v.split_whitespace())
+        .filter_map(|tok| {
+            let (name, _) = tok.trim_start_matches(['"', '\'']).split_once('=')?;
+            crate::hostenv::valid_name(name).then(|| name.to_string())
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -246,6 +362,51 @@ mod tests {
         let missing = missing_secrets(&all, &existing);
         assert_eq!(missing.len(), 1);
         assert_eq!(missing["shared"], vec!["a.container", "b.container"]);
+    }
+
+    #[test]
+    fn env_refs_scan_every_section_and_skip_escapes_and_local_defs() {
+        let mut u = unit(
+            "web.container",
+            UnitKind::Container,
+            "Container",
+            &[
+                ("Image", "ghcr.io/x/${IMAGE_TAG}"),
+                ("Volume", "${DATA_DIR}/a:/a"),
+                ("Exec", "echo $${NOT_A_REF} ${bad-name} ${UNTERMINATED"),
+                ("Label", "x=${DATA_DIR}"),
+            ],
+        );
+        u.sections.push(Section {
+            name: "Service".into(),
+            entries: vec![
+                ("Environment".into(), "\"IMAGE_TAG=latest\" OTHER=1".into()),
+                ("ExecStartPre".into(), "/bin/true ${PRE_VAR}".into()),
+            ],
+        });
+        assert_eq!(env_refs(&u), vec!["DATA_DIR", "PRE_VAR"]);
+    }
+
+    #[test]
+    fn missing_refs_flag_only_known_stores() {
+        let u = unit(
+            "web.container",
+            UnitKind::Container,
+            "Container",
+            &[
+                ("Secret", "db"),
+                ("Image", "${TAG}"),
+                ("Volume", "${HOME}:/h"),
+            ],
+        );
+        let secrets: HashSet<String> = HashSet::new();
+        let env: HashSet<String> = ["HOME".to_string()].into();
+        let m = MissingRefs::of(&u, Some(&secrets), Some(&env));
+        assert_eq!(m.secrets, vec!["db"]);
+        assert_eq!(m.env, vec!["TAG"]);
+        assert_eq!(m.len(), 2);
+        assert!(MissingRefs::of(&u, None, None).is_empty());
+        assert_eq!(missing_env([&u], &env)["TAG"], vec!["web.container"]);
     }
 
     fn unit(

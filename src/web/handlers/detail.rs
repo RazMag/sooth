@@ -10,7 +10,8 @@ use tower_sessions::Session;
 use crate::config::AppState;
 use crate::error::PageError;
 use crate::quadlet::{UnitKind, discovery, refs};
-use crate::web::templates;
+use crate::web::templates::detail::DetailCtx;
+use crate::web::{core, templates};
 
 pub async fn show(
     State(state): State<AppState>,
@@ -27,79 +28,49 @@ pub async fn show(
     // (incl. empty ones) feeds the group picker.
     let all = discovery::load_all(&state.quadlet_dir)?;
     let known_groups = discovery::list_groups(&state.quadlet_dir);
+    let stores = core::RefStores::load(&state, [&unit]).await;
+    let host_vars: Vec<(String, Option<bool>)> = refs::env_refs(&unit)
+        .into_iter()
+        .map(|n| {
+            let present = stores.env.as_ref().map(|e| e.contains(&n));
+            (n, present)
+        })
+        .collect();
+    let ctx = DetailCtx {
+        known_groups: &known_groups,
+        health: state.health.get(),
+        host_vars: &host_vars,
+    };
 
     Ok(match unit.kind {
         UnitKind::Container => {
-            let names = refs::secret_refs(&unit);
-            let existing = if names.is_empty() {
-                None
-            } else {
-                crate::secrets::names().await.ok()
-            };
-            let secrets: Vec<(String, Option<bool>)> = names
+            let secrets: Vec<(String, Option<bool>)> = refs::secret_refs(&unit)
                 .into_iter()
                 .map(|n| {
-                    let present = existing.as_ref().map(|e| e.contains(&n));
+                    let present = stores.secrets.as_ref().map(|e| e.contains(&n));
                     (n, present)
                 })
                 .collect();
-            templates::containers::detail_page(
-                &unit,
-                &status,
-                &csrf,
-                &secrets,
-                &known_groups,
-                state.health.get(),
-            )
+            templates::containers::detail_page(&unit, &status, &csrf, &secrets, &ctx)
         }
         UnitKind::Pod => {
             let members = refs::pod_members(&unit, &all);
             let (networks, volumes) = refs::pod_own_refs(&unit, &all);
             templates::pods::detail_page(
-                &unit,
-                &status,
-                &csrf,
-                &all,
-                &members,
-                &networks,
-                &volumes,
-                &known_groups,
-                state.health.get(),
+                &unit, &status, &csrf, &all, &members, &networks, &volumes, &ctx,
             )
         }
         UnitKind::Volume => {
             let used_by = refs::consumers_of(&unit, &all);
-            templates::volumes::detail_page(
-                &unit,
-                &status,
-                &csrf,
-                &all,
-                &used_by,
-                &known_groups,
-                state.health.get(),
-            )
+            templates::volumes::detail_page(&unit, &status, &csrf, &all, &used_by, &ctx)
         }
         UnitKind::Network => {
             let used_by = refs::consumers_of(&unit, &all);
-            templates::networks::detail_page(
-                &unit,
-                &status,
-                &csrf,
-                &all,
-                &used_by,
-                &known_groups,
-                state.health.get(),
-            )
+            templates::networks::detail_page(&unit, &status, &csrf, &all, &used_by, &ctx)
         }
         UnitKind::Image | UnitKind::Build => {
-            templates::images::detail_page(&unit, &status, &csrf, &known_groups, state.health.get())
+            templates::images::detail_page(&unit, &status, &csrf, &ctx)
         }
-        UnitKind::Kube => templates::generic::detail_page(
-            &unit,
-            &status,
-            &csrf,
-            &known_groups,
-            state.health.get(),
-        ),
+        UnitKind::Kube => templates::generic::detail_page(&unit, &status, &csrf, &ctx),
     })
 }

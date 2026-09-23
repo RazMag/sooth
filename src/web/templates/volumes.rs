@@ -1,8 +1,7 @@
 use maud::{Markup, html};
 
-use super::detail;
+use super::detail::{self, DetailCtx};
 use super::list::{Column, RowCtx};
-use crate::health::Health;
 use crate::quadlet::QuadletUnit;
 use crate::quadlet::refs;
 use crate::systemd::UnitStatus;
@@ -32,8 +31,7 @@ pub fn detail_page(
     csrf: &str,
     all_units: &[QuadletUnit],
     used_by: &[String],
-    known_groups: &[String],
-    health: Health,
+    ctx: &DetailCtx,
 ) -> Markup {
     let driver = unit
         .section("Volume")
@@ -48,7 +46,6 @@ pub fn detail_page(
             ("Used by", super::unit_links(all_units, used_by)),
         ],
         None,
-        known_groups,
-        health,
+        ctx,
     )
 }

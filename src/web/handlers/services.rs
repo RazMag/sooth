@@ -7,7 +7,7 @@ use crate::error::{FragmentError, PageError};
 use crate::quadlet::{QuadletUnit, UnitKind, discovery};
 use crate::systemd::UnitStatus;
 use crate::web::core;
-use crate::web::templates::list::GroupLists;
+use crate::web::templates::list::ListContext;
 use crate::web::templates::services::Stats;
 use crate::web::templates::{self};
 
@@ -33,15 +33,17 @@ pub async fn page(
     let (units, all) = core::load_units_and_siblings(&state, KINDS).await?;
     let known = discovery::list_groups(&state.quadlet_dir);
     let synced = state.git_sync.synced_groups();
+    let missing = core::missing_refs(&state, &units).await;
     let stats = compute_stats(&units);
     Ok(templates::services::services_page(
         &units,
         &stats,
         &csrf,
         &all,
-        &GroupLists {
+        &ListContext {
             known: &known,
             synced: &synced,
+            missing: &missing,
         },
         state.health.get(),
     ))
@@ -57,14 +59,16 @@ pub async fn rows(
     let (units, all) = core::load_units_and_siblings(&state, KINDS).await?;
     let known = discovery::list_groups(&state.quadlet_dir);
     let synced = state.git_sync.synced_groups();
+    let missing = core::missing_refs(&state, &units).await;
     Ok(templates::list::list_rows(
         &templates::services::SPEC,
         &units,
         &csrf,
         &all,
-        &GroupLists {
+        &ListContext {
             known: &known,
             synced: &synced,
+            missing: &missing,
         },
     ))
 }
