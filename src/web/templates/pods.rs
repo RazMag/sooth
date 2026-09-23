@@ -31,15 +31,10 @@ pub fn detail_page(
     known_groups: &[String],
     health: Health,
 ) -> Markup {
-    let extra = html! {
-        p.detail-links {
-            a.btn.btn-ghost.btn-sm href={"/containers/new?pod=" (unit.file_name)} {
-                (icon(Icon::Plus)) span { "Add container to this pod" }
-            }
-        }
-        @if !members.is_empty() {
-            (members_dialog(&unit.file_name, all_units, members))
-        }
+    let extra = if members.is_empty() {
+        None
+    } else {
+        Some(members_dialog(&unit.file_name, all_units, members))
     };
     detail::detail_page(
         unit,
@@ -51,7 +46,7 @@ pub fn detail_page(
             ("Volumes", super::unit_links(all_units, volumes)),
             ("Ports", super::ports_cell_live(unit, status)),
         ],
-        Some(extra),
+        extra,
         known_groups,
         health,
     )
@@ -214,6 +209,94 @@ pub fn new_page(p: NewPodPage<'_>) -> Markup {
     shell("New pod", Some(NavItem::Services), Some(p.health), body)
 }
 
+/// One of the pod's current member containers, offered for in-place editing
+/// on the Edit Pod page -- unlike [`NewContainerRow`] this isn't keyed by a
+/// client-assigned `id`: `refs::pod_members` is the sole, server-computed
+/// source of which members exist, so each row is addressed directly by its
+/// (already-existing, unchangeable) file name. Owned `String`s rather than
+/// borrows since the handler assembles each field from one of two different
+/// sources (disk vs. a rejected submission's form) per row.
+pub struct MemberContainerRow {
+    pub file_name: String,
+    pub group: String,
+    pub contents_prefill: String,
+    pub env_prefill: String,
+    /// Whether this row's `<details>` starts open -- `false` for every row on
+    /// a fresh page load (a pod's member list can get long, so each editor
+    /// stays tucked away until picked), `true` only for the one member whose
+    /// edit a 422 just rejected, so the error it caused is visible without
+    /// having to go hunting for which row it was.
+    pub open: bool,
+}
+
+/// `memberc_<file_name>_contents` -- kept in one place since the handler
+/// needs the exact same key to read the field back out of the submitted form.
+pub fn member_contents_field(file_name: &str) -> String {
+    format!("memberc_{file_name}_contents")
+}
+
+/// `memberc_<file_name>_env` -- see [`member_contents_field`].
+pub fn member_env_field(file_name: &str) -> String {
+    format!("memberc_{file_name}_env")
+}
+
+/// A native `<details>` so each member's editor collapses independently with
+/// no JS of its own -- unlike `.pod-picker-panel`/`.group-picker` (also
+/// `<details>`, but absolutely-positioned popups), this one's revealed
+/// content is a normal block in the page flow, same technique as
+/// `.gitsync-disclosure`. The chevron's rotation is plain CSS keyed off the
+/// `[open]` attribute (see `frontend/styles.css`), so collapsing/expanding
+/// needs nothing beyond what `<details>` already does natively.
+fn member_container_row(row: &MemberContainerRow) -> Markup {
+    html! {
+        details.newres-row open[row.open] {
+            summary.newres-row-summary {
+                (icon(Icon::ChevronDown))
+                span.newres-row-title { (row.file_name) }
+                @if !row.group.is_empty() {
+                    span.pod-picker-group { (row.group) }
+                }
+            }
+            div.editor-row {
+                div.editor-col {
+                    label { "Contents" }
+                    (code_editor_named(
+                        &row.contents_prefill,
+                        EditorFileName::Fixed(&row.file_name),
+                        &member_contents_field(&row.file_name),
+                    ))
+                }
+                div.editor-col {
+                    (env_var_editor_named(&row.env_prefill, &member_env_field(&row.file_name)))
+                }
+            }
+        }
+    }
+}
+
+/// The "Containers" section's members half: every container currently in
+/// this pod (per `refs::pod_members`), each with its own full raw-INI +
+/// env-var editor -- the same editing surface its own standalone edit page
+/// offers, just embedded here so membership doesn't force a detour. Renders
+/// nothing when the pod has no members yet (also why [`new_page`] never
+/// calls this -- a pod being created can't have any).
+fn members_field(rows: &[MemberContainerRow]) -> Markup {
+    html! {
+        @if !rows.is_empty() {
+            div.field {
+                (card_subhead("Members"))
+                p.field-hint {
+                    "Edit the containers already in this pod — each is saved to its own "
+                    "quadlet file when you submit."
+                }
+                @for row in rows {
+                    (member_container_row(row))
+                }
+            }
+        }
+    }
+}
+
 /// Parameters for [`edit_page`].
 pub struct EditPodPage<'a> {
     pub csrf: &'a str,
@@ -221,6 +304,9 @@ pub struct EditPodPage<'a> {
     /// the form's POST target (`<base_url>/edit`).
     pub base_url: &'a str,
     pub file_name: &'a str,
+    /// Every container currently in this pod, each editable in place. See
+    /// [`members_field`].
+    pub members: &'a [MemberContainerRow],
     /// The raw editor's body -- the file's current contents on first render,
     /// the rejected submission on a 422 redisplay.
     pub contents_body: &'a str,
@@ -254,11 +340,13 @@ pub struct EditPodPage<'a> {
 
 /// The "Edit Pod" page: the same raw INI editor every kind's edit page has,
 /// plus the "New Pod" page's pickers for attaching more already-defined
-/// containers/networks/volumes and defining brand-new ones -- container
-/// membership in particular is the one piece a raw edit can't express here
-/// (it lives in each *container's* own `Pod=` line, not this file). No file
-/// name/group fields, same as every other kind's edit page (renaming/
-/// regrouping is the separate move control, not part of editing).
+/// containers/networks/volumes and defining brand-new ones, plus (via
+/// [`members_field`]) a full in-place editor for every container currently
+/// in the pod -- membership itself is still changed by editing each
+/// container's own `Pod=` line, not this file, but that no longer requires
+/// leaving the page. No file name/group fields, same as every other kind's
+/// edit page (renaming/regrouping is the separate move control, not part of
+/// editing).
 pub fn edit_page(p: EditPodPage<'_>) -> Markup {
     let body = html! {
         (back_link(p.base_url, p.file_name))
@@ -269,7 +357,10 @@ pub fn edit_page(p: EditPodPage<'_>) -> Markup {
             div.host-vars-flyout { (host_vars_panel(p.host_vars)) }
             div.pod-sections {
                 (resource_card("Containers",
-                    containers_field(p.available_containers, p.existing_containers_body, p.restart_checked),
+                    html! {
+                        (members_field(p.members))
+                        (containers_field(p.available_containers, p.existing_containers_body, p.restart_checked))
+                    },
                     new_containers_field(p.new_containers)))
                 (resource_card("Networks",
                     networks_field(p.available_networks, p.networks_body),

@@ -338,6 +338,116 @@ fn new_container_rows(drafts: &[NewContainerDraft]) -> Vec<NewContainerRow<'_>> 
         .collect()
 }
 
+/// One current pod member's submitted raw contents + env text, from the
+/// `memberc_{file_name}_contents`/`_env` fields. Unlike [`NewContainerDraft`]
+/// there's no `id` indirection: `members` (see [`parse_member_drafts`]) is
+/// itself the authoritative, server-computed list of which containers exist
+/// to edit, so each is read directly by its already-existing file name.
+struct MemberDraft {
+    file_name: String,
+    contents: String,
+    env: String,
+}
+
+/// Reads one `MemberDraft` per entry in `members` (the pod's current
+/// membership, from `refs::pod_members`) out of the submitted form.
+fn parse_member_drafts(fields: &HashMap<String, String>, members: &[String]) -> Vec<MemberDraft> {
+    members
+        .iter()
+        .map(|file_name| MemberDraft {
+            file_name: file_name.clone(),
+            contents: fields
+                .get(&templates::pods::member_contents_field(file_name))
+                .cloned()
+                .unwrap_or_default(),
+            env: fields
+                .get(&templates::pods::member_env_field(file_name))
+                .cloned()
+                .unwrap_or_default(),
+        })
+        .collect()
+}
+
+/// A validated, write-ready member-container edit -- `stem` is the file-name
+/// stem (for the env sidecar path), `contents` already carries the managed
+/// `EnvironmentFile=` line. No name/uniqueness check, unlike
+/// [`PreparedContainer`]: the file already exists and isn't being renamed.
+struct PreparedMemberEdit {
+    file_name: String,
+    stem: String,
+    contents: String,
+    env_pairs: Vec<(String, String)>,
+}
+
+/// Validates every staged member edit -- env-var syntax and the resulting
+/// file's structural validity -- entirely before any write, same reasoning
+/// as [`prepare_new_containers`]. The error carries the failing member's
+/// file name separately from its message (rather than one pre-formatted
+/// string, like every other `prepare_*` here) so the caller can force that
+/// one row's `<details>` open on redisplay -- it's the one collapsed
+/// section a rejected submission needs the user to actually see.
+fn prepare_member_edits(
+    state: &AppState,
+    drafts: &[MemberDraft],
+) -> Result<Vec<PreparedMemberEdit>, (String, String)> {
+    let mut prepared = Vec::with_capacity(drafts.len());
+    for draft in drafts {
+        let stem = naming::stem(&draft.file_name).to_string();
+        let pairs = envfile::parse_editor_lines(&draft.env)
+            .map_err(|msg| (draft.file_name.clone(), msg))?;
+        let refval = envfile::reference_value(&state.quadlet_dir, &stem);
+        let contents = envfile::patch_environment_file(
+            &draft.contents,
+            "Container",
+            &refval,
+            !pairs.is_empty(),
+        );
+        writer::validate(&draft.file_name, &contents)
+            .map_err(|e| (draft.file_name.clone(), e.to_string()))?;
+        prepared.push(PreparedMemberEdit {
+            file_name: draft.file_name.clone(),
+            stem,
+            contents,
+            env_pairs: pairs,
+        });
+    }
+    Ok(prepared)
+}
+
+/// Writes each pre-validated member edit: the env sidecar first (capturing
+/// its prior value for rollback), then the quadlet file itself, restoring
+/// the sidecar if that write then fails -- same shape as
+/// `edit_delete::edit_submit`'s Container path, and the same residual-risk
+/// tradeoff as [`create_new_containers`] (logged and skipped, not unwound,
+/// on a genuine write-time race).
+async fn apply_member_edits(
+    state: &AppState,
+    session: &Session,
+    csrf_token: &str,
+    prepared: &[PreparedMemberEdit],
+) {
+    for m in prepared {
+        let prev_env = envfile::load(&state.quadlet_dir, &m.stem)
+            .ok()
+            .filter(|v| !v.is_empty());
+        if let Err(e) = envfile::save(&state.quadlet_dir, &m.stem, &m.env_pairs) {
+            tracing::warn!(file = m.file_name, error = %e, "failed to write env sidecar for pod member edit");
+            continue;
+        }
+        if let Err(e) = core::edit_unit(state, session, csrf_token, &m.file_name, &m.contents).await
+        {
+            tracing::warn!(file = m.file_name, error = %e, "failed to save pod member edit");
+            let res = match prev_env {
+                Some(vars) => envfile::save(&state.quadlet_dir, &m.stem, &vars),
+                None => envfile::delete(&state.quadlet_dir, &m.stem),
+            };
+            if let Err(e) = res {
+                tracing::warn!(stem = m.stem, error = %e, "failed to roll back env sidecar");
+            }
+        }
+    }
+}
+
 /// One brand-new network staged via the pod page's "New networks" field --
 /// see [`NewContainerDraft`]; simpler (no env vars, no `Pod=` patching -- a
 /// network doesn't reference the pod itself, the pod's own `[Pod]` section
@@ -816,7 +926,17 @@ pub async fn edit_form(
     session: Session,
     Path(file_name): Path<String>,
 ) -> Result<Response, PageError> {
-    render_edit(&state, &session, &file_name, None, &Staged::default(), None).await
+    render_edit(
+        &state,
+        &session,
+        &file_name,
+        None,
+        &Staged::default(),
+        None,
+        None,
+        None,
+    )
+    .await
 }
 
 pub async fn edit_submit(
@@ -862,6 +982,8 @@ pub async fn edit_submit(
                 &file_name,
                 Some(&contents),
                 &staged,
+                Some(&form),
+                None,
                 Some(&msg),
             )
             .await;
@@ -869,12 +991,13 @@ pub async fn edit_submit(
     };
 
     let all = discovery::load_all(&state.quadlet_dir).unwrap_or_default();
+    let pod_unit = all.iter().find(|u| u.file_name == file_name);
     // Newly-defined containers are filed alongside their pod.
-    let pod_group = all
-        .iter()
-        .find(|u| u.file_name == file_name)
-        .map(|u| u.group.clone())
+    let pod_group = pod_unit.map(|u| u.group.clone()).unwrap_or_default();
+    let members = pod_unit
+        .map(|u| refs::pod_members(u, &all))
         .unwrap_or_default();
+    let member_drafts = parse_member_drafts(&form, &members);
 
     for check in [
         validate_existing(&all, &existing),
@@ -888,6 +1011,8 @@ pub async fn edit_submit(
                 &file_name,
                 Some(&contents),
                 &staged,
+                Some(&form),
+                None,
                 Some(&msg),
             )
             .await;
@@ -903,6 +1028,8 @@ pub async fn edit_submit(
                     &file_name,
                     Some(&contents),
                     &staged,
+                    Some(&form),
+                    None,
                     Some(&msg),
                 )
                 .await;
@@ -917,6 +1044,8 @@ pub async fn edit_submit(
                 &file_name,
                 Some(&contents),
                 &staged,
+                Some(&form),
+                None,
                 Some(&msg),
             )
             .await;
@@ -931,7 +1060,25 @@ pub async fn edit_submit(
                 &file_name,
                 Some(&contents),
                 &staged,
+                Some(&form),
+                None,
                 Some(&msg),
+            )
+            .await;
+        }
+    };
+    let prepared_members = match prepare_member_edits(&state, &member_drafts) {
+        Ok(p) => p,
+        Err((failed_file, msg)) => {
+            return render_edit(
+                &state,
+                &session,
+                &file_name,
+                Some(&contents),
+                &staged,
+                Some(&form),
+                Some(&failed_file),
+                Some(&format!("{failed_file}: {msg}")),
             )
             .await;
         }
@@ -957,6 +1104,7 @@ pub async fn edit_submit(
                     tracing::warn!(file = f, pod = %file_name, error = %e, "failed to attach existing container to pod");
                 }
             }
+            apply_member_edits(&state, &session, &csrf_token, &prepared_members).await;
             create_new_networks(
                 &state,
                 &session,
@@ -983,6 +1131,8 @@ pub async fn edit_submit(
                 &file_name,
                 Some(&contents),
                 &staged,
+                Some(&form),
+                None,
                 Some(&e.to_string()),
             )
             .await
@@ -991,15 +1141,61 @@ pub async fn edit_submit(
     }
 }
 
+/// Builds the Members section's row list -- every container currently in
+/// the pod, each pre-filled from `form_for_members` (a rejected submission's
+/// posted values, so an edit isn't lost on a 422) or, failing that, loaded
+/// fresh from disk/the env sidecar, exactly as `edit_delete::render_edit`
+/// loads a standalone container edit page.
+fn member_rows(
+    state: &AppState,
+    all: &[QuadletUnit],
+    members: &[String],
+    form_for_members: Option<&HashMap<String, String>>,
+    open_member: Option<&str>,
+) -> Vec<templates::pods::MemberContainerRow> {
+    members
+        .iter()
+        .filter_map(|file_name| {
+            let member = all.iter().find(|u| &u.file_name == file_name)?;
+            let contents = form_for_members
+                .and_then(|f| f.get(&templates::pods::member_contents_field(file_name)))
+                .cloned()
+                .unwrap_or_else(|| member.raw.clone());
+            let env = match form_for_members
+                .and_then(|f| f.get(&templates::pods::member_env_field(file_name)))
+            {
+                Some(s) => s.clone(),
+                None => envfile::to_editor_lines(
+                    &envfile::load(&state.quadlet_dir, naming::stem(file_name)).unwrap_or_default(),
+                ),
+            };
+            Some(templates::pods::MemberContainerRow {
+                open: open_member == Some(file_name.as_str()),
+                file_name: file_name.clone(),
+                group: member.group.clone(),
+                contents_prefill: contents,
+                env_prefill: env,
+            })
+        })
+        .collect()
+}
+
 /// Renders the Edit Pod form. `contents_override` supplies the editor body
 /// on a 422 redisplay (the text as submitted); otherwise it's loaded fresh
-/// from disk.
+/// from disk. `form_for_members` is the full submitted form on a 422
+/// redisplay (so member-row edits aren't lost, see [`member_rows`]); `None`
+/// on a fresh GET. `open_member` is the file name of the one member row (if
+/// any) to force open -- set only when that member's own edit is what got
+/// this redisplay rejected, so a collapsed row never hides its own error.
+#[allow(clippy::too_many_arguments)]
 async fn render_edit(
     state: &AppState,
     session: &Session,
     file_name: &str,
     contents_override: Option<&str>,
     staged: &Staged<'_>,
+    form_for_members: Option<&HashMap<String, String>>,
+    open_member: Option<&str>,
     error: Option<&str>,
 ) -> Result<Response, PageError> {
     let unit = discovery::load_by_name(&state.quadlet_dir, file_name)?;
@@ -1012,6 +1208,13 @@ async fn render_edit(
     let available_containers = container_options(&all, Some(file_name));
     let available_networks = resource_options(&all, UnitKind::Network, &current_networks);
     let available_volumes = resource_options(&all, UnitKind::Volume, &current_volumes);
+    let members = member_rows(
+        state,
+        &all,
+        &refs::pod_members(&unit, &all),
+        form_for_members,
+        open_member,
+    );
     let new_containers = new_container_rows(staged.new_containers);
     let new_networks = new_network_rows(staged.new_networks);
     let new_volumes = new_volume_rows(staged.new_volumes);
@@ -1027,6 +1230,7 @@ async fn render_edit(
             csrf: &csrf,
             base_url: &core::unit_url(&unit),
             file_name: &unit.file_name,
+            members: &members,
             contents_body: contents,
             existing_containers_body: staged.existing_containers,
             available_containers: &available_containers,
@@ -1212,6 +1416,46 @@ mod tests {
     #[test]
     fn apply_pod_resources_with_nothing_staged_is_unchanged() {
         assert_eq!(apply_pod_resources("[Pod]\n", &[], &[]), "[Pod]\n");
+    }
+
+    // -- parse_member_drafts ------------------------------------------------
+
+    #[test]
+    fn parse_member_drafts_reads_one_draft_per_member_by_file_name() {
+        let form = fields(&[
+            ("memberc_web.container_contents", "[Container]\nImage=a\n"),
+            ("memberc_web.container_env", "A=1"),
+            (
+                "memberc_worker.container_contents",
+                "[Container]\nImage=b\n",
+            ),
+            ("unrelated_field", "ignored"),
+        ]);
+        let members = vec!["web.container".to_string(), "worker.container".to_string()];
+        let drafts = parse_member_drafts(&form, &members);
+        assert_eq!(drafts.len(), 2);
+        assert_eq!(drafts[0].file_name, "web.container");
+        assert_eq!(drafts[0].contents, "[Container]\nImage=a\n");
+        assert_eq!(drafts[0].env, "A=1");
+        assert_eq!(drafts[1].file_name, "worker.container");
+        assert_eq!(drafts[1].contents, "[Container]\nImage=b\n");
+        assert_eq!(drafts[1].env, "");
+    }
+
+    #[test]
+    fn parse_member_drafts_of_no_members_is_empty() {
+        let form = fields(&[("memberc_web.container_contents", "[Container]\n")]);
+        assert!(parse_member_drafts(&form, &[]).is_empty());
+    }
+
+    #[test]
+    fn parse_member_drafts_defaults_missing_fields_to_empty() {
+        let members = vec!["ghost.container".to_string()];
+        let drafts = parse_member_drafts(&HashMap::new(), &members);
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].file_name, "ghost.container");
+        assert_eq!(drafts[0].contents, "");
+        assert_eq!(drafts[0].env, "");
     }
 
     // -- parse_new_containers / parse_new_networks / parse_new_volumes ------
