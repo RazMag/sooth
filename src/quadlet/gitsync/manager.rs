@@ -17,6 +17,7 @@ use crate::events::{DashboardEvent, EventSender};
 use crate::quadlet::naming;
 
 use super::{GitSyncConfig, GitSyncError, SyncState, SyncStatus, git};
+use git::GitAuth;
 
 struct SyncEntry {
     config: GitSyncConfig,
@@ -35,14 +36,39 @@ pub struct GitSyncManager {
     entries: Arc<RwLock<HashMap<String, SyncEntry>>>,
     config_path: Arc<PathBuf>,
     events: EventSender,
+    /// `None` when no `github_token` is configured -- every clone/fetch then
+    /// behaves exactly as before this existed. Set once at construction
+    /// (from `Config.github_token`, which -- like the rest of `Config` --
+    /// needs a restart to change), never mutated live.
+    github_auth: Arc<Option<GitAuth>>,
 }
 
 impl GitSyncManager {
-    pub fn new(config_path: Arc<PathBuf>, events: EventSender) -> Self {
+    /// `exe_path` and `github_token` are only used to set up [`GitAuth`] (a
+    /// blank token skips it entirely, no askpass script written) -- see
+    /// `git::GitAuth::setup`. A failure there is logged and treated the same
+    /// as no token configured, rather than failing startup over what's an
+    /// optional, private-repo-only feature.
+    pub fn new(
+        config_path: Arc<PathBuf>,
+        events: EventSender,
+        exe_path: &Path,
+        github_token: &str,
+    ) -> Self {
+        let state_dir = config_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let github_auth = GitAuth::setup(exe_path, &state_dir, github_token).unwrap_or_else(|e| {
+            warn!(error = %e, "failed to set up GitHub token auth for git-sync; \
+                   continuing without it");
+            None
+        });
         Self {
             entries: Arc::new(RwLock::new(HashMap::new())),
             config_path,
             events,
+            github_auth: Arc::new(github_auth),
         }
     }
 
@@ -65,6 +91,7 @@ impl GitSyncManager {
             status.clone(),
             wake.clone(),
             self.events.clone(),
+            self.github_auth.clone(),
         ));
         let entry = SyncEntry {
             config,
@@ -111,7 +138,13 @@ impl GitSyncManager {
         }
         std::fs::create_dir_all(&target)?;
 
-        git::clone(&remote, branch.as_deref(), &target).await?;
+        git::clone(
+            &remote,
+            branch.as_deref(),
+            &target,
+            self.github_auth.as_ref().as_ref(),
+        )
+        .await?;
         let resolved_branch = resolve_branch(&target, branch.as_deref()).await?;
 
         let config = GitSyncConfig {
@@ -166,7 +199,13 @@ impl GitSyncManager {
         let branch_changed = Some(&resolved_branch) != existing.branch.as_ref();
 
         if remote_changed || branch_changed {
-            git::fetch_ref(&target, &resolved_branch).await?;
+            git::fetch_ref(
+                &target,
+                &resolved_branch,
+                &remote,
+                self.github_auth.as_ref().as_ref(),
+            )
+            .await?;
             git::checkout_branch(&target, &resolved_branch).await?;
         }
 
@@ -222,7 +261,13 @@ impl GitSyncManager {
         let _ = self.events.send(DashboardEvent::GitSyncChanged);
 
         let result: Result<String, GitSyncError> = async {
-            git::fetch(&target, branch).await?;
+            git::fetch(
+                &target,
+                branch,
+                &config.remote,
+                self.github_auth.as_ref().as_ref(),
+            )
+            .await?;
             let remote_head = git::rev_parse(&target, &format!("origin/{branch}")).await?;
             git::reset_hard(&target, &remote_head).await?;
             Ok(remote_head)
@@ -346,9 +391,17 @@ async fn run_loop(
     status: Arc<RwLock<SyncStatus>>,
     wake: Arc<Notify>,
     events: EventSender,
+    github_auth: Arc<Option<GitAuth>>,
 ) {
     loop {
-        attempt(&config, &quadlet_dir, &status, &events).await;
+        attempt(
+            &config,
+            &quadlet_dir,
+            &status,
+            &events,
+            github_auth.as_ref().as_ref(),
+        )
+        .await;
         let interval = Duration::from_secs(config.poll_interval_secs.max(1));
         tokio::select! {
             _ = tokio::time::sleep(interval) => {}
@@ -366,6 +419,7 @@ async fn attempt(
     quadlet_dir: &Path,
     status: &Arc<RwLock<SyncStatus>>,
     events: &EventSender,
+    github_auth: Option<&GitAuth>,
 ) {
     let target = quadlet_dir.join(&config.group);
     let already_cloned = target.join(".git").is_dir();
@@ -377,7 +431,14 @@ async fn attempt(
             report_error(&config.group, status, events, e.into());
             return;
         }
-        if let Err(e) = git::clone(&config.remote, config.branch.as_deref(), &target).await {
+        if let Err(e) = git::clone(
+            &config.remote,
+            config.branch.as_deref(),
+            &target,
+            github_auth,
+        )
+        .await
+        {
             report_error(&config.group, status, events, e);
             return;
         }
@@ -394,7 +455,9 @@ async fn attempt(
         }
     };
 
-    if already_cloned && let Err(e) = git::fetch(&target, &branch).await {
+    if already_cloned
+        && let Err(e) = git::fetch(&target, &branch, &config.remote, github_auth).await
+    {
         report_error(&config.group, status, events, e);
         return;
     }
@@ -499,7 +562,10 @@ mod tests {
         let config_dir = tempfile::tempdir().unwrap();
         let config_path = Arc::new(config_dir.path().join("config.toml"));
         let (tx, _rx) = tokio::sync::broadcast::channel(16);
-        (GitSyncManager::new(config_path, tx), config_dir)
+        (
+            GitSyncManager::new(config_path, tx, Path::new("/usr/bin/sooth"), ""),
+            config_dir,
+        )
     }
 
     #[tokio::test]

@@ -2,12 +2,14 @@
 //! after `journal.rs`'s `journalctl`. Every invocation disables the
 //! interactive credential prompt (`GIT_TERMINAL_PROMPT=0`) so a bad remote or
 //! missing credentials fails fast instead of hanging a poll loop forever, and
-//! is bounded by [`TIMEOUT`] for the same reason. Auth itself is left
+//! is bounded by [`TIMEOUT`] for the same reason. Auth is otherwise left
 //! entirely to the host: whatever SSH agent, `~/.ssh/config`, or credential
 //! helper already works for this user's own `git` is what sooth gets too,
-//! since it runs the exact same binary as the exact same user.
+//! since it runs the exact same binary as the exact same user -- [`GitAuth`]
+//! is the one exception, a configured GitHub token injected only for
+//! `https://github.com/...` remotes.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -16,6 +18,83 @@ use tokio::process::Command;
 use super::GitSyncError;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Bridges a configured GitHub access token (`Config.github_token`, set from
+/// the Settings page) into `git`'s credential machinery for
+/// `https://github.com/...` remotes -- the way private git-synced repos
+/// authenticate. Deliberately *not* done by embedding the token in the
+/// remote URL or via a `-c http.extraHeader=...` flag: both would put the
+/// token in this process's argv, readable by anyone who can list
+/// `/proc/<pid>/cmdline` for this user, and a URL-embedded token would also
+/// get written into the checkout's `.git/config` on disk. Instead this sets
+/// `GIT_ASKPASS` to a tiny wrapper script (written once by [`GitAuth::setup`])
+/// that re-invokes this same `sooth` binary as `sooth --git-askpass
+/// <prompt>` (see `main::git_askpass_cli`); the token itself travels only as
+/// the `SOOTH_GIT_ASKPASS_TOKEN` environment variable of the `git` child
+/// process (which `git` then passes on to the askpass child it spawns) --
+/// never on a command line, never persisted to the checkout.
+#[derive(Debug, Clone)]
+pub struct GitAuth {
+    askpass_path: PathBuf,
+    token: String,
+}
+
+impl GitAuth {
+    /// Writes the askpass wrapper script into `state_dir` (created if
+    /// missing) and returns a `GitAuth` that [`clone`]/[`fetch`]/
+    /// [`fetch_ref`] will use for a GitHub HTTPS remote, or `None` if
+    /// `token` is blank -- the "no token configured" case, where those
+    /// remotes behave exactly as before this existed.
+    pub fn setup(exe_path: &Path, state_dir: &Path, token: &str) -> std::io::Result<Option<Self>> {
+        let token = token.trim();
+        if token.is_empty() {
+            return Ok(None);
+        }
+        std::fs::create_dir_all(state_dir)?;
+        let askpass_path = state_dir.join(".sooth-git-askpass.sh");
+        let script = format!(
+            "#!/bin/sh\nexec {} --git-askpass \"$1\"\n",
+            shell_quote(&exe_path.display().to_string())
+        );
+        std::fs::write(&askpass_path, script)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&askpass_path, std::fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(Some(Self {
+            askpass_path,
+            token: token.to_string(),
+        }))
+    }
+}
+
+/// Single-quotes `s` for embedding in the generated `sh` script, closing and
+/// reopening the quote around any literal `'` in `s` (a path is the only
+/// thing ever passed here, but this is correct for arbitrary content).
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Whether `remote` is an `https://github.com/...` URL -- the only case
+/// [`GitAuth`] applies to, so a configured token is never sent to some other
+/// host a sync happens to point at.
+fn is_github_https(remote: &str) -> bool {
+    let Some(rest) = remote.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    let host = host.split(':').next().unwrap_or(host);
+    host.eq_ignore_ascii_case("github.com")
+}
+
+fn apply_auth(cmd: &mut Command, remote: &str, auth: Option<&GitAuth>) {
+    if let Some(auth) = auth.filter(|_| is_github_https(remote)) {
+        cmd.env("GIT_ASKPASS", &auth.askpass_path)
+            .env("SOOTH_GIT_ASKPASS_TOKEN", &auth.token);
+    }
+}
 
 fn base_command() -> Command {
     let mut cmd = Command::new("git");
@@ -53,8 +132,14 @@ async fn run(mut cmd: Command) -> Result<String, GitSyncError> {
 /// `git clone [--branch <branch>] --single-branch <remote> <dest>`. `dest`
 /// must already exist (created by the caller) and be empty -- `git clone`
 /// accepts an existing empty directory as its target.
-pub async fn clone(remote: &str, branch: Option<&str>, dest: &Path) -> Result<(), GitSyncError> {
+pub async fn clone(
+    remote: &str,
+    branch: Option<&str>,
+    dest: &Path,
+    auth: Option<&GitAuth>,
+) -> Result<(), GitSyncError> {
     let mut cmd = base_command();
+    apply_auth(&mut cmd, remote, auth);
     cmd.arg("clone").arg("--single-branch");
     if let Some(branch) = branch {
         cmd.arg("--branch").arg(branch);
@@ -64,9 +149,17 @@ pub async fn clone(remote: &str, branch: Option<&str>, dest: &Path) -> Result<()
     Ok(())
 }
 
-/// `git -C <dir> fetch --quiet origin <branch>`.
-pub async fn fetch(dir: &Path, branch: &str) -> Result<(), GitSyncError> {
+/// `git -C <dir> fetch --quiet origin <branch>`. `remote` is `origin`'s
+/// configured URL -- not passed on the command line (the fetch targets the
+/// already-configured `origin`), only used to decide whether `auth` applies.
+pub async fn fetch(
+    dir: &Path,
+    branch: &str,
+    remote: &str,
+    auth: Option<&GitAuth>,
+) -> Result<(), GitSyncError> {
     let mut cmd = base_command();
+    apply_auth(&mut cmd, remote, auth);
     cmd.arg("-C")
         .arg(dir)
         .arg("fetch")
@@ -82,8 +175,16 @@ pub async fn fetch(dir: &Path, branch: &str) -> Result<(), GitSyncError> {
 /// exists locally even for a branch the original `--single-branch` clone
 /// never fetched. Needed before [`checkout_branch`] can switch to a branch
 /// that isn't the one already checked out (see `GitSyncManager::edit`).
-pub async fn fetch_ref(dir: &Path, branch: &str) -> Result<(), GitSyncError> {
+/// `remote` is the same "which URL is this really talking to" hint as
+/// `fetch`'s.
+pub async fn fetch_ref(
+    dir: &Path,
+    branch: &str,
+    remote: &str,
+    auth: Option<&GitAuth>,
+) -> Result<(), GitSyncError> {
     let mut cmd = base_command();
+    apply_auth(&mut cmd, remote, auth);
     cmd.arg("-C")
         .arg(dir)
         .arg("fetch")
@@ -244,6 +345,7 @@ mod tests {
             &origin.path().display().to_string(),
             Some("main"),
             dest.path(),
+            None,
         )
         .await
         .unwrap();
@@ -261,6 +363,7 @@ mod tests {
             &origin.path().display().to_string(),
             Some("main"),
             dest.path(),
+            None,
         )
         .await
         .unwrap();
@@ -279,7 +382,14 @@ mod tests {
                 .success()
         );
 
-        fetch(dest.path(), "main").await.unwrap();
+        fetch(
+            dest.path(),
+            "main",
+            &origin.path().display().to_string(),
+            None,
+        )
+        .await
+        .unwrap();
         let remote = rev_parse(dest.path(), "origin/main").await.unwrap();
         assert_ne!(before, remote);
         assert!(is_ancestor(dest.path(), &before, &remote).await.unwrap());
@@ -319,6 +429,7 @@ mod tests {
             &origin.path().display().to_string(),
             Some("main"),
             dest.path(),
+            None,
         )
         .await
         .unwrap();
@@ -327,7 +438,14 @@ mod tests {
         // Switching the tracked branch (the `GitSyncManager::edit` path):
         // fetch the new branch's ref explicitly, since `--single-branch`
         // never brought it down, then check it out.
-        fetch_ref(dest.path(), "staging").await.unwrap();
+        fetch_ref(
+            dest.path(),
+            "staging",
+            &origin.path().display().to_string(),
+            None,
+        )
+        .await
+        .unwrap();
         checkout_branch(dest.path(), "staging").await.unwrap();
 
         assert_eq!(current_branch(dest.path()).await.unwrap(), "staging");
@@ -347,6 +465,7 @@ mod tests {
             &origin.path().display().to_string(),
             Some("main"),
             dest.path(),
+            None,
         )
         .await
         .unwrap();
@@ -371,6 +490,7 @@ mod tests {
             &origin.path().display().to_string(),
             Some("main"),
             dest.path(),
+            None,
         )
         .await
         .unwrap();
@@ -400,7 +520,14 @@ mod tests {
                 .status
                 .success()
         );
-        fetch(dest.path(), "main").await.unwrap();
+        fetch(
+            dest.path(),
+            "main",
+            &origin.path().display().to_string(),
+            None,
+        )
+        .await
+        .unwrap();
         let remote = rev_parse(dest.path(), "origin/main").await.unwrap();
 
         assert!(!is_ancestor(dest.path(), &local, &remote).await.unwrap());
@@ -410,9 +537,60 @@ mod tests {
     async fn fetch_of_a_bad_remote_fails_fast_without_a_credential_prompt() {
         let dest = tempfile::tempdir().unwrap();
         std::fs::remove_dir(dest.path()).unwrap();
-        let err = clone("https://example.invalid/nope.git", None, dest.path())
+        let err = clone("https://example.invalid/nope.git", None, dest.path(), None)
             .await
             .unwrap_err();
         assert!(matches!(err, GitSyncError::Failed(_)));
+    }
+
+    #[test]
+    fn is_github_https_matches_only_github_over_https() {
+        assert!(is_github_https("https://github.com/owner/repo.git"));
+        assert!(is_github_https("https://github.com/owner/repo"));
+        assert!(is_github_https("https://GitHub.com/owner/repo.git"));
+        assert!(is_github_https(
+            "https://x-access-token@github.com/owner/repo.git"
+        ));
+        assert!(is_github_https("https://github.com:443/owner/repo.git"));
+        assert!(!is_github_https("https://gitlab.com/owner/repo.git"));
+        assert!(!is_github_https("git@github.com:owner/repo.git"));
+        assert!(!is_github_https("ssh://git@github.com/owner/repo.git"));
+        assert!(!is_github_https(
+            "https://notgithub.com.evil.example/owner/repo.git"
+        ));
+    }
+
+    #[test]
+    fn git_auth_setup_is_none_for_a_blank_token() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            GitAuth::setup(Path::new("/usr/bin/sooth"), dir.path(), "   ")
+                .unwrap()
+                .is_none()
+        );
+        assert!(!dir.path().join(".sooth-git-askpass.sh").exists());
+    }
+
+    #[test]
+    fn git_auth_setup_writes_an_executable_askpass_script() {
+        let dir = tempfile::tempdir().unwrap();
+        let auth = GitAuth::setup(Path::new("/usr/bin/sooth"), dir.path(), "ghp_example")
+            .unwrap()
+            .unwrap();
+
+        let contents = std::fs::read_to_string(&auth.askpass_path).unwrap();
+        assert!(contents.contains("--git-askpass"));
+        assert!(contents.contains("/usr/bin/sooth"));
+        assert!(
+            !contents.contains("ghp_example"),
+            "the token must never be written to disk"
+        );
+
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&auth.askpass_path)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
     }
 }

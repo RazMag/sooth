@@ -1,8 +1,11 @@
 //! Git-synced quadlet groups: a group directory whose contents are kept in
 //! sync with a remote git repository, checked and pulled automatically on a
-//! per-sync interval. Auth is left entirely to the host's own `git`
+//! per-sync interval. Auth is mostly left to the host's own `git`
 //! configuration (SSH agent, `~/.ssh/config`, credential helpers) -- sooth
-//! stores no credentials of its own, it just runs `git` as the same user.
+//! stores no credentials of its own for those, it just runs `git` as the
+//! same user. The one exception is a private `https://github.com/...`
+//! remote: `Config.github_token` (set from the Settings page) lets sooth
+//! supply a GitHub access token itself, via [`git::GitAuth`].
 //!
 //! See [`GitSyncManager`] for the runtime side (one poll task per configured
 //! sync) and `crate::web::handlers::gitsync` for the web surface. Deliberately
