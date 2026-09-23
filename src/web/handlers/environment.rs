@@ -26,6 +26,9 @@ pub struct FlashQuery {
     set: Option<u8>,
     unset: Option<u8>,
     live: Option<u8>,
+    /// `?name=FOO` from a "missing host variable" link: prefills the add
+    /// form's name (ignored unless it's a valid variable name).
+    name: Option<String>,
 }
 
 pub async fn index(
@@ -46,7 +49,12 @@ pub async fn index(
         (_, true, _) => Some("Variable removed."),
         _ => None,
     };
-    Ok(render(&state, &session, None, notice, None).await)
+    let prefill = flash
+        .name
+        .as_deref()
+        .filter(|n| hostenv::valid_name(n))
+        .map(|n| (n, ""));
+    Ok(render(&state, &session, prefill, notice, None).await)
 }
 
 #[derive(Deserialize)]

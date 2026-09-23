@@ -14,7 +14,8 @@ use tower_sessions::Session;
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError, PageError};
 use crate::quadlet::gitsync::{GitSyncConfig, GitSyncError, SyncStatus};
-use crate::quadlet::{discovery, refs};
+use crate::quadlet::{QuadletUnit, discovery, refs};
+use crate::web::core;
 use crate::web::templates::gitsync::{AddFormValues, SyncEntry};
 use crate::web::templates::settings::GithubTokenStatus;
 use crate::web::templates::{self};
@@ -30,35 +31,43 @@ fn done(headers: &HeaderMap) -> Response {
     }
 }
 
-/// Every sync plus the podman secrets its group's units reference but that
-/// don't exist yet -- an advisory badge only; it never affects `SyncState`
-/// or blocks a sync. When podman can't be listed, reports nothing missing
-/// rather than flagging every reference.
+/// Every sync plus the podman secrets and host `${NAME}` variables its
+/// group's units reference but that don't exist yet -- advisory badges
+/// only; they never affect `SyncState` or block a sync. A store that can't
+/// be read reports nothing missing rather than flagging every reference.
 async fn entries(state: &AppState) -> Vec<SyncEntry> {
     let snapshot = state.git_sync.snapshot();
-    let (Ok(existing), Ok(all)) = (
-        crate::secrets::names().await,
-        discovery::load_all(&state.quadlet_dir),
-    ) else {
-        return without_secrets(snapshot);
+    let Ok(all) = discovery::load_all(&state.quadlet_dir) else {
+        return without_missing(snapshot);
     };
+    let stores = core::RefStores::load(state, &all).await;
     snapshot
         .into_iter()
         .map(|(config, status)| {
             let prefix = format!("{}/", config.group);
-            let in_group = all
+            let in_group: Vec<&QuadletUnit> = all
                 .iter()
-                .filter(|u| u.group == config.group || u.group.starts_with(&prefix));
-            let missing = refs::missing_secrets(in_group, &existing);
-            (config, status, missing)
+                .filter(|u| u.group == config.group || u.group.starts_with(&prefix))
+                .collect();
+            let secrets = stores
+                .secrets
+                .as_ref()
+                .map(|e| refs::missing_secrets(in_group.iter().copied(), e))
+                .unwrap_or_default();
+            let env = stores
+                .env
+                .as_ref()
+                .map(|e| refs::missing_env(in_group.iter().copied(), e))
+                .unwrap_or_default();
+            (config, status, secrets, env)
         })
         .collect()
 }
 
-fn without_secrets(snapshot: Vec<(GitSyncConfig, SyncStatus)>) -> Vec<SyncEntry> {
+fn without_missing(snapshot: Vec<(GitSyncConfig, SyncStatus)>) -> Vec<SyncEntry> {
     snapshot
         .into_iter()
-        .map(|(c, s)| (c, s, Default::default()))
+        .map(|(c, s)| (c, s, Default::default(), Default::default()))
         .collect()
 }
 
@@ -116,7 +125,7 @@ pub async fn add(
         (
             StatusCode::UNPROCESSABLE_ENTITY,
             templates::gitsync::page_with_add_error(
-                &without_secrets(state.git_sync.snapshot()),
+                &without_missing(state.git_sync.snapshot()),
                 csrf,
                 &entered,
                 &known_groups,

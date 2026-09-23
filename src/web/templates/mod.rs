@@ -1072,8 +1072,11 @@ mod tests {
             "csrf",
             &[("Image", html! { code { "docker.io/library/nginx" } })],
             None,
-            &[],
-            Health::default(),
+            &detail::DetailCtx {
+                known_groups: &[],
+                health: Health::default(),
+                host_vars: &[("TAG".into(), Some(false)), ("HOME".into(), Some(true))],
+            },
         )
         .into_string();
 
@@ -1082,5 +1085,8 @@ mod tests {
         assert!(markup.contains("config-block-name"));
         assert!(markup.contains("web.service"));
         assert!(markup.contains("detail-grid"));
+        assert!(markup.contains("Host variables"));
+        assert!(markup.contains("/environment?name=TAG"));
+        assert!(!markup.contains("/environment?name=HOME"));
     }
 }

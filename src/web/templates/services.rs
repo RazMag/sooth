@@ -5,7 +5,7 @@
 
 use maud::{Markup, html};
 
-use super::list::{Column, GroupLists, ListSpec, RowCtx, kind_cell};
+use super::list::{Column, ListContext, ListSpec, RowCtx, kind_cell};
 use super::{Icon, NavItem, icon, ports_cell_live, shell};
 use crate::health::Health;
 use crate::quadlet::QuadletUnit;
@@ -68,7 +68,7 @@ pub fn services_page(
     stats: &Stats,
     csrf: &str,
     all_units: &[QuadletUnit],
-    groups: &GroupLists,
+    groups: &ListContext,
     health: Health,
 ) -> Markup {
     let create = html! {

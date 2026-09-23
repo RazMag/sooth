@@ -8,10 +8,16 @@ use super::{BannerKind, NavItem, banner, csrf_input, group_field, page_header, s
 use crate::health::Health;
 use crate::quadlet::gitsync::{GitSyncConfig, SyncState, SyncStatus};
 
-/// One sync card's data: its config, live status, and the `Secret=` names
-/// its units reference that podman doesn't have yet (secret name -> file
-/// names), from `refs::missing_secrets`.
-pub type SyncEntry = (GitSyncConfig, SyncStatus, BTreeMap<String, Vec<String>>);
+/// One sync card's data: its config, live status, the `Secret=` names its
+/// units reference that podman doesn't have yet, and the `${NAME}` host
+/// variables they reference that the user manager doesn't have (each name ->
+/// file names), from `refs::missing_secrets` / `refs::missing_env`.
+pub type SyncEntry = (
+    GitSyncConfig,
+    SyncStatus,
+    BTreeMap<String, Vec<String>>,
+    BTreeMap<String, Vec<String>>,
+);
 
 /// The add-sync form's values, round-tripped as plain strings so a rejected
 /// submission redisplays exactly as typed -- same pattern as
@@ -164,8 +170,8 @@ pub fn rows(entries: &[SyncEntry], csrf: &str) -> Markup {
         @if entries.is_empty() {
             p.empty { "No git-synced groups configured yet." }
         } @else {
-            @for (config, status, missing) in entries {
-                (sync_card(config, status, missing, csrf))
+            @for (config, status, secrets, env) in entries {
+                (sync_card(config, status, secrets, env, csrf))
             }
         }
     }
@@ -174,7 +180,8 @@ pub fn rows(entries: &[SyncEntry], csrf: &str) -> Markup {
 fn sync_card(
     config: &GitSyncConfig,
     status: &SyncStatus,
-    missing: &BTreeMap<String, Vec<String>>,
+    missing_secrets: &BTreeMap<String, Vec<String>>,
+    missing_env: &BTreeMap<String, Vec<String>>,
     csrf: &str,
 ) -> Markup {
     // A single-quoted JS string embedded straight into an `onsubmit`
@@ -201,7 +208,8 @@ fn sync_card(
                 @if let SyncState::Error(msg) = &status.state {
                     tr { td { "Error" } td { (msg) } }
                 }
-                (super::secrets::missing_row(missing))
+                (super::secrets::missing_row(missing_secrets))
+                (super::environment::missing_row(missing_env))
             }
             div.gitsync-actions {
                 form.inline-form method="post" action="/git-sync/sync" {

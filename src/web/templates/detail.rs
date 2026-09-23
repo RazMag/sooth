@@ -15,14 +15,23 @@ use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
 use crate::web::core;
 
+/// The page-wide inputs every kind's detail page passes through untouched:
+/// the group picker's choices, the health strip, and each `${NAME}` host
+/// variable the unit references with whether the user manager has it
+/// (`None` when its environment couldn't be read) -- see `refs::env_refs`.
+pub struct DetailCtx<'a> {
+    pub known_groups: &'a [String],
+    pub health: Health,
+    pub host_vars: &'a [(String, Option<bool>)],
+}
+
 pub fn detail_page(
     unit: &QuadletUnit,
     status: &UnitStatus,
     csrf: &str,
     facts: &[(&str, Markup)],
     extra: Option<Markup>,
-    known_groups: &[String],
-    health: Health,
+    ctx: &DetailCtx,
 ) -> Markup {
     let service = unit.service_name();
     let base = core::unit_url(unit);
@@ -58,11 +67,14 @@ pub fn detail_page(
                         @if !unit.is_template() {
                             tr {
                                 td { "Group" }
-                                td { (group_picker(&base, &unit.group, csrf, known_groups)) }
+                                td { (group_picker(&base, &unit.group, csrf, ctx.known_groups)) }
                             }
                         }
                         @for (key, value) in facts {
                             tr { td { (key) } td { (value) } }
+                        }
+                        @if !ctx.host_vars.is_empty() {
+                            tr { td { "Host variables" } td { (host_vars_cell(ctx.host_vars)) } }
                         }
                     }
                 }
@@ -80,5 +92,21 @@ pub fn detail_page(
             }
         }
     };
-    shell(&unit.file_name, active, Some(health), body)
+    shell(&unit.file_name, active, Some(ctx.health), body)
+}
+
+/// Each referenced `${NAME}`, flagging any the user manager doesn't have --
+/// the unit won't interpolate it -- with a link to set it.
+fn host_vars_cell(vars: &[(String, Option<bool>)]) -> Markup {
+    html! {
+        @for (i, (name, present)) in vars.iter().enumerate() {
+            @if i > 0 { ", " }
+            @if *present == Some(false) {
+                a href={"/environment?name=" (name)} { code { "${" (name) "}" } }
+                " " span.badge.badge-warn title="Not in the systemd user manager's environment — set it on the Environment page" { "missing" }
+            } @else {
+                a href="/environment" { code { "${" (name) "}" } }
+            }
+        }
+    }
 }

@@ -4,6 +4,17 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-09-23
+
+### Added
+
+- **Missing host variables** are flagged like missing secrets: a unit that
+  references a `${NAME}` the systemd user manager doesn't have gets a
+  "missing" badge on its detail page and its Git Sync card, with a link that
+  opens the Environment page's add form prefilled with the name.
+- **Missing secrets and host variables in the unit tables**: each row shows
+  an "N missing" badge naming what isn't set.
+
 ## [0.3.2] - 2026-09-23
 
 ### Added
@@ -79,6 +90,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.3.3]: https://github.com/RazMag/sooth/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/RazMag/sooth/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/RazMag/sooth/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/RazMag/sooth/compare/v0.2.1...v0.3.0

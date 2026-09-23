@@ -13,7 +13,7 @@ use crate::config::AppState;
 use crate::error::{FragmentError, PageError};
 use crate::quadlet::{UnitKind, discovery};
 use crate::web::core;
-use crate::web::templates::list::{Column, GroupLists, ListSpec, kind_cell};
+use crate::web::templates::list::{Column, ListContext, ListSpec, kind_cell};
 use crate::web::templates::{self, NavItem};
 
 const ALL_UNITS_COLUMNS: &[Column] = &[Column {
@@ -77,14 +77,16 @@ macro_rules! list_handlers {
             let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
             let known = discovery::list_groups(&state.quadlet_dir);
             let synced = state.git_sync.synced_groups();
+            let missing = core::missing_refs(&state, &units).await;
             Ok(templates::list::list_page(
                 $spec,
                 &units,
                 &csrf,
                 &all,
-                &GroupLists {
+                &ListContext {
                     known: &known,
                     synced: &synced,
+                    missing: &missing,
                 },
                 state.health.get(),
             ))
@@ -100,14 +102,16 @@ macro_rules! list_handlers {
             let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
             let known = discovery::list_groups(&state.quadlet_dir);
             let synced = state.git_sync.synced_groups();
+            let missing = core::missing_refs(&state, &units).await;
             Ok(templates::list::list_rows(
                 $spec,
                 &units,
                 &csrf,
                 &all,
-                &GroupLists {
+                &ListContext {
                     known: &known,
                     synced: &synced,
+                    missing: &missing,
                 },
             ))
         }

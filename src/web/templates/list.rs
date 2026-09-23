@@ -3,6 +3,8 @@
 //! shape, empty state, filter box, and SSE refresh wiring are identical
 //! everywhere, so they live here once.
 
+use std::collections::HashMap;
+
 use maud::{Markup, html};
 
 use super::{
@@ -11,6 +13,7 @@ use super::{
 };
 use crate::health::Health;
 use crate::quadlet::QuadletUnit;
+use crate::quadlet::refs::MissingRefs;
 use crate::systemd::UnitStatus;
 use crate::web::core;
 
@@ -18,16 +21,19 @@ use crate::web::core;
 /// the `data-filter-target` of the filter box. One value everywhere.
 pub const ROWS_ID: &str = "unit-rows";
 
-/// The two group-name lists every list render needs, bundled into one
+/// The table-wide context every list render needs, bundled into one
 /// parameter (keeps `list_table` under clippy's argument-count lint):
 /// `known` is every existing group directory (drop target / "move to"
 /// autocomplete source), `synced` is the subset of those git-sync already
 /// manages -- see `web::core`'s `synced_destination` / `synced_source`,
 /// the authoritative version of the same check this only previews for the
 /// drag-and-drop guard in `dragdrop.js` and the "synced" chip below.
-pub struct GroupLists<'a> {
+/// `missing` is each unit's unset secrets / host variables by file name
+/// (`core::missing_refs`), drawn as a "missing" badge on its row.
+pub struct ListContext<'a> {
     pub known: &'a [String],
     pub synced: &'a [String],
+    pub missing: &'a HashMap<String, MissingRefs>,
 }
 
 /// What a column cell can draw on: the row's own unit and live status, plus
@@ -66,7 +72,7 @@ fn row(
     columns: &[Column],
     csrf: &str,
     all_units: &[QuadletUnit],
-    known_groups: &[String],
+    lists: &ListContext,
     group_member: Option<&str>,
 ) -> Markup {
     let service = unit.service_name();
@@ -95,6 +101,9 @@ fn row(
                     @if unit.is_template() {
                         " " span.chip.chip-muted title="Template unit — managed read-only, use the CLI to instantiate it" { "template" }
                     }
+                    @if let Some(m) = lists.missing.get(&unit.file_name) {
+                        " " (missing_badge(unit, m))
+                    }
                     @if let Some(desc) = unit.description() {
                         div.cell-secondary { (desc) }
                     }
@@ -108,7 +117,26 @@ fn row(
                 (autostart_pill(status.is_autostart_enabled()))
                 (autoupdate_pill(unit))
             }
-            td { (kebab_menu(unit, status, csrf, known_groups)) }
+            td { (kebab_menu(unit, status, csrf, lists.known)) }
+        }
+    }
+}
+
+/// A row's "N missing" badge, linking to the unit's detail page (which lists
+/// each reference); the tooltip names them.
+fn missing_badge(unit: &QuadletUnit, m: &MissingRefs) -> Markup {
+    let mut parts = Vec::new();
+    if !m.secrets.is_empty() {
+        parts.push(format!("secrets: {}", m.secrets.join(", ")));
+    }
+    if !m.env.is_empty() {
+        let vars: Vec<String> = m.env.iter().map(|n| format!("${{{n}}}")).collect();
+        parts.push(format!("host variables: {}", vars.join(", ")));
+    }
+    let title = format!("Not set — {}", parts.join("; "));
+    html! {
+        a.badge.badge-warn href=(core::unit_url(unit)) title=(title) {
+            (m.len()) " missing"
         }
     }
 }
@@ -203,7 +231,7 @@ pub fn list_rows(
     units: &[(QuadletUnit, UnitStatus)],
     csrf: &str,
     all_units: &[QuadletUnit],
-    groups: &GroupLists,
+    groups: &ListContext,
 ) -> Markup {
     let known_groups = groups.known;
     let sections = section_groups(units, known_groups);
@@ -216,7 +244,7 @@ pub fn list_rows(
     html! {
         // Root (ungrouped) units first, bare.
         @for (unit, status) in units.iter().filter(|(u, _)| u.group.is_empty()) {
-            (row(unit, status, spec.columns, csrf, all_units, known_groups, None))
+            (row(unit, status, spec.columns, csrf, all_units, groups, None))
         }
         // Then one collapsible section per group directory.
         @for grp in sections {
@@ -236,7 +264,7 @@ pub fn list_rows(
                 }
             } @else {
                 @for (unit, status) in members {
-                    (row(unit, status, spec.columns, csrf, all_units, known_groups, Some(grp)))
+                    (row(unit, status, spec.columns, csrf, all_units, groups, Some(grp)))
                 }
             }
         }
@@ -282,7 +310,7 @@ pub fn list_table(
     csrf: &str,
     rows_route: &str,
     all_units: &[QuadletUnit],
-    groups: &GroupLists,
+    groups: &ListContext,
     create: Markup,
 ) -> Markup {
     html! {
@@ -334,7 +362,7 @@ pub fn list_page(
     units: &[(QuadletUnit, UnitStatus)],
     csrf: &str,
     all_units: &[QuadletUnit],
-    groups: &GroupLists,
+    groups: &ListContext,
     health: Health,
 ) -> Markup {
     let body = html! {

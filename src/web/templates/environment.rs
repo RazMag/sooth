@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use maud::{Markup, html};
 
 use super::{BannerKind, NavItem, banner, csrf_input, page_header, shell};
@@ -124,6 +126,29 @@ pub fn page(p: EnvironmentPage<'_>) -> Markup {
     )
 }
 
+/// The "N host variables missing" row for a git-sync card (see
+/// `gitsync::rows`) -- the `${NAME}` analogue of `secrets::missing_row`.
+/// Each name links to the Environment page with the add form prefilled.
+pub fn missing_row(missing: &BTreeMap<String, Vec<String>>) -> Markup {
+    html! {
+        @if !missing.is_empty() {
+            tr {
+                td { "Host variables" }
+                td {
+                    span.badge.badge-warn { (missing.len()) " missing" }
+                    " "
+                    @for (i, (name, users)) in missing.iter().enumerate() {
+                        @if i > 0 { ", " }
+                        a href={"/environment?name=" (name)} title={"Used by " (users.join(", "))} {
+                            code { "${" (name) "}" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The value column: the live manager value when it has one, otherwise the
 /// value from the file with a "pending" marker. When the two disagree, both
 /// are shown so a stale live value is obvious.
@@ -145,5 +170,20 @@ fn value_cell(v: &EnvVar, live: &[(String, String)]) -> Markup {
                 span.chip.chip-muted title="Not in the running manager yet — applies on next login" { "pending" }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_row_links_each_name_or_renders_nothing() {
+        assert!(missing_row(&BTreeMap::new()).into_string().is_empty());
+        let missing = BTreeMap::from([("TAG".to_string(), vec!["web.container".to_string()])]);
+        let html = missing_row(&missing).into_string();
+        assert!(html.contains("1 missing"));
+        assert!(html.contains("/environment?name=TAG"));
+        assert!(html.contains("Used by web.container"));
     }
 }
