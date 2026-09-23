@@ -859,6 +859,7 @@
   .group-picker > summary { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; list-style: none; }
   .group-picker > summary::-webkit-details-marker { display: none; }
   .group-picker > summary svg:last-child { width: 0.8rem; height: 0.8rem; }
+  .group-picker > summary.group-picker-invalid { outline: 2px solid var(--color-danger); outline-offset: 1px; }
   .group-picker-panel {
     position: absolute;
     z-index: 30;
