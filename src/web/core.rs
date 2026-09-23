@@ -12,7 +12,7 @@ use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
-use crate::quadlet::{QuadletUnit, UnitKind, discovery, install, naming, writer};
+use crate::quadlet::{QuadletUnit, UnitKind, containerref, discovery, install, naming, writer};
 use crate::systemd::UnitStatus;
 
 /// The section a unit belongs to, and therefore the URL prefix all of its
@@ -234,6 +234,57 @@ pub async fn create_unit(
     )?)
 }
 
+/// Points an existing `.container` quadlet at `pod_file_name` by patching its
+/// `[Container]` `Pod=` line and rewriting the file in place -- the "New Pod"
+/// and "Edit Pod" pages' follow-up step for each already-defined container
+/// the user picked to attach. Rejects non-Container kinds. No CSRF check
+/// here: this is only ever called from within a handler (`handlers::pods`)
+/// that already verified the one submitted token before running a batch of
+/// these.
+///
+/// Podman only places a container into a pod when it's (re)created, so a
+/// quadlet already running under its old `Pod=` (or none) keeps running
+/// there until it's next started -- the file change alone doesn't move it.
+/// `restart_if_running` closes that gap: when true and the container is
+/// currently active, it's restarted right after the reload so it rejoins the
+/// right pod immediately instead of on some later, unrelated restart.
+pub async fn attach_container_to_pod(
+    state: &AppState,
+    file_name: &str,
+    pod_file_name: &str,
+    restart_if_running: bool,
+) -> Result<(), AppError> {
+    let unit = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?;
+    if unit.kind != UnitKind::Container {
+        return Err(crate::quadlet::QuadletError::Validation(format!(
+            "{file_name} is not a container"
+        ))
+        .into());
+    }
+    let patched = containerref::set_pod(&unit.raw, Some(pod_file_name));
+    if patched == unit.raw {
+        return Ok(());
+    }
+    writer::write_atomic(&state.quadlet_dir, &unit.rel_path(), &patched)?;
+    state.systemd.reload().await?;
+    let _ = state.events.send(DashboardEvent::UnitsChanged);
+    tracing::info!(file = %unit.file_name, pod = pod_file_name, "container attached to pod");
+
+    if restart_if_running {
+        let service = unit.service_name();
+        let status = state.systemd.status(&service).await?;
+        if status.is_active() {
+            state.systemd.restart(&service).await?;
+            let status = state.systemd.status(&service).await?;
+            let _ = state
+                .events
+                .send(DashboardEvent::Status { service, status });
+            tracing::info!(file = %unit.file_name, pod = pod_file_name, "container restarted to join pod");
+        }
+    }
+    Ok(())
+}
+
 /// Same tail as `create_unit`, but overwrites an existing file -- used by
 /// the raw-textarea edit flow (which stays kind-agnostic for every kind).
 pub async fn edit_unit(
@@ -321,6 +372,14 @@ pub async fn move_unit(
 /// with it and keeps its service name (podman keys off the bare file name).
 /// A rename + `daemon-reload`; a no-op when the parent is unchanged. Rejects
 /// moving a group into itself or one of its own descendants.
+///
+/// When `group` is itself a git-synced directory, the move goes through
+/// `GitSyncManager::move_group` instead of a bare `writer::move_dir`, so
+/// `GitSyncConfig.group` -- the manager's own lookup key, and what every
+/// later poll re-derives the on-disk path from -- moves with it rather than
+/// being left pointing at a path that no longer exists. Moving a group that
+/// merely sits inside, or is an ancestor of, a synced directory is still
+/// rejected: only the sync's own directory can be moved this way.
 pub async fn move_group_dir(
     state: &AppState,
     session: &Session,
@@ -345,7 +404,8 @@ pub async fn move_group_dir(
         )
         .into());
     }
-    if let Some(synced) = synced_source(state, group) {
+    let is_synced_group = is_synced_group(state, group);
+    if !is_synced_group && let Some(synced) = synced_source(state, group) {
         return Err(git_sync_conflict(&synced));
     }
     if let Some(synced) = synced_destination(state, new_parent) {
@@ -355,7 +415,14 @@ pub async fn move_group_dir(
     if to == group {
         return Ok(()); // already at this parent
     }
-    writer::move_dir(&state.quadlet_dir, group, &to)?;
+    if is_synced_group {
+        state
+            .git_sync
+            .move_group(group, &to, &state.quadlet_dir)
+            .await?;
+    } else {
+        writer::move_dir(&state.quadlet_dir, group, &to)?;
+    }
     state.systemd.reload().await?;
     let _ = state.events.send(DashboardEvent::UnitsChanged);
     tracing::info!(from = group, to = %to, "group directory moved");
@@ -382,9 +449,21 @@ fn synced_destination(state: &AppState, group: &str) -> Option<String> {
 /// git-sync's path tracking: `group` *is* a sync's directory, sits inside
 /// one, or contains one as a descendant (any of which would carry the
 /// synced checkout to a new path that `GitSyncConfig.group` no longer
-/// names, so the next poll can't find it).
+/// names, so the next poll can't find it). Callers special-case the "*is*
+/// a sync's directory" case via [`is_synced_group`] -- that one's allowed,
+/// routed through `GitSyncManager::move_group` instead of rejected outright.
 fn synced_source(state: &AppState, group: &str) -> Option<String> {
     source_overlap(&state.git_sync.synced_groups(), group)
+}
+
+/// Whether `group` is exactly a configured git-sync's own directory -- not
+/// one of its subdirectories, and not an ancestor merely containing one.
+/// The specific `synced_source` overlap that `move_group_dir`/`rename_group`
+/// are allowed to act on, by moving/renaming it through
+/// `GitSyncManager::move_group` (which keeps `GitSyncConfig.group` pointed
+/// at the right path) rather than a bare `writer::move_dir`.
+fn is_synced_group(state: &AppState, group: &str) -> bool {
+    state.git_sync.synced_groups().iter().any(|g| g == group)
 }
 
 /// The pure check behind [`synced_destination`], split out so it's testable
@@ -411,14 +490,19 @@ fn source_overlap(synced_groups: &[String], group: &str) -> Option<String> {
 fn git_sync_conflict(synced_group: &str) -> AppError {
     crate::quadlet::QuadletError::Validation(format!(
         "'{synced_group}' is synced from a git repository (see the Git Sync page) and is \
-         managed by the remote -- it can't be used as a move/create target, or moved/renamed itself"
+         managed by the remote -- it can't be used as a move/create target, and a directory \
+         inside it or containing it can't be moved or renamed either. Move '{synced_group}' \
+         itself instead."
     ))
     .into()
 }
 
 /// Renames a group's last path segment, keeping it under the same parent:
 /// `media/arr` + `series` -> `media/series`. A `rename` on disk (contents
-/// move with it) + `daemon-reload`; a no-op when the name is unchanged.
+/// move with it) + `daemon-reload`; a no-op when the name is unchanged. Like
+/// [`move_group_dir`], a git-synced group's own directory is allowed to be
+/// renamed this way (via `GitSyncManager::move_group`); one that merely sits
+/// inside or contains a sync is still rejected.
 pub async fn rename_group(
     state: &AppState,
     session: &Session,
@@ -446,10 +530,18 @@ pub async fn rename_group(
     if to == group {
         return Ok(());
     }
-    if let Some(synced) = synced_source(state, group) {
+    let is_synced_group = is_synced_group(state, group);
+    if !is_synced_group && let Some(synced) = synced_source(state, group) {
         return Err(git_sync_conflict(&synced));
     }
-    writer::move_dir(&state.quadlet_dir, group, &to)?;
+    if is_synced_group {
+        state
+            .git_sync
+            .move_group(group, &to, &state.quadlet_dir)
+            .await?;
+    } else {
+        writer::move_dir(&state.quadlet_dir, group, &to)?;
+    }
     state.systemd.reload().await?;
     let _ = state.events.send(DashboardEvent::UnitsChanged);
     tracing::info!(from = group, to = %to, "group renamed");

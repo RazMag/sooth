@@ -73,4 +73,22 @@ export function initGroups() {
     saveExpanded(set);
     apply(table, set);
   });
+
+  // The "Add group" toolbar popup (`details.add-group`) and the group-move
+  // popup (`details.group-picker`, detail page + row kebab) are plain
+  // disclosures with no other close affordance -- clicking anywhere outside
+  // the open one dismisses it, same as a native dropdown. `details.host-vars`
+  // (the floating host-variable panel, see `.host-vars-flyout` in
+  // styles.css) deliberately isn't included here: inserting a reference
+  // means clicking a chip in the panel *and* clicking into the target editor
+  // to place the cursor first, and that editor click is "outside" the
+  // panel -- closing on it would fight the very workflow the panel exists
+  // for. It has its own visible close affordance instead (`.host-vars-close`
+  // in the summary, native `<summary>` toggle).
+  document.addEventListener("click", (e) => {
+    const openSelector = "details.add-group[open], details.group-picker[open]";
+    for (const details of document.querySelectorAll(openSelector)) {
+      if (!details.contains(e.target)) details.open = false;
+    }
+  });
 }

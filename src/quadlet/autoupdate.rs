@@ -18,10 +18,6 @@
 //! (`unit.section("Container").and_then(|s| s.get("AutoUpdate"))`) -- unlike
 //! autostart, there's no systemd round-trip involved.
 
-// TODO: `install::set_enabled` and `envfile::patch_environment_file` do the
-// same "find a `[Section]`, splice one managed line" line-vector scan. This is
-// the third copy; if a fourth shows up, extract a shared helper.
-
 const SECTION: &str = "Container";
 const KEY: &str = "AutoUpdate";
 
@@ -54,18 +50,6 @@ impl AutoUpdateMode {
     }
 }
 
-fn is_any_header(l: &str) -> bool {
-    let t = l.trim();
-    t.starts_with('[') && t.ends_with(']')
-}
-
-fn opens_container(l: &str) -> bool {
-    l.trim()
-        .strip_prefix('[')
-        .and_then(|x| x.strip_suffix(']'))
-        .is_some_and(|name| name.trim().eq_ignore_ascii_case(SECTION))
-}
-
 /// True when `line` is an `AutoUpdate=` assignment (any value, case-insensitive
 /// key, leading/trailing whitespace tolerated).
 fn is_autoupdate_line(line: &str) -> bool {
@@ -92,21 +76,11 @@ fn is_autoupdate_line(line: &str) -> bool {
 /// lines (matching is on the trimmed line) but a newly inserted line is
 /// bare-LF, mirroring [`super::install::set_enabled`].
 pub fn set_autoupdate(raw: &str, mode: Option<AutoUpdateMode>) -> String {
-    let had_trailing_nl = raw.ends_with('\n');
-    let mut lines: Vec<String> = raw.split('\n').map(str::to_string).collect();
-    if had_trailing_nl {
-        lines.pop(); // the empty element `split` leaves after a final '\n'
-    }
+    use super::iniedit::{insert_pos, join_lines, opens_section, section_body, split_lines};
 
-    let finish = |lines: Vec<String>| {
-        let mut out = lines.join("\n");
-        if had_trailing_nl {
-            out.push('\n');
-        }
-        out
-    };
+    let (mut lines, had_trailing_nl) = split_lines(raw);
 
-    let header_idx = lines.iter().position(|l| opens_container(l));
+    let header_idx = lines.iter().position(|l| opens_section(l, SECTION));
 
     let Some(h) = header_idx else {
         // No `[Container]` section. A real container file always has one
@@ -119,16 +93,12 @@ pub fn set_autoupdate(raw: &str, mode: Option<AutoUpdateMode>) -> String {
             lines.push(format!("[{SECTION}]"));
             lines.push(format!("{KEY}={}", mode.as_str()));
         }
-        return finish(lines);
+        return join_lines(lines, had_trailing_nl);
     };
 
-    let body_start = h + 1;
-    let body_end = lines[body_start..]
-        .iter()
-        .position(|l| is_any_header(l))
-        .map_or(lines.len(), |p| body_start + p);
-
-    let hits: Vec<usize> = (body_start..body_end)
+    let body = section_body(&lines, h);
+    let hits: Vec<usize> = body
+        .clone()
         .filter(|&i| is_autoupdate_line(&lines[i]))
         .collect();
 
@@ -143,10 +113,7 @@ pub fn set_autoupdate(raw: &str, mode: Option<AutoUpdateMode>) -> String {
                     }
                 }
                 None => {
-                    let mut ins = body_end;
-                    while ins > body_start && lines[ins - 1].trim().is_empty() {
-                        ins -= 1;
-                    }
+                    let ins = insert_pos(&lines, body);
                     lines.insert(ins, desired);
                 }
             }
@@ -158,7 +125,7 @@ pub fn set_autoupdate(raw: &str, mode: Option<AutoUpdateMode>) -> String {
         }
     }
 
-    finish(lines)
+    join_lines(lines, had_trailing_nl)
 }
 
 #[cfg(test)]

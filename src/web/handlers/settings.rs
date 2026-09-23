@@ -38,6 +38,7 @@ pub async fn page(
         Some("password") => {
             Some("Password saved. Restart sooth for the new password to take effect.")
         }
+        Some("github_token") => Some("GitHub token saved. Restart sooth for it to take effect."),
         Some(_) => Some("Saved. Restart sooth for changes to take effect."),
         None => None,
     };
@@ -110,7 +111,11 @@ pub async fn save(
     }
 
     // Reconstruct the form so a rejected submission redisplays exactly as
-    // typed (same pattern as the quadlet create/edit forms).
+    // typed (same pattern as the quadlet create/edit forms). The GitHub
+    // token isn't part of this form (it has its own, see
+    // `save_github_token`), so its display fields come from the still-live
+    // `state.config` rather than anything just submitted.
+    let unchanged = FormValues::from_config(&state.config, &state.self_update.config_snapshot());
     let entered = || FormValues {
         bind_addr: form.bind_addr.clone(),
         quadlet_dir: form.quadlet_dir.clone(),
@@ -120,6 +125,8 @@ pub async fn save(
         self_update_mode: form.mode.clone(),
         self_update_poll_interval_secs: form.poll_interval_secs.clone(),
         self_update_repo: form.repo.clone(),
+        github_token_set: unchanged.github_token_set,
+        github_token_last4: unchanged.github_token_last4.clone(),
     };
 
     let Ok(bind_addr) = form.bind_addr.trim().parse::<SocketAddr>() else {
@@ -266,6 +273,58 @@ pub async fn change_password(
 
     tracing::info!(path = %state.config_path.display(), "password changed via settings");
     Ok(Redirect::to("/settings?saved=password").into_response())
+}
+
+#[derive(Deserialize)]
+pub struct GithubTokenForm {
+    csrf_token: String,
+    #[serde(default)]
+    github_token: String,
+}
+
+/// Saves (or, given a blank field, clears) the GitHub access token used to
+/// authenticate git-sync against private `https://github.com/...` remotes.
+/// A separate form/route from the rest of Settings (like `change_password`)
+/// so the token is never round-tripped back into the page as a prefilled
+/// value -- the field the operator sees is always blank, whether or not one
+/// is currently saved (see `FormValues::github_token_set`/`_last4`).
+pub async fn save_github_token(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<GithubTokenForm>,
+) -> Result<Response, PageError> {
+    if !crate::auth::csrf::verify(&session, &form.csrf_token).await {
+        return Err(AppError::Csrf.into());
+    }
+
+    if EnvLocks::detect().github_token {
+        let values = FormValues::from_config(&state.config, &state.self_update.config_snapshot());
+        return Ok(render_error(
+            &state,
+            &session,
+            &values,
+            "The GitHub token is set by the SOOTH_GITHUB_TOKEN environment variable; \
+             change it there and restart.",
+        )
+        .await);
+    }
+
+    crate::config::patch_config_toml(
+        &state.config_path,
+        &[(
+            "github_token",
+            toml::Value::String(form.github_token.trim().to_string()),
+        )],
+    )
+    .map_err(|e| {
+        AppError::Internal(anyhow::anyhow!(
+            "failed to write {}: {e}",
+            state.config_path.display()
+        ))
+    })?;
+
+    tracing::info!(path = %state.config_path.display(), "github token saved via settings");
+    Ok(Redirect::to("/settings?saved=github_token").into_response())
 }
 
 #[derive(Deserialize)]

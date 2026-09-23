@@ -126,9 +126,10 @@ pub fn section_back_target(kind: UnitKind) -> (&'static str, &'static str) {
 }
 
 /// The `<head>` shared by every full page. The bundled `app.js` carries htmx,
-/// its SSE extension, and CodeMirror; the inline script resolves an effective
-/// light/dark theme and stamps it on `<html>` before first paint (a deferred
-/// script would run too late and flash the wrong theme).
+/// its SSE extension, and CodeMirror; the inline script resolves the saved
+/// theme *preference* (`light` / `dark` / `system`) into an effective
+/// light/dark theme and stamps both on `<html>` before first paint (a
+/// deferred script would run too late and flash the wrong theme).
 fn head_tag(title: &str) -> Markup {
     html! {
         head {
@@ -137,9 +138,11 @@ fn head_tag(title: &str) -> Markup {
             title { (title) " · sooth" }
             script {
                 (maud::PreEscaped(
-                    "try{var t=localStorage.getItem('sooth-theme');\
-                     if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';\
-                     document.documentElement.dataset.theme=t;}catch(e){}"
+                    "try{var p=localStorage.getItem('sooth-theme');\
+                     if(p!=='light'&&p!=='dark'&&p!=='system')p='system';\
+                     var eff=p==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):p;\
+                     document.documentElement.dataset.theme=eff;\
+                     document.documentElement.dataset.themePref=p;}catch(e){}"
                 ))
             }
             link rel="stylesheet" href="/static/style.css";
@@ -175,6 +178,7 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                                 }
                             }
                         }
+                        div.sidebar-version { "v" (env!("CARGO_PKG_VERSION")) }
                         div.sidebar-footer {
                             a class={
                                 "btn-icon"
@@ -187,9 +191,11 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                                     "Settings"
                                 }) { (icon(Icon::Settings)) }
                             button.btn-icon.theme-toggle type="button" data-theme-toggle
-                                title="Toggle light/dark theme" aria-label="Toggle light/dark theme" {
+                                title="Theme: click to cycle Light / Dark / System"
+                                aria-label="Change theme (Light / Dark / System)" {
                                 span.i-sun { (icon(Icon::Sun)) }
                                 span.i-moon { (icon(Icon::Moon)) }
+                                span.i-monitor { (icon(Icon::Monitor)) }
                             }
                             span.spacer {}
                             form method="post" action="/logout" {
@@ -428,6 +434,64 @@ pub fn known_groups_datalist(groups: &[String]) -> Markup {
         datalist id="known-groups" {
             @for g in groups {
                 option value=(g) {}
+            }
+        }
+    }
+}
+
+/// A group-picking field for a create/add form that has no existing unit to
+/// move yet, just a local field value to set: a plain text input with a
+/// `<datalist>` (the no-JS fallback -- pick a suggestion or type any new
+/// path) progressively enhanced into the same picker-with-an-add-field
+/// control [`group_picker`] uses, so choosing an existing group or filing
+/// under a brand-new one both stay one click away. Not `group_move_menu`
+/// reused directly (there's no unit/group to POST a move for here, just a
+/// field), but it shares its CSS classes (`.group-picker`, `.group-opt`, …)
+/// for an identical look, and its open disclosure gets the same
+/// outside-click-to-close handling from `frontend/groups.js` for free.
+/// Shared by the New/Edit Pod pages (`required: false` -- a pod can live at
+/// the quadlet-dir root) and the Git Sync "Add" form (`required: true` --
+/// syncing into the root isn't offered) -- `frontend/podpicker.js`'s
+/// `initPodGroupField` scans for any `[data-group-field]` on the page, not
+/// just pods', so it activates wherever this markup shows up with no extra
+/// wiring.
+pub fn group_field(prefill: &str, known: &[String], required: bool) -> Markup {
+    let hint = if required {
+        "(subdirectory to use)"
+    } else {
+        "(optional subdirectory)"
+    };
+    html! {
+        div.field data-group-field {
+            label for="group" { "Group " span.field-hint { (hint) } }
+            input.input type="text" id="group" name="group" list="known-groups"
+                value=(prefill) placeholder="e.g. media/arr" required[required]
+                autocomplete="off" autocapitalize="off" spellcheck="false"
+                data-group-source;
+            (known_groups_datalist(known))
+            details.group-picker hidden data-group-picker {
+                summary.btn.btn-ghost.btn-sm {
+                    (icon(Icon::Folder))
+                    span data-group-picker-label {
+                        @if prefill.is_empty() { "root" } @else { (prefill) }
+                    }
+                    (icon(Icon::ChevronDown))
+                }
+                div.group-picker-panel {
+                    div.group-picker-list {
+                        @if !required {
+                            button.group-opt type="button" data-group-choice="" { "root" }
+                        }
+                        @for g in known {
+                            button.group-opt type="button" data-group-choice=(g) { (g) }
+                        }
+                    }
+                    div.group-picker-new {
+                        input.input.input-sm type="text" placeholder="new group…" data-group-new-input
+                            autocomplete="off" autocapitalize="off" spellcheck="false";
+                        button.btn.btn-sm type="button" data-group-new-add { "Add" }
+                    }
+                }
             }
         }
     }
@@ -812,8 +876,15 @@ pub enum EditorFileName<'a> {
 }
 
 /// The quadlet-content editor: a plain `<textarea>` progressively enhanced
-/// into a syntax-highlighted, live-validated CodeMirror editor by the bundle.
-pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
+/// into a syntax-highlighted, live-validated CodeMirror editor by the
+/// bundle. `field_name` is almost always `"contents"` -- the one exception is
+/// the Pod pages' inline "new container" rows, which need one independently
+/// named editor per row (see [`code_editor`] for the common case).
+pub fn code_editor_named(
+    contents: &str,
+    file_name: EditorFileName<'_>,
+    field_name: &str,
+) -> Markup {
     let (fixed, stem_input, suffix, kind_select) = match file_name {
         EditorFileName::Fixed(n) => (Some(n), None, None, None),
         EditorFileName::StemSuffix { input, suffix } => (None, Some(input), Some(suffix), None),
@@ -821,7 +892,7 @@ pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
     };
     html! {
         textarea.input
-            name="contents"
+            name=(field_name)
             rows="18"
             data-code-editor
             data-file-name=[fixed]
@@ -830,17 +901,29 @@ pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
             data-kind-select=[kind_select]
             required
             { (contents) }
-        div id="validate-status" class="validate-status" {}
+        // No `id` here -- a page can carry more than one of these (one per
+        // inline "new container" row), and `frontend/editor.js` locates each
+        // instance's own status slot positionally (the element right after
+        // its textarea), not by a document-wide id.
+        div { div.validate-status {} }
     }
 }
 
+/// [`code_editor_named`] with the one field name every page but the Pod
+/// pages' inline container rows actually uses.
+pub fn code_editor(contents: &str, file_name: EditorFileName<'_>) -> Markup {
+    code_editor_named(contents, file_name, "contents")
+}
+
 /// The Name/Value environment-variable editor for `.container` / `.build`
-/// units. `body` is the current `KEY=VALUE` lines (one per variable); it
-/// renders as a plain `<textarea>` that `frontend/envvars.js` progressively
-/// enhances into add/remove rows. Submitted as one `env_vars` field and
-/// written to a sidecar `env/<name>.env` referenced by a managed
-/// `EnvironmentFile=` line.
-pub fn env_var_editor(body: &str) -> Markup {
+/// units (and the Pod pages' inline "new container" rows). `body` is the
+/// current `KEY=VALUE` lines (one per variable); it renders as a plain
+/// `<textarea>` that `frontend/envvars.js` progressively enhances into
+/// add/remove rows. Written to a sidecar `env/<name>.env` referenced by a
+/// managed `EnvironmentFile=` line. `field_name` is almost always
+/// `"env_vars"` (see [`env_var_editor`]) -- a page with more than one of
+/// these (one per inline container row) needs each independently named.
+pub fn env_var_editor_named(body: &str, field_name: &str) -> Markup {
     html! {
         div.field data-envvars {
             label { "Environment variables" }
@@ -848,9 +931,15 @@ pub fn env_var_editor(body: &str) -> Markup {
                 "Saved to a sidecar " code { "env/<name>.env" }
                 " and wired into the unit with " code { "EnvironmentFile=" } "."
             }
-            textarea.input name="env_vars" rows="4" data-envvars-source { (body) }
+            textarea.input name=(field_name) rows="4" data-envvars-source { (body) }
         }
     }
+}
+
+/// [`env_var_editor_named`] with the one field name every page but the Pod
+/// pages' inline container rows actually uses.
+pub fn env_var_editor(body: &str) -> Markup {
+    env_var_editor_named(body, "env_vars")
 }
 
 /// A collapsible reference panel, shown near the editor, listing the host
@@ -862,8 +951,18 @@ pub fn host_vars_panel(vars: &[EnvVar]) -> Markup {
     html! {
         details.host-vars {
             summary {
-                "Host variables"
-                @if !vars.is_empty() { span.muted { " · " (vars.len()) } }
+                span {
+                    "Host variables"
+                    @if !vars.is_empty() { span.muted { " · " (vars.len()) } }
+                }
+                // Purely visual -- there's no separate click handler, closing
+                // relies on the native `<summary>` toggle a click anywhere in
+                // this row already triggers (see `.host-vars-close` in
+                // styles.css, shown only while `[open]`). A real nested
+                // `<button>` here would be invalid HTML (interactive content
+                // inside the implicit disclosure control `<summary>` already
+                // is), so this is a decorative icon, not a focusable control.
+                span.host-vars-close aria-hidden="true" { (icon(Icon::X)) }
             }
             div.host-vars-body {
                 @if vars.is_empty() {
@@ -893,11 +992,11 @@ pub fn host_vars_panel(vars: &[EnvVar]) -> Markup {
 }
 
 pub fn validate_ok() -> Markup {
-    html! { div id="validate-status" class="validate-status valid" { (icon(Icon::Check)) span { "Valid" } } }
+    html! { div.validate-status.valid { (icon(Icon::Check)) span { "Valid" } } }
 }
 
 pub fn validate_error(message: &str) -> Markup {
-    html! { div id="validate-status" class="validate-status invalid" { (icon(Icon::X)) span { (message) } } }
+    html! { div.validate-status.invalid { (icon(Icon::X)) span { (message) } } }
 }
 
 pub fn error_fragment(message: &str, id: Uuid) -> Markup {

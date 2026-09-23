@@ -32,6 +32,16 @@ fn main() -> anyhow::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--hash-password") {
         return hash_password_cli();
     }
+    // --git-askpass is never invoked by a human: it's what `GIT_ASKPASS`
+    // points `git` at (via a small wrapper script, see
+    // `quadlet::gitsync::git::GitAuth::setup`) when a GitHub token is
+    // configured, so `git` gets credentials for a private
+    // `https://github.com/...` remote without the token ever appearing on a
+    // command line or in a checkout's `.git/config`. Also runs synchronously
+    // and exits immediately, same as `--hash-password`.
+    if std::env::args().nth(1).as_deref() == Some("--git-askpass") {
+        return git_askpass_cli();
+    }
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(run())
@@ -48,6 +58,26 @@ fn hash_password_cli() -> anyhow::Result<()> {
         anyhow::bail!("passwords did not match");
     }
     println!("{}", auth::hash_password(&password)?);
+    Ok(())
+}
+
+/// Answers one `git` credential prompt (its text is `argv[2]`) with the
+/// token from `SOOTH_GIT_ASKPASS_TOKEN` -- set by `git.rs` only on the `git`
+/// child process it spawns, so this only ever sees it when actually invoked
+/// as that process's askpass helper. A username prompt gets a placeholder
+/// (`x-access-token`, the conventional non-empty username GitHub's own
+/// token-auth docs use); anything else -- the password prompt -- gets the
+/// token itself.
+fn git_askpass_cli() -> anyhow::Result<()> {
+    let prompt = std::env::args().nth(2).unwrap_or_default();
+    if prompt.to_ascii_lowercase().starts_with("username") {
+        println!("x-access-token");
+    } else {
+        println!(
+            "{}",
+            std::env::var("SOOTH_GIT_ASKPASS_TOKEN").unwrap_or_default()
+        );
+    }
     Ok(())
 }
 
@@ -100,8 +130,12 @@ async fn run() -> anyhow::Result<()> {
     // Deliberately doesn't touch `systemd_client`/`events_tx` for reload --
     // its writes into the quadlet tree are picked up by the fs-watch task
     // below exactly like an external edit.
-    let git_sync =
-        quadlet::gitsync::GitSyncManager::new(Arc::new(config_path.clone()), events_tx.clone());
+    let git_sync = quadlet::gitsync::GitSyncManager::new(
+        Arc::new(config_path.clone()),
+        events_tx.clone(),
+        &exe_path,
+        &config.github_token,
+    );
     git_sync.start_all(&config.git_syncs, Arc::from(quadlet_dir.as_path()));
 
     // Self-update: one poll task, live-reconfigurable exactly like
@@ -167,7 +201,7 @@ async fn run() -> anyhow::Result<()> {
 
     let app = web::build_router(state);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
-    info!(addr = %config.bind_addr, "sooth listening");
+    info!(addr = %config.bind_addr, url = %format!("http://{}", config.bind_addr), "sooth listening");
 
     // Set by `shutdown_signal` when the wind-down was triggered by the
     // Settings "Restart" button rather than a real signal.

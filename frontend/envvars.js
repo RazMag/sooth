@@ -51,6 +51,10 @@ export function initEnvVars() {
       valEl.className = "input";
       valEl.placeholder = "value";
       valEl.setAttribute("data-v", "");
+      // Lets a host-var chip (`editor.js`'s insert-ref tracking) target this
+      // field's cursor when it's the one focused -- values are where a
+      // `${NAME}` reference actually belongs; names stay plain identifiers.
+      valEl.setAttribute("data-insertable", "");
       valEl.autocomplete = "off";
       valEl.spellcheck = false;
       valEl.value = v;

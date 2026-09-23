@@ -2195,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "sooth"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2217,7 +2217,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
- "tower",
  "tower-http 0.7.1",
  "tower-sessions",
  "tracing",

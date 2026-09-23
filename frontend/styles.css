@@ -253,12 +253,17 @@
   .back-link:hover { color: var(--color-ink); text-decoration: none; }
   .back-link svg { width: 0.95rem; height: 0.95rem; }
 
-  /* Theme toggle: show the icon for the mode you'd switch *to*. */
+  /* Theme toggle: show the icon for the current preference (cycles
+     light -> dark -> system on click); default to the system icon so a
+     missing/invalid attribute (no-JS, private-browsing storage failure)
+     still shows something sensible. */
   .theme-toggle .i-sun,
-  .theme-toggle .i-moon { display: inline-flex; }
-  .theme-toggle .i-moon { display: none; }
-  :root[data-theme="dark"] .theme-toggle .i-sun { display: none; }
-  :root[data-theme="dark"] .theme-toggle .i-moon { display: inline-flex; }
+  .theme-toggle .i-moon,
+  .theme-toggle .i-monitor { display: none; }
+  :root:not([data-theme-pref]) .theme-toggle .i-monitor,
+  :root[data-theme-pref="system"] .theme-toggle .i-monitor { display: inline-flex; }
+  :root[data-theme-pref="light"] .theme-toggle .i-sun { display: inline-flex; }
+  :root[data-theme-pref="dark"] .theme-toggle .i-moon { display: inline-flex; }
 
   /* Badges & chips -------------------------------------------- */
   .badge {
@@ -442,6 +447,14 @@
   textarea.input { font-family: var(--font-mono); min-height: 6rem; resize: vertical; }
   .field-hint { font-size: 0.78rem; color: var(--color-faint); }
   .field > .field-hint { margin: 0; }
+  /* A `resource_card`'s "Existing"/"New" subsection label -- same weight as
+     a `.field > label`, but a block heading rather than tied to one input. */
+  .card-subhead {
+    margin: 0 0 0.2rem;
+    font-size: 0.82rem;
+    color: var(--color-muted);
+    font-weight: 500;
+  }
   .field-note-env { font-size: 0.78rem; color: var(--color-warn); margin: 0.1rem 0 0; }
   .input[readonly] { background: var(--color-raised); color: var(--color-muted); cursor: not-allowed; }
   .checkbox-line { display: flex; align-items: center; gap: 0.5rem; }
@@ -649,6 +662,13 @@
   }
   .sidebar-footer .spacer { flex: 1; }
 
+  .sidebar-version {
+    padding: 0 0.6rem 0.5rem;
+    font-size: 0.72rem;
+    color: var(--color-faint);
+    text-align: center;
+  }
+
   .nav-scrim { display: none; }
 
   /* Content column ---------------------------------- */
@@ -801,8 +821,13 @@
 
   .input-sm { padding: 0.3rem 0.5rem; font-size: 0.82rem; border-radius: 0.4rem; }
 
-  /* Detail-page group control: current group + a dropdown of the rest. */
+  /* Detail-page group control: current group + a dropdown of the rest. Also
+     used, hidden by default, as the "New Pod" group field's progressive
+     enhancement -- `.group-picker[hidden]` has to be explicit since the
+     unconditional `display` below outranks the UA `[hidden]` rule on origin
+     alone; without it the JS-revealed picker would never actually hide. */
   .group-picker { position: relative; display: inline-block; }
+  .group-picker[hidden] { display: none; }
   .group-picker > summary { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; list-style: none; }
   .group-picker > summary::-webkit-details-marker { display: none; }
   .group-picker > summary svg:last-child { width: 0.8rem; height: 0.8rem; }
@@ -837,11 +862,28 @@
   .group-picker-new { display: flex; gap: 0.3rem; padding-top: 0.35rem; margin-top: 0.1rem; border-top: 1px solid var(--color-line); }
   .group-picker-new .input { flex: 1; min-width: 0; }
 
-  /* "Add group" disclosure in the list toolbar. */
+  /* "Add group" disclosure in the list toolbar: opens a small popup next to
+     the button (same technique as `.group-picker-panel`) instead of pushing
+     the rest of the toolbar down. */
   .add-group { position: relative; }
   .add-group > summary { list-style: none; }
   .add-group > summary::-webkit-details-marker { display: none; }
-  .add-group-form { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.5rem; }
+  .add-group-form {
+    position: absolute;
+    z-index: 30;
+    top: 100%;
+    left: 0;
+    margin-top: 0.35rem;
+    padding: 0.5rem;
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    box-shadow: var(--shadow-pop);
+  }
+  .add-group-form .input { width: 12rem; }
 
   /* Drag handle on each unit row. */
   .drag-handle { display: inline-flex; vertical-align: middle; margin-right: 0.3rem; color: var(--color-faint); cursor: grab; }
@@ -1053,6 +1095,25 @@
   }
   .card-title { margin: 0 0 0.6rem; font-size: 0.95rem; font-weight: 620; }
 
+  /* New/Edit Pod: one `.card` per resource kind (Containers/Networks/
+     Volumes) plus Configuration, stacked in the page's normal single
+     column -- no side-by-side aside/main split, since the only thing that
+     would live in a second column (the host-variable panel) is a single
+     collapsible disclosure most submissions never open, and reserving a
+     fixed-width column for that wastes real width on every load. */
+  .pod-sections { display: flex; flex-direction: column; gap: 1.25rem; margin-top: 1.25rem; }
+  /* New/Edit Pod: the submit sits as its own row after the last resource
+     card, not inside one -- it gets the same `1.25rem` gap every other
+     section gets (from `.pod-sections`, being its last child) instead of
+     blending straight into the Configuration card above it, without a
+     card's own border/background making a single button look like an empty
+     section. Sized up a step from the default `.btn`, since it's the one
+     action that actually commits everything on the page. Left-aligned like
+     every other "New"/"Edit" page's submit button (`generic.rs`) rather
+     than pushed to the right -- flush right would land it right on top of
+     the fixed `.host-vars-flyout` pinned to that same corner. */
+  .pod-form-actions .btn-primary { padding: 0.6rem 1.5rem; font-size: 0.92rem; }
+
   .config-block {
     background: var(--color-surface);
     border: 1px solid var(--color-line);
@@ -1127,8 +1188,38 @@
     border: 1px solid var(--color-line);
     border-radius: 0.5rem;
     max-width: 72rem;
+    background: var(--color-surface);
   }
+  /* Every "New"/"Edit" page (generic.rs's shared form, plus Pod's own):
+     the panel can insert into *any* editor on the page (main Contents, an
+     env-var row, or -- on the Pod pages -- any "New container"/"New
+     network"/"New volume" row further down), so it needs to stay reachable
+     no matter how far the page has scrolled -- a fixed-position flyout
+     instead of sitting in the form's own flow, so it costs no layout space
+     when collapsed (just the small pill) and, open, floats above the page
+     rather than blending into whatever's scrolled underneath it.
+     `box-shadow: var(--shadow-pop)` is the same elevation token every other
+     floating surface here (dialogs, the mobile nav drawer) already uses, so
+     it reads as "above the page" the same way those do. One consistent
+     interaction for this tool everywhere it appears, rather than a plain
+     inline disclosure on some pages and a flyout on others. */
+  .host-vars-flyout {
+    position: fixed;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    z-index: 30;
+  }
+  .host-vars-flyout .host-vars {
+    margin: 0;
+    max-width: min(22rem, calc(100vw - 3rem));
+    box-shadow: var(--shadow-pop);
+  }
+  .host-vars-flyout .host-vars-body { max-height: min(60vh, 24rem); overflow-y: auto; }
   .host-vars > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
     cursor: pointer;
     list-style: none;
     padding: 0.45rem 0.7rem;
@@ -1139,6 +1230,12 @@
   .host-vars > summary::-webkit-details-marker { display: none; }
   .host-vars > summary::marker { content: ""; }
   .host-vars[open] > summary { border-bottom: 1px solid var(--color-line); }
+  /* Only a visual cue while open -- see the doc comment on this element in
+     `host_vars_panel` for why it isn't a real nested button. */
+  .host-vars-close { display: none; flex: none; }
+  .host-vars-close svg { width: 0.85rem; height: 0.85rem; }
+  .host-vars[open] > summary .host-vars-close { display: inline-flex; }
+  .host-vars > summary:hover .host-vars-close { color: var(--color-ink); }
   .host-vars-body { padding: 0.6rem 0.7rem; }
   .host-vars-body > .field-hint { margin: 0 0 0.5rem; }
   .host-vars-grid {
@@ -1175,6 +1272,181 @@
   .envvar-row .input { flex: 1; min-width: 0; }
   .envvar-row .input[data-k] { flex: 0 1 12rem; }
   .envvar-row [data-remove] { flex: none; }
+
+  /* New Pod: staged container chips -------------------------------- */
+  .staged-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
+  .staged-chips:empty { display: none; }
+  .staged-chip { gap: 0.35rem; padding-right: 0.35rem; }
+  .staged-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    border: none;
+    background: none;
+    color: inherit;
+    font-size: 0.85rem;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 999px;
+  }
+  .staged-chip-remove:hover { background: var(--color-accent); color: var(--color-surface); }
+
+  /* New Pod: existing-container picker -- an inline disclosure, not a
+     popup, so it lays out like `.host-vars` rather than floating. */
+  .pod-picker-panel {
+    margin: 0.4rem 0 0.9rem;
+    max-width: 72rem;
+  }
+  .pod-picker-panel > summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  .pod-picker-panel > summary::-webkit-details-marker { display: none; }
+  .pod-picker-panel > summary::marker { content: ""; }
+  .pod-picker-body {
+    margin-top: 0.5rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    background: var(--color-surface);
+  }
+  .pod-picker-body > .field-hint { padding: 0.7rem; margin: 0; }
+  .pod-picker-body > .input {
+    display: block;
+    width: 100%;
+    max-width: none;
+    border: none;
+    border-bottom: 1px solid var(--color-line);
+    border-radius: 0.5rem 0.5rem 0 0;
+  }
+  .pod-picker-list {
+    overflow-y: auto;
+    max-height: 18rem;
+    padding: 0.4rem;
+  }
+  .pod-picker-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    padding: 0.5rem 0.6rem;
+    border-radius: 0.4rem;
+    cursor: pointer;
+  }
+  .pod-picker-row:hover { background: var(--color-raised); }
+  .pod-picker-row input[type="checkbox"] { flex: none; margin: 0.15rem 0 0; }
+  .pod-picker-name { font-family: var(--font-mono); font-size: 0.85rem; }
+  .pod-picker-group,
+  .pod-picker-image,
+  .pod-picker-note { font-size: 0.78rem; color: var(--color-muted); }
+  .pod-picker-note { color: var(--color-warn); }
+
+  /* New Pod / Edit Pod: inline "new container"/"new network"/"new volume"
+     rows -- each embeds its own raw INI editor (plus env vars, for
+     containers), so it gets its own card rather than living inline in the
+     picker-row list above. Shared by all three kinds' fields
+     (`new_containers_field`/`new_networks_field`/`new_volumes_field`), driven
+     generically by `frontend/podresourcerows.js`. */
+  .newres-row {
+    margin: 0.6rem 0;
+    padding: 0.8rem;
+    border: 1px solid var(--color-line);
+    border-radius: 0.6rem;
+    background: var(--color-surface);
+  }
+  .newres-row-header {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.6rem;
+  }
+  .newres-row-header > .field { flex: 1; margin-bottom: 0; }
+  .newres-row-header > button { flex: none; }
+  .newres-row .editor-row { margin-top: 0.6rem; }
+  [data-newres-template] { display: none; }
+
+  /* Edit Pod: a member container's row is a plain `<details>` (see
+     `member_container_row`) instead of a Name field + editors -- collapsed
+     by default (a pod's member list can get long), its summary reading as a
+     header rather than a button, same marker-hiding technique as
+     `.gitsync-disclosure`. The chevron rotates purely off the `[open]`
+     attribute, no JS. */
+  .newres-row > summary.newres-row-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    list-style: none;
+    cursor: pointer;
+  }
+  .newres-row > summary.newres-row-summary::-webkit-details-marker { display: none; }
+  .newres-row-summary svg { flex: none; width: 0.85rem; height: 0.85rem; color: var(--color-muted); transition: transform 0.12s ease; }
+  .newres-row:not([open]) > summary.newres-row-summary svg { transform: rotate(-90deg); }
+  .newres-row-summary .newres-row-title {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  /* A "New X" field is a deliberately separate action from the "X" field's
+     existing-attach picker just above it (own heading, own hint) -- this
+     rule keeps that break visible even when the picker above is collapsed,
+     so the two never read as one continuous control. */
+  .newres-field {
+    margin-top: 1.4rem;
+    padding-top: 1.1rem;
+    border-top: 1px solid var(--color-line);
+  }
+
+  /* Pod detail: "N containers" modal -----------------------------
+     A real <dialog>, unlike the New Pod picker above. Its native centering
+     relies on the UA default `margin: auto`, which Tailwind's preflight
+     (`margin: 0` on every element, universal selector) quietly cancels --
+     that's what actually put an earlier attempt at this in the corner, not
+     `<dialog>` itself. Setting `margin` again here, at class-selector
+     specificity, wins over that reset regardless of source order. */
+  .pod-members-dialog {
+    margin: auto;
+    width: min(24rem, calc(100vw - 2.5rem));
+    max-height: min(28rem, calc(100vh - 4rem));
+    padding: 0;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.75rem;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    box-shadow: var(--shadow-pop);
+  }
+  .pod-members-dialog::backdrop { background: rgb(15 18 23 / 0.4); }
+  .pod-members-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.7rem 0.5rem 0.7rem 1rem;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .pod-members-header h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pod-members-list {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    max-height: 22rem;
+    padding: 0.4rem;
+  }
+  .pod-members-list a,
+  .pod-members-list span {
+    padding: 0.45rem 0.6rem;
+    border-radius: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+  }
+  .pod-members-list a:hover { background: var(--color-raised); }
+  .pod-members-list span { color: var(--color-muted); }
 
   /* Login --------------------------------------- */
   .login-body {

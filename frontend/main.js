@@ -14,6 +14,9 @@ import { initMenus } from "./menu.js";
 import { initLogs } from "./logs.js";
 import { initEditors } from "./editor.js";
 import { initEnvVars } from "./envvars.js";
+import { initPodGroupField, initPodResourcePickers } from "./podpicker.js";
+import { initPodMembersDialog } from "./podmembers.js";
+import { initNewResourceRows } from "./podresourcerows.js";
 import { initPortLinks } from "./ports.js";
 import { initSettingsForm } from "./settings.js";
 
@@ -33,6 +36,10 @@ function boot() {
   initLogs();
   initEditors();
   initEnvVars();
+  initPodGroupField();
+  initPodResourcePickers();
+  initNewResourceRows();
+  initPodMembersDialog();
   initPortLinks();
   initSettingsForm();
 }
@@ -49,6 +56,10 @@ document.addEventListener("htmx:afterSwap", () => {
   initLogs();
   initEditors();
   initEnvVars();
+  initPodGroupField();
+  initPodResourcePickers();
+  initNewResourceRows();
+  initPodMembersDialog();
   initPortLinks();
   initSettingsForm();
 });

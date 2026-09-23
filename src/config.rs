@@ -46,6 +46,15 @@ pub struct Config {
     /// `git_syncs` above.
     #[serde(default)]
     pub self_update: SelfUpdateConfig,
+    /// A GitHub personal access token, used to authenticate `git_syncs`
+    /// clones/fetches against `https://github.com/...` remotes that need it
+    /// (private repos). Empty means "no token configured" -- those remotes
+    /// then fall back to the host's own `git` credential setup (SSH agent,
+    /// credential helper, ...) exactly as before this field existed. Applied
+    /// at startup only (see `quadlet::gitsync::git::GitAuth`), not live like
+    /// `git_syncs`/`self_update` -- changing it needs a restart.
+    #[serde(default)]
+    pub github_token: String,
 }
 
 fn default_idle_timeout() -> u64 {
@@ -63,6 +72,7 @@ impl Default for Config {
             session_idle_timeout_secs: default_idle_timeout(),
             git_syncs: Vec::new(),
             self_update: SelfUpdateConfig::default(),
+            github_token: String::new(),
         }
     }
 }
