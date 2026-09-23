@@ -67,6 +67,18 @@ CSS/JS embedded, so it runs from any directory.
   rather than silently overwritten; a "Force resync" action is there to
   discard the divergence on purpose. Files inside a synced group are managed
   by the remote and get overwritten on the next sync, so don't hand-edit them.
+- **Secrets** — a page over this user's podman secret store
+  (`podman secret`): add, replace, and delete secrets, see which units use
+  each one, and set any that a quadlet references via `Secret=` but that
+  don't exist yet. Replacing a secret can restart the units using it in the
+  same step (running and failed ones; stopped units stay stopped), or later
+  with the row's restart icon. Values are piped to podman on stdin and never
+  logged; a value is only displayed when you click its eye icon (click again
+  to hide; a copy button shows while it's visible), and that response is
+  marked uncacheable. A container's detail page flags missing secrets, the
+  editor's insert panel can add a `Secret=` line, and deleting a secret is
+  refused while any quadlet still references it. See
+  [Secrets and Git Sync](#secrets-and-git-sync).
 - **Self-update** — checks GitHub Releases for a newer `sooth` binary on a
   schedule, from the Updates card on the Settings page: *Off* (the default),
   *Notify* (surface an "update available" banner, then let a human download
@@ -84,6 +96,35 @@ CSS/JS embedded, so it runs from any directory.
   Sessions are in-memory, so restarting the process signs everyone out.
 - Light / dark theme with no flash on reload; the sidebar collapses to a
   drawer on narrow viewports.
+
+## Secrets and Git Sync
+
+Keep secret *values* out of quadlet files — and out of any repo you
+git-sync — by putting only secret *names* there:
+
+```ini
+[Container]
+Image=docker.io/library/postgres:17
+Secret=db-password,type=env,target=POSTGRES_PASSWORD
+# or as a file at /run/secrets/tls-key:
+Secret=tls-key,type=mount
+```
+
+Then set `db-password` once on the host from the Secrets page. A synced
+group whose units reference secrets that aren't set yet shows a
+"N missing" badge on its Git Sync card linking straight to them; the sync
+itself still runs, and the affected units just fail to start until the
+secret exists. Avoid `Environment=`, the per-container env editor, and
+host `${NAME}` variables for sensitive values — all three are plain text on
+disk (and host variables are visible to every user service).
+
+A container reads its secrets at start, so a replaced value only takes
+effect once the units using it restart — leave "Restart … using it" ticked
+when replacing, or use the row's restart icon. Podman's default `file`
+driver stores values unencrypted, readable only by this user, under
+`~/.local/share/containers/storage/secrets`; for encryption at rest,
+configure podman's `pass` or `shell` driver in `containers.conf` — sooth
+works the same with any driver.
 
 ## Install
 

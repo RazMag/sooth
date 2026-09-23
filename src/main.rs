@@ -13,6 +13,7 @@ mod hostenv;
 mod journal;
 mod logging;
 mod quadlet;
+mod secrets;
 mod selfupdate;
 mod systemd;
 mod web;

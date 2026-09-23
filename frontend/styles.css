@@ -746,6 +746,34 @@
   .gitsync-disclosure-body { margin-top: 0.6rem; max-width: 26rem; }
   .gitsync-disclosure-body > .field:last-of-type { margin-bottom: 0.6rem; }
 
+  /* Secrets page (templates/secrets.rs + frontend/secrets.js): every row stays
+     one line -- the Value column holds a mask or the revealed value (first
+     line only, ellipsized; the full value is its tooltip and what Copy
+     copies), the eye toggle, copy, and Replace; row actions are icons. */
+  .secrets-table td { white-space: nowrap; vertical-align: middle; }
+  .secret-value-line { display: flex; align-items: center; gap: 0.25rem; }
+  /* Mask and revealed value share one fixed-width slot, and the copy button
+     only toggles `visibility` (see `.secret-copy-off`), so showing a value
+     never changes the column's width. */
+  .secret-mask,
+  .secret-plain { display: inline-block; width: 14rem; height: 1.5rem; line-height: 1.5rem; flex: none; }
+  .secret-mask { letter-spacing: 0.1em; color: var(--color-muted); }
+  .secret-plain {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: pre;
+    vertical-align: middle;
+  }
+  .secret-value-line > .btn:last-child { margin-left: 0.35rem; }
+  .secret-copy-off { visibility: hidden; }
+  .secret-row-actions { text-align: right; }
+  .secret-row-actions .inline-form { display: inline-flex; }
+  .btn-icon-sm { padding: 0.3rem; }
+  .btn-icon-sm svg { width: 0.95rem; height: 0.95rem; }
+  .btn-icon-danger:hover { color: var(--color-danger); }
+  .btn-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-icon:disabled:hover { background: transparent; color: var(--color-muted); }
+
   /* The one destructive disclosure, set apart from the routine actions above
      it with a rule so a checkbox/confirm-input/button trio never reads as
      just another button next to "Sync now". */
@@ -1403,7 +1431,8 @@
      that's what actually put an earlier attempt at this in the corner, not
      `<dialog>` itself. Setting `margin` again here, at class-selector
      specificity, wins over that reset regardless of source order. */
-  .pod-members-dialog {
+  .pod-members-dialog,
+  .modal-dialog {
     margin: auto;
     width: min(24rem, calc(100vw - 2.5rem));
     max-height: min(28rem, calc(100vh - 4rem));
@@ -1414,8 +1443,10 @@
     color: var(--color-ink);
     box-shadow: var(--shadow-pop);
   }
-  .pod-members-dialog::backdrop { background: rgb(15 18 23 / 0.4); }
-  .pod-members-header {
+  .pod-members-dialog::backdrop,
+  .modal-dialog::backdrop { background: rgb(15 18 23 / 0.4); }
+  .pod-members-header,
+  .modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1423,7 +1454,8 @@
     padding: 0.7rem 0.5rem 0.7rem 1rem;
     border-bottom: 1px solid var(--color-line);
   }
-  .pod-members-header h2 {
+  .pod-members-header h2,
+  .modal-header h2 {
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
@@ -1447,6 +1479,12 @@
   }
   .pod-members-list a:hover { background: var(--color-raised); }
   .pod-members-list span { color: var(--color-muted); }
+
+  /* Generic modal (Secrets' Set/Replace) -- shares the pod-members
+     dialog's frame above; wider for a textarea. */
+  .modal-dialog { width: min(30rem, calc(100vw - 2.5rem)); max-height: none; }
+  .modal-body { padding: 1rem; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 
   /* Login --------------------------------------- */
   .login-body {
