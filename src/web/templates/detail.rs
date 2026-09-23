@@ -99,13 +99,16 @@ pub fn detail_page(
 /// the unit won't interpolate it -- with a link to set it.
 fn host_vars_cell(vars: &[(String, Option<bool>)]) -> Markup {
     html! {
-        @for (i, (name, present)) in vars.iter().enumerate() {
-            @if i > 0 { ", " }
-            @if *present == Some(false) {
-                a href={"/environment?name=" (name)} { code { "${" (name) "}" } }
-                " " span.badge.badge-warn title="Not in the systemd user manager's environment — set it on the Environment page" { "missing" }
-            } @else {
-                a href="/environment" { code { "${" (name) "}" } }
+        div.ref-list {
+            @for (name, present) in vars {
+                span.ref-item {
+                    @if *present == Some(false) {
+                        a href={"/environment?name=" (name)} { code { "${" (name) "}" } }
+                        span.badge.badge-warn title="Not in the systemd user manager's environment — set it on the Environment page" { "missing" }
+                    } @else {
+                        a href="/environment" { code { "${" (name) "}" } }
+                    }
+                }
             }
         }
     }

@@ -38,11 +38,14 @@ fn secrets_cell(secrets: &[(String, Option<bool>)]) -> Markup {
         @if secrets.is_empty() {
             span.muted { "—" }
         } @else {
-            @for (i, (name, present)) in secrets.iter().enumerate() {
-                @if i > 0 { ", " }
-                a href={"/secrets#secret-" (name)} { (name) }
-                @if *present == Some(false) {
-                    " " span.badge.badge-warn title="Not in podman's secret store — set it on the Secrets page" { "missing" }
+            div.ref-list {
+                @for (name, present) in secrets {
+                    span.ref-item {
+                        a href={"/secrets#secret-" (name)} { (name) }
+                        @if *present == Some(false) {
+                            span.badge.badge-warn title="Not in podman's secret store — set it on the Secrets page" { "missing" }
+                        }
+                    }
                 }
             }
         }
