@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use maud::{Markup, html};
@@ -5,6 +6,11 @@ use maud::{Markup, html};
 use super::{BannerKind, NavItem, banner, csrf_input, group_field, page_header, shell};
 use crate::health::Health;
 use crate::quadlet::gitsync::{GitSyncConfig, SyncState, SyncStatus};
+
+/// One sync card's data: its config, live status, and the `Secret=` names
+/// its units reference that podman doesn't have yet (secret name -> file
+/// names), from `refs::missing_secrets`.
+pub type SyncEntry = (GitSyncConfig, SyncStatus, BTreeMap<String, Vec<String>>);
 
 /// The add-sync form's values, round-tripped as plain strings so a rejected
 /// submission redisplays exactly as typed -- same pattern as
@@ -27,12 +33,7 @@ impl Default for AddFormValues {
     }
 }
 
-pub fn page(
-    entries: &[(GitSyncConfig, SyncStatus)],
-    csrf: &str,
-    known_groups: &[String],
-    health: Health,
-) -> Markup {
+pub fn page(entries: &[SyncEntry], csrf: &str, known_groups: &[String], health: Health) -> Markup {
     render(
         entries,
         csrf,
@@ -44,7 +45,7 @@ pub fn page(
 }
 
 pub fn page_with_add_error(
-    entries: &[(GitSyncConfig, SyncStatus)],
+    entries: &[SyncEntry],
     csrf: &str,
     values: &AddFormValues,
     known_groups: &[String],
@@ -55,7 +56,7 @@ pub fn page_with_add_error(
 }
 
 fn render(
-    entries: &[(GitSyncConfig, SyncStatus)],
+    entries: &[SyncEntry],
     csrf: &str,
     values: &AddFormValues,
     known_groups: &[String],
@@ -137,19 +138,24 @@ fn render(
 
 /// The status cards only -- the payload of `GET /git-sync/rows`, re-fetched
 /// by the page on `sse:git-sync-changed` (see `crate::events::DashboardEvent`).
-pub fn rows(entries: &[(GitSyncConfig, SyncStatus)], csrf: &str) -> Markup {
+pub fn rows(entries: &[SyncEntry], csrf: &str) -> Markup {
     html! {
         @if entries.is_empty() {
             p.empty { "No git-synced groups configured yet." }
         } @else {
-            @for (config, status) in entries {
-                (sync_card(config, status, csrf))
+            @for (config, status, missing) in entries {
+                (sync_card(config, status, missing, csrf))
             }
         }
     }
 }
 
-fn sync_card(config: &GitSyncConfig, status: &SyncStatus, csrf: &str) -> Markup {
+fn sync_card(
+    config: &GitSyncConfig,
+    status: &SyncStatus,
+    missing: &BTreeMap<String, Vec<String>>,
+    csrf: &str,
+) -> Markup {
     // A single-quoted JS string embedded straight into an `onsubmit`
     // attribute -- safe because `naming::valid_group` (checked server-side
     // on every write) restricts a group to `[A-Za-z0-9_.-]` and `/`, so it
@@ -174,6 +180,7 @@ fn sync_card(config: &GitSyncConfig, status: &SyncStatus, csrf: &str) -> Markup 
                 @if let SyncState::Error(msg) = &status.state {
                     tr { td { "Error" } td { (msg) } }
                 }
+                (super::secrets::missing_row(missing))
             }
             div.gitsync-actions {
                 form.inline-form method="post" action="/git-sync/sync" {

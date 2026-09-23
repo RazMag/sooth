@@ -29,13 +29,29 @@ pub async fn show(
     let known_groups = discovery::list_groups(&state.quadlet_dir);
 
     Ok(match unit.kind {
-        UnitKind::Container => templates::containers::detail_page(
-            &unit,
-            &status,
-            &csrf,
-            &known_groups,
-            state.health.get(),
-        ),
+        UnitKind::Container => {
+            let names = refs::secret_refs(&unit);
+            let existing = if names.is_empty() {
+                None
+            } else {
+                crate::secrets::names().await.ok()
+            };
+            let secrets: Vec<(String, Option<bool>)> = names
+                .into_iter()
+                .map(|n| {
+                    let present = existing.as_ref().map(|e| e.contains(&n));
+                    (n, present)
+                })
+                .collect();
+            templates::containers::detail_page(
+                &unit,
+                &status,
+                &csrf,
+                &secrets,
+                &known_groups,
+                state.health.get(),
+            )
+        }
         UnitKind::Pod => {
             let members = refs::pod_members(&unit, &all);
             let (networks, volumes) = refs::pod_own_refs(&unit, &all);

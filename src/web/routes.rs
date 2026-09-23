@@ -10,7 +10,7 @@ use crate::config::AppState;
 
 use super::handlers::{
     detail, edit_delete, environment, gitsync, groups, list, logs, pods, ports, raw_create,
-    selfupdate, services, settings, unit_ops, validate,
+    secrets, selfupdate, services, settings, unit_ops, validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
@@ -134,6 +134,11 @@ pub fn build_router(state: AppState) -> Router {
             get(environment::index).post(environment::add),
         )
         .route("/environment/delete", post(environment::remove))
+        .route("/secrets", get(secrets::index).post(secrets::set))
+        .route("/secrets/delete", post(secrets::remove))
+        .route("/secrets/chips", get(secrets::chips))
+        .route("/secrets/restart", post(secrets::restart))
+        .route("/secrets/reveal", post(secrets::reveal))
         .route("/git-sync", get(gitsync::page).post(gitsync::add))
         .route("/git-sync/rows", get(gitsync::rows))
         .route("/git-sync/edit", post(gitsync::edit))

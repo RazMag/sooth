@@ -14,6 +14,7 @@ pub mod logs;
 pub mod networks;
 pub mod pods;
 pub mod ports;
+pub mod secrets;
 pub mod selfupdate;
 pub mod services;
 pub mod settings;
@@ -43,6 +44,7 @@ pub enum NavItem {
     Images,
     Ports,
     Environment,
+    Secrets,
     GitSync,
     /// Not part of `all()` -- rendered as its own control in the sidebar
     /// footer, not the main nav list.
@@ -58,6 +60,7 @@ impl NavItem {
             NavItem::Images => "/images",
             NavItem::Ports => "/ports",
             NavItem::Environment => "/environment",
+            NavItem::Secrets => "/secrets",
             NavItem::GitSync => "/git-sync",
             NavItem::Settings => "/settings",
         }
@@ -71,6 +74,7 @@ impl NavItem {
             NavItem::Images => "Images",
             NavItem::Ports => "Ports",
             NavItem::Environment => "Environment",
+            NavItem::Secrets => "Secrets",
             NavItem::GitSync => "Git Sync",
             NavItem::Settings => "Settings",
         }
@@ -84,12 +88,13 @@ impl NavItem {
             NavItem::Images => Icon::Images,
             NavItem::Ports => Icon::Ports,
             NavItem::Environment => Icon::Environment,
+            NavItem::Secrets => Icon::Secrets,
             NavItem::GitSync => Icon::GitSync,
             NavItem::Settings => Icon::Settings,
         }
     }
 
-    fn all() -> [NavItem; 7] {
+    fn all() -> [NavItem; 8] {
         [
             NavItem::Services,
             NavItem::Volumes,
@@ -97,6 +102,7 @@ impl NavItem {
             NavItem::Images,
             NavItem::Ports,
             NavItem::Environment,
+            NavItem::Secrets,
             NavItem::GitSync,
         ]
     }
@@ -985,6 +991,14 @@ pub fn host_vars_panel(vars: &[EnvVar]) -> Markup {
                             }
                         }
                     }
+                }
+                // Podman secrets (`Secret=` lines, container units only),
+                // fetched on load so none of this panel's callers has to
+                // thread a podman round trip through -- see
+                // `handlers::secrets::chips`.
+                p.field-hint { strong { "Secrets" } }
+                div hx-get="/secrets/chips" hx-trigger="load" hx-swap="innerHTML" {
+                    p.field-hint.muted { "Loading…" }
                 }
             }
         }
