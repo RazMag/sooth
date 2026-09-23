@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use maud::{DOCTYPE, Markup, html};
 
 use super::{BannerKind, Icon, NavItem, banner, csrf_input, icon, page_header, selfupdate, shell};
@@ -18,15 +20,10 @@ pub struct FormValues {
     pub self_update_mode: String,
     pub self_update_poll_interval_secs: String,
     pub self_update_repo: String,
-    /// Whether a GitHub access token is currently saved -- never the token
-    /// itself, which (unlike every other field here) is never round-tripped
-    /// into the rendered page. See `github_token_last4`.
-    pub github_token_set: bool,
-    /// The saved token's last 4 characters, for on-screen identification
-    /// only (e.g. "confirm this is the token I meant to save") -- the same
-    /// tradeoff most services make showing a card's last 4 digits. Empty
-    /// when no token is saved.
-    pub github_token_last4: String,
+    /// Active vs. saved GitHub token -- never the token itself, which
+    /// (unlike every other field here) is never round-tripped into the
+    /// rendered page.
+    pub github_token: GithubTokenStatus,
 }
 
 impl FormValues {
@@ -35,7 +32,11 @@ impl FormValues {
     /// settings apply immediately rather than only on the next load, so
     /// `state.config` (frozen at startup) would show a saved change as
     /// reverted until a restart.
-    pub fn from_config(config: &Config, self_update: &SelfUpdateConfig) -> Self {
+    pub fn from_config(
+        config: &Config,
+        config_path: &Path,
+        self_update: &SelfUpdateConfig,
+    ) -> Self {
         let quadlet_dir = config
             .quadlet_dir
             .clone()
@@ -51,8 +52,91 @@ impl FormValues {
             self_update_mode: self_update.mode.as_str().to_string(),
             self_update_poll_interval_secs: self_update.poll_interval_secs.to_string(),
             self_update_repo: self_update.repo.clone(),
-            github_token_set: !config.github_token.trim().is_empty(),
-            github_token_last4: last4(config.github_token.trim()),
+            github_token: GithubTokenStatus::detect(config, config_path),
+        }
+    }
+}
+
+/// Whether a GitHub access token is in use, and whether the config file
+/// holds a different one than the running process loaded. `Config` is
+/// frozen at startup, so a token saved from Settings only applies after a
+/// restart -- reading the file too is what lets the page say "saved,
+/// restart to apply" instead of still claiming no token is saved.
+///
+/// Only last-4 suffixes are kept, for on-screen identification (the same
+/// tradeoff most services make showing a card's last 4 digits).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GithubTokenStatus {
+    /// Suffix of the token the running process uses, if any.
+    pub active: Option<String>,
+    /// Suffix of the token in the config file, if any. Equal to `active`
+    /// unless a save is waiting for a restart.
+    pub saved: Option<String>,
+    /// The saved and active tokens differ (a restart would change which
+    /// one git-sync uses). Always `false` when the env var pins it.
+    pub pending_restart: bool,
+    /// Pinned by `SOOTH_GITHUB_TOKEN` -- the config file is then ignored.
+    pub env_locked: bool,
+}
+
+impl GithubTokenStatus {
+    pub fn detect(config: &Config, config_path: &Path) -> Self {
+        let env_locked = EnvLocks::detect().github_token;
+        let active = config.github_token.trim();
+        let saved = if env_locked {
+            active.to_string()
+        } else {
+            // An unreadable file can't have been saved to either -- fall
+            // back to "same as active" rather than inventing a pending change.
+            crate::config::read_config_toml(config_path)
+                .ok()
+                .map(|t| {
+                    t.get("github_token")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string()
+                })
+                .unwrap_or_else(|| active.to_string())
+        };
+        Self::from_tokens(active, &saved, env_locked)
+    }
+
+    fn from_tokens(active: &str, saved: &str, env_locked: bool) -> Self {
+        let suffix = |t: &str| (!t.is_empty()).then(|| last4(t));
+        Self {
+            active: suffix(active),
+            saved: suffix(saved),
+            pending_restart: !env_locked && active != saved,
+            env_locked,
+        }
+    }
+}
+
+/// One-line description of a [`GithubTokenStatus`], shared by the Settings
+/// page's "Security & sessions" GitHub token card and the Git Sync add form.
+pub fn github_token_summary(status: &GithubTokenStatus) -> Markup {
+    let ending = |s: &str| html! { " ending in " code { "…" (s) } };
+    html! {
+        @match (&status.active, status.pending_restart, &status.saved) {
+            (Some(a), false, _) => {
+                span.badge.badge-running { "Token active" }
+                " A GitHub token" (ending(a)) " is in use"
+                @if status.env_locked { " (from " code { "SOOTH_GITHUB_TOKEN" } ")" } "."
+            }
+            (None, false, _) => {
+                span.badge.badge-stopped { "No token" }
+                " No GitHub token is saved."
+            }
+            (_, true, Some(s)) => {
+                span.badge.badge-warn { "Restart needed" }
+                " A new GitHub token" (ending(s)) " is saved but not in use until sooth restarts"
+                @if let Some(a) = &status.active { " (still using the one" (ending(a)) ")" } "."
+            }
+            (_, true, None) => {
+                span.badge.badge-warn { "Restart needed" }
+                " The GitHub token was removed, but sooth keeps using it until it restarts."
+            }
         }
     }
 }
@@ -240,6 +324,37 @@ pub fn page(
                         locks.session_idle_timeout_secs, "SOOTH_SESSION_IDLE_TIMEOUT_SECS", None,
                     ))
                 }
+                // The GitHub token saves through its own route (like the
+                // password), not "Save changes" -- so its controls are
+                // associated via `form=` with `#github-token-form`, which
+                // lives outside `#settings-form` (forms can't nest). That
+                // also keeps them out of `settings.js`'s dirty check, which
+                // only looks at `#settings-form`'s own elements.
+                div.card #github-token-card {
+                    h3 { "GitHub access token" }
+                    p.field-hint {
+                        "Used to clone/fetch a " a href="/git-sync" { "git-synced" }
+                        " group's remote when it's a private " code { "https://github.com/..." }
+                        " repository. Public repos and non-GitHub remotes don't need this -- and "
+                        "this token is only ever sent to " code { "github.com" } ", never to some "
+                        "other host a sync happens to point at."
+                    }
+                    p.field-hint #github-token-status { (github_token_summary(&values.github_token)) }
+                    @if locks.github_token {
+                        (env_note("SOOTH_GITHUB_TOKEN"))
+                    } @else {
+                        div.field {
+                            label for="github_token" { "New token" }
+                            input.input type="password" id="github_token" name="github_token"
+                                form="github-token-form" autocomplete="off" placeholder="ghp_…";
+                            p.field-hint {
+                                "Leave blank and save to remove the saved token. Applied the "
+                                "next time sooth restarts."
+                            }
+                        }
+                        button.btn.btn-primary type="submit" form="github-token-form" { "Save token" }
+                    }
+                }
             }
 
             section.settings-section {
@@ -301,6 +416,12 @@ pub fn page(
             }
         }
 
+        @if !locks.github_token {
+            form #github-token-form autocomplete="off" method="post" action="/settings/github-token" {
+                (csrf_input(csrf))
+            }
+        }
+
         section.settings-section {
             h2 { "Restart" }
             div.card {
@@ -312,43 +433,6 @@ pub fn page(
                 form #restart-form method="post" action="/settings/restart" {
                     (csrf_input(csrf))
                     button.btn.btn-restart type="submit" { "Restart sooth now" }
-                }
-            }
-        }
-
-        section.settings-section {
-            h2 { "Git access" }
-            div.card {
-                p.field-hint {
-                    "A GitHub personal access token, used to clone/fetch a "
-                    a href="/git-sync" { "git-synced" } " group's remote when it's a private "
-                    code { "https://github.com/..." } " repository. Public repos and non-GitHub "
-                    "remotes don't need this -- and this token is only ever sent to "
-                    code { "github.com" } ", never to some other host a sync happens to point at."
-                }
-                @if locks.github_token {
-                    (env_note("SOOTH_GITHUB_TOKEN"))
-                } @else {
-                    @if values.github_token_set {
-                        p.field-hint {
-                            "Currently saved, ending in " code { "…" (values.github_token_last4) } "."
-                        }
-                    } @else {
-                        p.field-hint { "No token currently saved." }
-                    }
-                    form autocomplete="off" method="post" action="/settings/github-token" {
-                        (csrf_input(csrf))
-                        div.field {
-                            label for="github_token" { "GitHub access token" }
-                            input.input type="password" id="github_token" name="github_token"
-                                autocomplete="off" placeholder="ghp_…";
-                            p.field-hint {
-                                "Leave blank and save to remove the saved token. Applied the "
-                                "next time sooth restarts."
-                            }
-                        }
-                        button.btn.btn-primary type="submit" { "Save token" }
-                    }
                 }
             }
         }
@@ -475,5 +559,35 @@ pub fn restarting_page() -> Markup {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GithubTokenStatus;
+
+    #[test]
+    fn token_status_matches_when_saved_equals_active() {
+        let s = GithubTokenStatus::from_tokens("ghp_abcd1234", "ghp_abcd1234", false);
+        assert_eq!(s.active.as_deref(), Some("1234"));
+        assert!(!s.pending_restart);
+    }
+
+    #[test]
+    fn token_status_flags_a_save_awaiting_restart() {
+        let s = GithubTokenStatus::from_tokens("", "ghp_abcd1234", false);
+        assert_eq!(s.active, None);
+        assert_eq!(s.saved.as_deref(), Some("1234"));
+        assert!(s.pending_restart);
+
+        let removed = GithubTokenStatus::from_tokens("ghp_abcd1234", "", false);
+        assert!(removed.pending_restart);
+        assert_eq!(removed.saved, None);
+    }
+
+    #[test]
+    fn token_status_never_pending_when_env_locked() {
+        let s = GithubTokenStatus::from_tokens("ghp_abcd1234", "", true);
+        assert!(!s.pending_restart);
     }
 }

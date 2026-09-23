@@ -467,6 +467,13 @@ pub fn group_field(prefill: &str, known: &[String], required: bool) -> Markup {
     } else {
         "(optional subdirectory)"
     };
+    // A required field has no "root" choice, so an empty one reads as
+    // "nothing picked yet" rather than looking like root was selected.
+    let empty_label = if required {
+        "choose a group…"
+    } else {
+        "root"
+    };
     html! {
         div.field data-group-field {
             label for="group" { "Group " span.field-hint { (hint) } }
@@ -478,8 +485,8 @@ pub fn group_field(prefill: &str, known: &[String], required: bool) -> Markup {
             details.group-picker hidden data-group-picker {
                 summary.btn.btn-ghost.btn-sm {
                     (icon(Icon::Folder))
-                    span data-group-picker-label {
-                        @if prefill.is_empty() { "root" } @else { (prefill) }
+                    span data-group-picker-label data-empty-label=(empty_label) {
+                        @if prefill.is_empty() { (empty_label) } @else { (prefill) }
                     }
                     (icon(Icon::ChevronDown))
                 }

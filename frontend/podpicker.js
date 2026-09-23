@@ -30,11 +30,14 @@ export function initPodGroupField() {
     picker.hidden = false;
 
     const labelEl = picker.querySelector("[data-group-picker-label]");
+    const emptyLabel = labelEl.dataset.emptyLabel || "root";
+    const summary = picker.querySelector("summary");
 
     const setGroup = (value) => {
       input.value = value;
-      labelEl.textContent = value === "" ? "root" : value;
+      labelEl.textContent = value === "" ? emptyLabel : value;
       picker.open = false;
+      input.setCustomValidity("");
       input.dispatchEvent(new Event("input", { bubbles: true }));
     };
 
@@ -43,6 +46,26 @@ export function initPodGroupField() {
     });
 
     const newInput = picker.querySelector("[data-group-new-input]");
+
+    // The source input is hidden, so a `required` one left empty can't be
+    // focused for the browser's own validation bubble (Firefox logs "The
+    // invalid form control ... is not focusable" and the submit just does
+    // nothing). Take over: cancel the native report and open the picker
+    // with its new-group field focused instead.
+    input.addEventListener("invalid", (e) => {
+      e.preventDefault();
+      picker.open = true;
+      if (summary) summary.classList.add("group-picker-invalid");
+      if (newInput) {
+        newInput.focus();
+      } else if (summary) {
+        summary.focus();
+      }
+    });
+    input.addEventListener("input", () => {
+      if (summary) summary.classList.remove("group-picker-invalid");
+    });
+
     const addBtn = picker.querySelector("[data-group-new-add]");
     const addNew = () => {
       const v = newInput.value.trim();
