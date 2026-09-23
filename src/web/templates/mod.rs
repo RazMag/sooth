@@ -439,6 +439,64 @@ pub fn known_groups_datalist(groups: &[String]) -> Markup {
     }
 }
 
+/// A group-picking field for a create/add form that has no existing unit to
+/// move yet, just a local field value to set: a plain text input with a
+/// `<datalist>` (the no-JS fallback -- pick a suggestion or type any new
+/// path) progressively enhanced into the same picker-with-an-add-field
+/// control [`group_picker`] uses, so choosing an existing group or filing
+/// under a brand-new one both stay one click away. Not `group_move_menu`
+/// reused directly (there's no unit/group to POST a move for here, just a
+/// field), but it shares its CSS classes (`.group-picker`, `.group-opt`, …)
+/// for an identical look, and its open disclosure gets the same
+/// outside-click-to-close handling from `frontend/groups.js` for free.
+/// Shared by the New/Edit Pod pages (`required: false` -- a pod can live at
+/// the quadlet-dir root) and the Git Sync "Add" form (`required: true` --
+/// syncing into the root isn't offered) -- `frontend/podpicker.js`'s
+/// `initPodGroupField` scans for any `[data-group-field]` on the page, not
+/// just pods', so it activates wherever this markup shows up with no extra
+/// wiring.
+pub fn group_field(prefill: &str, known: &[String], required: bool) -> Markup {
+    let hint = if required {
+        "(subdirectory to use)"
+    } else {
+        "(optional subdirectory)"
+    };
+    html! {
+        div.field data-group-field {
+            label for="group" { "Group " span.field-hint { (hint) } }
+            input.input type="text" id="group" name="group" list="known-groups"
+                value=(prefill) placeholder="e.g. media/arr" required[required]
+                autocomplete="off" autocapitalize="off" spellcheck="false"
+                data-group-source;
+            (known_groups_datalist(known))
+            details.group-picker hidden data-group-picker {
+                summary.btn.btn-ghost.btn-sm {
+                    (icon(Icon::Folder))
+                    span data-group-picker-label {
+                        @if prefill.is_empty() { "root" } @else { (prefill) }
+                    }
+                    (icon(Icon::ChevronDown))
+                }
+                div.group-picker-panel {
+                    div.group-picker-list {
+                        @if !required {
+                            button.group-opt type="button" data-group-choice="" { "root" }
+                        }
+                        @for g in known {
+                            button.group-opt type="button" data-group-choice=(g) { (g) }
+                        }
+                    }
+                    div.group-picker-new {
+                        input.input.input-sm type="text" placeholder="new group…" data-group-new-input
+                            autocomplete="off" autocapitalize="off" spellcheck="false";
+                        button.btn.btn-sm type="button" data-group-new-add { "Add" }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The group-move control: a disclosure whose summary shows the unit's
 /// current group, opening a panel that lists every other group (one click
 /// moves) plus a field to file it under a brand-new one. Shared by the

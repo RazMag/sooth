@@ -1,11 +1,14 @@
-// Progressively enhances two things on the "New Pod"/"Edit Pod" pages:
+// Progressively enhances two things -- named for where the group picker
+// first showed up (the "New Pod"/"Edit Pod" pages), but `initPodGroupField`
+// itself scans for any `[data-group-field]` on the page, so it applies
+// equally to the Git Sync "Add" form's group field:
 //
 // - Group: a plain text input + <datalist> (the no-JS fallback) becomes the
 //   same click-a-group-or-type-a-new-one disclosure the detail page's group
 //   control uses.
-// - Containers/Networks/Volumes: each is an inline picker (a native
-//   <details> disclosure, part of the page's own flow -- no popup) for
-//   attaching already-defined quadlets, one `[data-resource-field]` per
+// - Containers/Networks/Volumes (pods only): each is an inline picker (a
+//   native <details> disclosure, part of the page's own flow -- no popup)
+//   for attaching already-defined quadlets, one `[data-resource-field]` per
 //   kind. All three share the same generic logic here; a volume's row
 //   additionally carries a destination-path input (`[data-resource-dest]`),
 //   which is the only thing that changes how a selection serializes.
