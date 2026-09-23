@@ -202,16 +202,25 @@ struct NewContainerDraft {
 /// usage limit.
 const MAX_NEW_CONTAINERS: usize = 20;
 
-/// Groups the submitted form's `newc_{id}_*` keys into drafts, one per
-/// distinct numeric `id`, sorted for a deterministic, stable order.
-fn parse_new_containers(fields: &HashMap<String, String>) -> Vec<NewContainerDraft> {
+/// Collects the distinct numeric `id`s out of the submitted form's
+/// `<prefix>{id}_name` keys, sorted for a deterministic, stable draft order
+/// and capped at `max`. Shared by `parse_new_containers`/`_networks`/
+/// `_volumes`, whose draft shapes otherwise differ (env vars, `dest`, ...).
+fn collect_draft_ids(fields: &HashMap<String, String>, prefix: &str, max: usize) -> Vec<u32> {
     let mut ids: Vec<u32> = fields
         .keys()
-        .filter_map(|k| k.strip_prefix("newc_")?.strip_suffix("_name")?.parse().ok())
+        .filter_map(|k| k.strip_prefix(prefix)?.strip_suffix("_name")?.parse().ok())
         .collect();
     ids.sort_unstable();
     ids.dedup();
-    ids.truncate(MAX_NEW_CONTAINERS);
+    ids.truncate(max);
+    ids
+}
+
+/// Groups the submitted form's `newc_{id}_*` keys into drafts, one per
+/// distinct numeric `id`, sorted for a deterministic, stable order.
+fn parse_new_containers(fields: &HashMap<String, String>) -> Vec<NewContainerDraft> {
+    let ids = collect_draft_ids(fields, "newc_", MAX_NEW_CONTAINERS);
 
     ids.into_iter()
         .map(|id| NewContainerDraft {
@@ -463,18 +472,7 @@ struct NewNetworkDraft {
 const MAX_NEW_NETWORKS: usize = 20;
 
 fn parse_new_networks(fields: &HashMap<String, String>) -> Vec<NewNetworkDraft> {
-    let mut ids: Vec<u32> = fields
-        .keys()
-        .filter_map(|k| {
-            k.strip_prefix("newnet_")?
-                .strip_suffix("_name")?
-                .parse()
-                .ok()
-        })
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids.truncate(MAX_NEW_NETWORKS);
+    let ids = collect_draft_ids(fields, "newnet_", MAX_NEW_NETWORKS);
 
     ids.into_iter()
         .map(|id| NewNetworkDraft {
@@ -571,18 +569,7 @@ struct NewVolumeDraft {
 const MAX_NEW_VOLUMES: usize = 20;
 
 fn parse_new_volumes(fields: &HashMap<String, String>) -> Vec<NewVolumeDraft> {
-    let mut ids: Vec<u32> = fields
-        .keys()
-        .filter_map(|k| {
-            k.strip_prefix("newvol_")?
-                .strip_suffix("_name")?
-                .parse()
-                .ok()
-        })
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids.truncate(MAX_NEW_VOLUMES);
+    let ids = collect_draft_ids(fields, "newvol_", MAX_NEW_VOLUMES);
 
     ids.into_iter()
         .map(|id| NewVolumeDraft {
