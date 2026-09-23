@@ -3,6 +3,7 @@ use std::time::SystemTime;
 
 use maud::{Markup, html};
 
+use super::settings::{GithubTokenStatus, github_token_summary};
 use super::{BannerKind, NavItem, banner, csrf_input, group_field, page_header, shell};
 use crate::health::Health;
 use crate::quadlet::gitsync::{GitSyncConfig, SyncState, SyncStatus};
@@ -33,12 +34,19 @@ impl Default for AddFormValues {
     }
 }
 
-pub fn page(entries: &[SyncEntry], csrf: &str, known_groups: &[String], health: Health) -> Markup {
+pub fn page(
+    entries: &[SyncEntry],
+    csrf: &str,
+    known_groups: &[String],
+    token: &GithubTokenStatus,
+    health: Health,
+) -> Markup {
     render(
         entries,
         csrf,
         &AddFormValues::default(),
         known_groups,
+        token,
         None,
         health,
     )
@@ -49,10 +57,19 @@ pub fn page_with_add_error(
     csrf: &str,
     values: &AddFormValues,
     known_groups: &[String],
+    token: &GithubTokenStatus,
     error: &str,
     health: Health,
 ) -> Markup {
-    render(entries, csrf, values, known_groups, Some(error), health)
+    render(
+        entries,
+        csrf,
+        values,
+        known_groups,
+        token,
+        Some(error),
+        health,
+    )
 }
 
 fn render(
@@ -60,6 +77,7 @@ fn render(
     csrf: &str,
     values: &AddFormValues,
     known_groups: &[String],
+    token: &GithubTokenStatus,
     add_error: Option<&str>,
     health: Health,
 ) -> Markup {
@@ -90,11 +108,14 @@ fn render(
                 div.field {
                     label for="remote" { "Remote URL" }
                     p.field-hint {
-                        "Anything " code { "git clone" } " accepts. Private repos need this "
-                        "user's own git to already be able to reach it (SSH agent, "
-                        code { "~/.ssh/config" } ", or a credential helper) -- sooth has no "
-                        "credentials of its own."
+                        "Anything " code { "git clone" } " accepts. A private "
+                        code { "https://github.com/..." } " repo authenticates with the GitHub "
+                        "token from " a href="/settings#github-token-card" { "Settings" } "; "
+                        "any other private remote needs this user's own git to already be able "
+                        "to reach it (SSH agent, " code { "~/.ssh/config" } ", or a credential "
+                        "helper)."
                     }
+                    p.field-hint #git-sync-token-status { (github_token_summary(token)) }
                     input.input type="text" id="remote" name="remote" value=(values.remote)
                         placeholder="git@github.com:you/quadlets.git" required;
                 }

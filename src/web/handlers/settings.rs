@@ -33,7 +33,11 @@ pub async fn page(
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    let values = FormValues::from_config(&state.config, &state.self_update.config_snapshot());
+    let values = FormValues::from_config(
+        &state.config,
+        &state.config_path,
+        &state.self_update.config_snapshot(),
+    );
     let message = match query.saved.as_deref() {
         Some("password") => {
             Some("Password saved. Restart sooth for the new password to take effect.")
@@ -115,7 +119,11 @@ pub async fn save(
     // token isn't part of this form (it has its own, see
     // `save_github_token`), so its display fields come from the still-live
     // `state.config` rather than anything just submitted.
-    let unchanged = FormValues::from_config(&state.config, &state.self_update.config_snapshot());
+    let unchanged = FormValues::from_config(
+        &state.config,
+        &state.config_path,
+        &state.self_update.config_snapshot(),
+    );
     let entered = || FormValues {
         bind_addr: form.bind_addr.clone(),
         quadlet_dir: form.quadlet_dir.clone(),
@@ -125,8 +133,7 @@ pub async fn save(
         self_update_mode: form.mode.clone(),
         self_update_poll_interval_secs: form.poll_interval_secs.clone(),
         self_update_repo: form.repo.clone(),
-        github_token_set: unchanged.github_token_set,
-        github_token_last4: unchanged.github_token_last4.clone(),
+        github_token: unchanged.github_token.clone(),
     };
 
     let Ok(bind_addr) = form.bind_addr.trim().parse::<SocketAddr>() else {
@@ -239,7 +246,11 @@ pub async fn change_password(
         return Err(AppError::Csrf.into());
     }
 
-    let values = FormValues::from_config(&state.config, &state.self_update.config_snapshot());
+    let values = FormValues::from_config(
+        &state.config,
+        &state.config_path,
+        &state.self_update.config_snapshot(),
+    );
     let fail = |msg: &'static str| render_error(&state, &session, &values, msg);
 
     if EnvLocks::detect().auth_password_hash {
@@ -287,7 +298,7 @@ pub struct GithubTokenForm {
 /// A separate form/route from the rest of Settings (like `change_password`)
 /// so the token is never round-tripped back into the page as a prefilled
 /// value -- the field the operator sees is always blank, whether or not one
-/// is currently saved (see `FormValues::github_token_set`/`_last4`).
+/// is currently saved (see `GithubTokenStatus`).
 pub async fn save_github_token(
     State(state): State<AppState>,
     session: Session,
@@ -298,7 +309,11 @@ pub async fn save_github_token(
     }
 
     if EnvLocks::detect().github_token {
-        let values = FormValues::from_config(&state.config, &state.self_update.config_snapshot());
+        let values = FormValues::from_config(
+            &state.config,
+            &state.config_path,
+            &state.self_update.config_snapshot(),
+        );
         return Ok(render_error(
             &state,
             &session,

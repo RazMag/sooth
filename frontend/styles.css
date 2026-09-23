@@ -479,6 +479,8 @@
   .settings-section { margin-top: 1.75rem; padding-top: 1.75rem; border-top: 1px solid var(--color-line); }
   .settings-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
   .settings-section h2 { margin: 0 0 0.6rem; }
+  .settings-section .card + .card { margin-top: 1rem; }
+  .settings-section .card h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
   .card > .field:last-child { margin-bottom: 0; }
 
   /* The Save action: a card like every other section's, not a bespoke bar,
