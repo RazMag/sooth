@@ -1364,6 +1364,28 @@
   .newres-row .editor-row { margin-top: 0.6rem; }
   [data-newres-template] { display: none; }
 
+  /* Edit Pod: a member container's row is a plain `<details>` (see
+     `member_container_row`) instead of a Name field + editors -- collapsed
+     by default (a pod's member list can get long), its summary reading as a
+     header rather than a button, same marker-hiding technique as
+     `.gitsync-disclosure`. The chevron rotates purely off the `[open]`
+     attribute, no JS. */
+  .newres-row > summary.newres-row-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    list-style: none;
+    cursor: pointer;
+  }
+  .newres-row > summary.newres-row-summary::-webkit-details-marker { display: none; }
+  .newres-row-summary svg { flex: none; width: 0.85rem; height: 0.85rem; color: var(--color-muted); transition: transform 0.12s ease; }
+  .newres-row:not([open]) > summary.newres-row-summary svg { transform: rotate(-90deg); }
+  .newres-row-summary .newres-row-title {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
   /* A "New X" field is a deliberately separate action from the "X" field's
      existing-attach picker just above it (own heading, own hint) -- this
      rule keeps that break visible even when the picker above is collapsed,
