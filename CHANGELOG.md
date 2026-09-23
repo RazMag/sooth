@@ -4,6 +4,26 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **GitHub token status** on the Settings page and the Git Sync add form:
+  shows whether a token is in use (with its last 4 characters), none is
+  saved, or a newly saved/removed token is waiting for a restart.
+
+### Changed
+
+- The GitHub access token setting moved into Settings' "Security &
+  sessions" section.
+
+### Fixed
+
+- Adding a git-sync with no group chosen silently did nothing (the browser
+  logged "The invalid form control with name='group' is not focusable");
+  it now opens the group picker instead. An empty required group field
+  reads "choose a group…" rather than "root".
+
 ## [0.3.1] - 2026-09-23
 
 ### Added
@@ -59,5 +79,6 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[Unreleased]: https://github.com/RazMag/sooth/compare/v0.3.1...HEAD
 [0.3.1]: https://github.com/RazMag/sooth/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/RazMag/sooth/compare/v0.2.1...v0.3.0
