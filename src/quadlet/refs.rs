@@ -4,7 +4,11 @@
 //! Volumes/Networks its own `[Pod]` section declares (`pod_members`,
 //! `pod_own_refs`), for the pod detail page's "part of this pod" rows.
 //! Pure and unit-testable -- `&[QuadletUnit]` in, referencing file names
-//! out; no D-Bus, no filesystem.
+//! out; no D-Bus, no filesystem. Also which podman secrets a Container
+//! consumes via `Secret=` (`secret_refs` / `secret_consumers` /
+//! `missing_secrets`) -- the existence check itself lives in `crate::secrets`.
+
+use std::collections::{BTreeMap, HashSet};
 
 use super::model::{QuadletUnit, UnitKind};
 use super::naming;
@@ -127,10 +131,122 @@ pub fn pod_own_refs(pod: &QuadletUnit, all: &[QuadletUnit]) -> (Vec<String>, Vec
     )
 }
 
+/// The podman secret names a unit consumes: every `Secret=` in a Container's
+/// `[Container]` section, trimmed to the name (the first `,`-delimited
+/// segment of `NAME[,type=…,target=…]`). Sorted and deduplicated. Empty for
+/// every other kind -- a `.build`'s `Secret=` is `podman build --secret
+/// id=…,src=<file>`, which reads a host file, not the podman secret store.
+pub fn secret_refs(unit: &QuadletUnit) -> Vec<String> {
+    if unit.kind != UnitKind::Container {
+        return Vec::new();
+    }
+    let Some(section) = unit.section("Container") else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = section
+        .entries
+        .iter()
+        .filter(|(k, _)| k.as_str() == "Secret")
+        .filter_map(|(_, v)| {
+            let name = v.split(',').next().unwrap_or(v).trim();
+            (!name.is_empty()).then(|| name.to_string())
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// File names of every unit in `all` that references the podman secret
+/// `name` via `Secret=`. Sorted -- the secret analogue of [`consumers_of`].
+pub fn secret_consumers(name: &str, all: &[QuadletUnit]) -> Vec<String> {
+    let mut out: Vec<String> = all
+        .iter()
+        .filter(|u| secret_refs(u).iter().any(|s| s == name))
+        .map(|u| u.file_name.clone())
+        .collect();
+    out.sort();
+    out
+}
+
+/// Every secret name referenced by some unit in `units` that isn't in
+/// `existing`, mapped to the (sorted) file names referencing it.
+pub fn missing_secrets<'a>(
+    units: impl IntoIterator<Item = &'a QuadletUnit>,
+    existing: &HashSet<String>,
+) -> BTreeMap<String, Vec<String>> {
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for unit in units {
+        for name in secret_refs(unit) {
+            if !existing.contains(&name) {
+                out.entry(name).or_default().push(unit.file_name.clone());
+            }
+        }
+    }
+    for users in out.values_mut() {
+        users.sort();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::quadlet::model::Section;
+
+    #[test]
+    fn secret_refs_take_the_name_segment() {
+        let web = unit(
+            "web.container",
+            UnitKind::Container,
+            "Container",
+            &[
+                ("Secret", "db-pass,type=env,target=DB_PASSWORD"),
+                ("Secret", "tls-key"),
+                ("Secret", " db-pass ,type=mount"),
+                ("Secret", ""),
+                ("Environment", "A=b"),
+            ],
+        );
+        assert_eq!(secret_refs(&web), vec!["db-pass", "tls-key"]);
+    }
+
+    #[test]
+    fn secret_refs_ignore_build_units() {
+        let b = unit(
+            "app.build",
+            UnitKind::Build,
+            "Build",
+            &[("Secret", "id=token,src=/run/token")],
+        );
+        assert!(secret_refs(&b).is_empty());
+    }
+
+    #[test]
+    fn secret_consumers_and_missing() {
+        let all = vec![
+            unit(
+                "b.container",
+                UnitKind::Container,
+                "Container",
+                &[("Secret", "shared"), ("Secret", "only-b")],
+            ),
+            unit(
+                "a.container",
+                UnitKind::Container,
+                "Container",
+                &[("Secret", "shared,type=env,target=S")],
+            ),
+        ];
+        assert_eq!(
+            secret_consumers("shared", &all),
+            vec!["a.container", "b.container"]
+        );
+        let existing: HashSet<String> = ["only-b".to_string()].into();
+        let missing = missing_secrets(&all, &existing);
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing["shared"], vec!["a.container", "b.container"]);
+    }
 
     fn unit(
         file_name: &str,

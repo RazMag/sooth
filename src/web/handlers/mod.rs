@@ -8,6 +8,7 @@ pub mod logs;
 pub mod pods;
 pub mod ports;
 pub mod raw_create;
+pub mod secrets;
 pub mod selfupdate;
 pub mod services;
 pub mod settings;

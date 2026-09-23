@@ -13,9 +13,9 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError, PageError};
-use crate::quadlet::discovery;
-use crate::quadlet::gitsync::GitSyncError;
-use crate::web::templates::gitsync::AddFormValues;
+use crate::quadlet::gitsync::{GitSyncConfig, GitSyncError, SyncStatus};
+use crate::quadlet::{discovery, refs};
+use crate::web::templates::gitsync::{AddFormValues, SyncEntry};
 use crate::web::templates::{self};
 
 /// `204` for an htmx caller (relies on the `sse:git-sync-changed` row
@@ -29,13 +29,45 @@ fn done(headers: &HeaderMap) -> Response {
     }
 }
 
+/// Every sync plus the podman secrets its group's units reference but that
+/// don't exist yet -- an advisory badge only; it never affects `SyncState`
+/// or blocks a sync. When podman can't be listed, reports nothing missing
+/// rather than flagging every reference.
+async fn entries(state: &AppState) -> Vec<SyncEntry> {
+    let snapshot = state.git_sync.snapshot();
+    let (Ok(existing), Ok(all)) = (
+        crate::secrets::names().await,
+        discovery::load_all(&state.quadlet_dir),
+    ) else {
+        return without_secrets(snapshot);
+    };
+    snapshot
+        .into_iter()
+        .map(|(config, status)| {
+            let prefix = format!("{}/", config.group);
+            let in_group = all
+                .iter()
+                .filter(|u| u.group == config.group || u.group.starts_with(&prefix));
+            let missing = refs::missing_secrets(in_group, &existing);
+            (config, status, missing)
+        })
+        .collect()
+}
+
+fn without_secrets(snapshot: Vec<(GitSyncConfig, SyncStatus)>) -> Vec<SyncEntry> {
+    snapshot
+        .into_iter()
+        .map(|(c, s)| (c, s, Default::default()))
+        .collect()
+}
+
 pub async fn page(State(state): State<AppState>, session: Session) -> impl IntoResponse {
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
     let known_groups = discovery::list_groups(&state.quadlet_dir);
     templates::gitsync::page(
-        &state.git_sync.snapshot(),
+        &entries(&state).await,
         &csrf,
         &known_groups,
         state.health.get(),
@@ -48,7 +80,7 @@ pub async fn rows(State(state): State<AppState>, session: Session) -> impl IntoR
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    templates::gitsync::rows(&state.git_sync.snapshot(), &csrf)
+    templates::gitsync::rows(&entries(&state).await, &csrf)
 }
 
 #[derive(Deserialize)]
@@ -82,7 +114,7 @@ pub async fn add(
         (
             StatusCode::UNPROCESSABLE_ENTITY,
             templates::gitsync::page_with_add_error(
-                &state.git_sync.snapshot(),
+                &without_secrets(state.git_sync.snapshot()),
                 csrf,
                 &entered,
                 &known_groups,

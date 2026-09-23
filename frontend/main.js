@@ -18,6 +18,7 @@ import { initPodGroupField, initPodResourcePickers } from "./podpicker.js";
 import { initPodMembersDialog } from "./podmembers.js";
 import { initNewResourceRows } from "./podresourcerows.js";
 import { initPortLinks } from "./ports.js";
+import { initSecrets } from "./secrets.js";
 import { initSettingsForm } from "./settings.js";
 
 window.htmx = htmx;
@@ -42,6 +43,7 @@ function boot() {
   initPodMembersDialog();
   initPortLinks();
   initSettingsForm();
+  initSecrets();
 }
 
 if (document.readyState === "loading") {

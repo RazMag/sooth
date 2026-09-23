@@ -14,6 +14,9 @@ pub enum Icon {
     Moon,
     Monitor,
     Check,
+    Copy,
+    Eye,
+    EyeOff,
     X,
     Plus,
     Play,
@@ -31,6 +34,7 @@ pub enum Icon {
     Images,
     Ports,
     Environment,
+    Secrets,
     GitSync,
     Folder,
     ChevronDown,
@@ -55,6 +59,15 @@ pub fn icon(which: Icon) -> Markup {
             r#"<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/>"#
         }
         Icon::Check => r#"<path d="M20 6 9 17l-5-5"/>"#,
+        Icon::Copy => {
+            r#"<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>"#
+        }
+        Icon::Eye => {
+            r#"<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>"#
+        }
+        Icon::EyeOff => {
+            r#"<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>"#
+        }
         Icon::X => r#"<path d="M18 6 6 18M6 6l12 12"/>"#,
         Icon::Plus => r#"<path d="M5 12h14M12 5v14"/>"#,
         Icon::Play => r#"<path d="m6 3 14 9-14 9Z"/>"#,
@@ -95,6 +108,9 @@ pub fn icon(which: Icon) -> Markup {
         }
         Icon::Environment => {
             r#"<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/>"#
+        }
+        Icon::Secrets => {
+            r#"<path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/>"#
         }
         Icon::GitSync => {
             r#"<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>"#
