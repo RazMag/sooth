@@ -4,6 +4,8 @@
 //! failure, so every section's thin Axum handlers stay identical regardless
 //! of which kind they're wiring up.
 
+use std::collections::{HashMap, HashSet};
+
 use tower_sessions::Session;
 use tracing::Instrument;
 
@@ -12,6 +14,7 @@ use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
+use crate::quadlet::refs::{self, MissingRefs};
 use crate::quadlet::{QuadletUnit, UnitKind, containerref, discovery, install, naming, writer};
 use crate::systemd::UnitStatus;
 
@@ -78,6 +81,65 @@ pub async fn load_units_and_siblings(
         out.push((unit.clone(), status));
     }
     Ok((out, all))
+}
+
+/// The names that exist in podman's secret store and in the user manager's
+/// live environment -- what `Secret=` / `${NAME}` references in `units` are
+/// checked against. Each is fetched only when some unit references one, and
+/// is `None` when it couldn't be read (so nothing gets flagged missing).
+pub struct RefStores {
+    pub secrets: Option<HashSet<String>>,
+    pub env: Option<HashSet<String>>,
+}
+
+impl RefStores {
+    pub async fn load<'a>(
+        state: &AppState,
+        units: impl IntoIterator<Item = &'a QuadletUnit> + Clone,
+    ) -> Self {
+        let secrets = if units
+            .clone()
+            .into_iter()
+            .any(|u| !refs::secret_refs(u).is_empty())
+        {
+            crate::secrets::names()
+                .await
+                .inspect_err(|e| tracing::debug!(error = %e, "secret listing failed"))
+                .ok()
+        } else {
+            Some(HashSet::new())
+        };
+        let env = if units.into_iter().any(|u| !refs::env_refs(u).is_empty()) {
+            state
+                .systemd
+                .environment()
+                .await
+                .inspect_err(|e| tracing::debug!(error = %e, "show-environment failed"))
+                .ok()
+                .map(|vars| vars.into_iter().map(|(k, _)| k).collect())
+        } else {
+            Some(HashSet::new())
+        };
+        Self { secrets, env }
+    }
+
+    pub fn missing(&self, unit: &QuadletUnit) -> MissingRefs {
+        MissingRefs::of(unit, self.secrets.as_ref(), self.env.as_ref())
+    }
+}
+
+/// Per-unit missing secrets / host variables for a list table, keyed by file
+/// name. Units with nothing missing are left out.
+pub async fn missing_refs(
+    state: &AppState,
+    units: &[(QuadletUnit, UnitStatus)],
+) -> HashMap<String, MissingRefs> {
+    let stores = RefStores::load(state, units.iter().map(|(u, _)| u)).await;
+    units
+        .iter()
+        .map(|(u, _)| (u.file_name.clone(), stores.missing(u)))
+        .filter(|(_, m)| !m.is_empty())
+        .collect()
 }
 
 pub struct ActionOutcome {

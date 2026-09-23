@@ -1,5 +1,6 @@
 use maud::{Markup, html};
 
+use super::detail::DetailCtx;
 use super::{
     BannerKind, EditorFileName, Icon, NavItem, back_link, banner, code_editor, code_editor_named,
     csrf_input, detail, env_var_editor_named, group_field, host_vars_panel, icon, page_header,
@@ -28,8 +29,7 @@ pub fn detail_page(
     members: &[String],
     networks: &[String],
     volumes: &[String],
-    known_groups: &[String],
-    health: Health,
+    ctx: &DetailCtx,
 ) -> Markup {
     let extra = if members.is_empty() {
         None
@@ -47,8 +47,7 @@ pub fn detail_page(
             ("Ports", super::ports_cell_live(unit, status)),
         ],
         extra,
-        known_groups,
-        health,
+        ctx,
     )
 }
 
