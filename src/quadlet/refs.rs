@@ -90,6 +90,33 @@ pub fn pod_members(pod: &QuadletUnit, all: &[QuadletUnit]) -> Vec<String> {
     out
 }
 
+/// The image a Container unit runs, as podman would name it: its `Image=`
+/// value, or -- when that names an `.image` / `.build` quadlet in `all` --
+/// the image that quadlet produces (`ImageTag=`, else an `.image`'s own
+/// `Image=`). `None` when there's no `Image=` or it names a quadlet that
+/// isn't there / doesn't say what it produces.
+pub fn container_image(container: &QuadletUnit, all: &[QuadletUnit]) -> Option<String> {
+    let value = container.section("Container")?.get("Image")?.trim();
+    let Some(kind) = [UnitKind::Image, UnitKind::Build]
+        .into_iter()
+        .find(|k| value.ends_with(&format!(".{}", k.extension())))
+    else {
+        return Some(value.to_string());
+    };
+    let target = all
+        .iter()
+        .find(|u| u.kind == kind && u.file_name == value)?;
+    let section = target.section(kind.primary_section())?;
+    section
+        .get("ImageTag")
+        .or_else(|| {
+            (kind == UnitKind::Image)
+                .then(|| section.get("Image"))
+                .flatten()
+        })
+        .map(|s| s.trim().to_string())
+}
+
 /// The networks and volumes (in that order) a Pod's own `[Pod]` section
 /// declares via `Network=`/`Volume=`, trimmed to just the resource
 /// reference (the part before any `:OPTS`/`:DEST`) and resolved against
@@ -603,5 +630,44 @@ mod tests {
     fn pod_own_refs_empty_when_no_pod_section() {
         let not_a_pod = unit("x.container", UnitKind::Container, "Container", &[]);
         assert_eq!(pod_own_refs(&not_a_pod, &[]), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
+    fn container_image_resolves_image_and_build_quadlets() {
+        let c = |image: &str| {
+            unit(
+                "web.container",
+                UnitKind::Container,
+                "Container",
+                &[("Image", image)],
+            )
+        };
+        let all = vec![
+            unit(
+                "nginx.image",
+                UnitKind::Image,
+                "Image",
+                &[("Image", "docker.io/library/nginx")],
+            ),
+            unit(
+                "app.build",
+                UnitKind::Build,
+                "Build",
+                &[("ImageTag", "localhost/app")],
+            ),
+        ];
+        assert_eq!(
+            container_image(&c("docker.io/x"), &all).as_deref(),
+            Some("docker.io/x")
+        );
+        assert_eq!(
+            container_image(&c("nginx.image"), &all).as_deref(),
+            Some("docker.io/library/nginx")
+        );
+        assert_eq!(
+            container_image(&c("app.build"), &all).as_deref(),
+            Some("localhost/app")
+        );
+        assert_eq!(container_image(&c("gone.image"), &all), None);
     }
 }

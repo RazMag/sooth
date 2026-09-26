@@ -349,6 +349,16 @@ pub fn status_badge(service: &str, status: &UnitStatus) -> Markup {
     }
 }
 
+/// A status badge with no SSE wiring -- for a unit shown more than once on a
+/// page (e.g. a pod member on every one of its pod's port rows), where
+/// `status_badge`'s id would repeat. The surrounding fragment has to
+/// re-render itself to stay current.
+pub fn plain_status_badge(status: &UnitStatus) -> Markup {
+    let (variant, label) = status_display(status);
+    let raw = format!("{}/{}", status.active_state, status.sub_state);
+    html! { span class={"badge " (variant)} title=(raw) { (label) } }
+}
+
 /// A small "Autostart" pill shown next to a unit's actions when its quadlet
 /// file carries an `[Install]` / `WantedBy=` -- the rootless stand-in for
 /// `systemctl is-enabled` (which always reports `generated` for these).
