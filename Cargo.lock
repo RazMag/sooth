@@ -2195,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "sooth"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2210,6 +2210,7 @@ dependencies = [
  "rust-embed",
  "self_update",
  "serde",
+ "serde_json",
  "sha2",
  "tempfile",
  "thiserror",

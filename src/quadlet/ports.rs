@@ -150,50 +150,81 @@ fn parse_port_range(s: &str) -> Option<HostPortRange> {
     }
 }
 
-/// A group of mappings from more than one quadlet file whose host-port
-/// ranges overlap on the same protocol -- a real declared conflict.
-#[derive(Debug, Clone)]
-pub struct PortCollision {
+/// A port a container says it serves -- a `ExposePort=` line in its quadlet
+/// or an `EXPOSE` baked into its image. Informational only (podman publishes
+/// nothing for it), but it's the one declared signal of which container in a
+/// pod is meant to receive a pod-published port.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExposedPort {
+    pub range: HostPortRange,
     pub protocol: Protocol,
-    pub host_port: HostPortRange,
-    pub mappings: Vec<PortMapping>,
 }
 
-/// Host IP is deliberately ignored when grouping: over-flagging a
-/// same-port-different-IP bind is safer than missing a real conflict on a
-/// single-host rootless setup.
-pub fn find_collisions(mappings: &[PortMapping]) -> Vec<PortCollision> {
-    let mut groups: Vec<PortCollision> = Vec::new();
+/// Parses `80`, `80/tcp` or `8000-8010/udp` -- the shape of both
+/// `ExposePort=` values and an image's `Config.ExposedPorts` keys.
+pub fn parse_exposed(s: &str) -> Option<ExposedPort> {
+    let s = s.trim();
+    let (port, protocol) = match s.rsplit_once('/') {
+        Some((port, "tcp")) => (port, Protocol::Tcp),
+        Some((port, "udp")) => (port, Protocol::Udp),
+        Some(_) => return None,
+        None => (s, Protocol::Tcp),
+    };
+    Some(ExposedPort {
+        range: parse_port_range(port)?,
+        protocol,
+    })
+}
 
-    for mapping in mappings {
-        let Some(host_port) = mapping.host_port else {
-            continue;
-        };
-        if let Some(group) = groups
-            .iter_mut()
-            .find(|g| g.protocol == mapping.protocol && g.host_port.overlaps(host_port))
-        {
-            group.host_port.start = group.host_port.start.min(host_port.start);
-            group.host_port.end = group.host_port.end.max(host_port.end);
-            group.mappings.push(mapping.clone());
-        } else {
-            groups.push(PortCollision {
-                protocol: mapping.protocol,
-                host_port,
-                mappings: vec![mapping.clone()],
-            });
-        }
+/// Every `ExposePort=` in a Container unit's `[Container]` section.
+/// Unparsable values are skipped. Empty for every other kind.
+pub fn declared_exposed(unit: &QuadletUnit) -> Vec<ExposedPort> {
+    if unit.kind != UnitKind::Container {
+        return Vec::new();
     }
+    unit.section("Container")
+        .map(|s| {
+            s.entries
+                .iter()
+                .filter(|(k, _)| k == "ExposePort")
+                .filter_map(|(_, v)| parse_exposed(v))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
-    groups.retain(|g| {
-        g.mappings
-            .iter()
-            .map(|m| &m.file_name)
-            .collect::<std::collections::HashSet<_>>()
-            .len()
-            > 1
-    });
-    groups
+/// Whether any of `exposed` covers `mapping`'s container port on the same
+/// protocol -- i.e. the container claims to be what that port reaches.
+pub fn serves(exposed: &[ExposedPort], mapping: &PortMapping) -> bool {
+    let Some(target) = parse_port_range(&mapping.container_port) else {
+        return false;
+    };
+    exposed
+        .iter()
+        .any(|e| e.protocol == mapping.protocol && e.range.overlaps(target))
+}
+
+/// File names of every *other* quadlet whose static host-port range overlaps
+/// `mapping`'s on the same protocol -- the units it really conflicts with.
+/// Empty for a dynamic host port. Sorted and deduplicated. Keyed per mapping
+/// (not per file), so a unit with two ports is only flagged on the one that
+/// actually collides.
+///
+/// Host IP is deliberately ignored: over-flagging a same-port-different-IP
+/// bind is safer than missing a real conflict on a single-host rootless setup.
+pub fn conflicts_with(mapping: &PortMapping, all: &[PortMapping]) -> Vec<String> {
+    let Some(host_port) = mapping.host_port else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = all
+        .iter()
+        .filter(|other| other.file_name != mapping.file_name && other.protocol == mapping.protocol)
+        .filter(|other| other.host_port.is_some_and(|r| r.overlaps(host_port)))
+        .map(|other| other.file_name.clone())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 #[cfg(test)]
@@ -284,32 +315,99 @@ mod tests {
     }
 
     #[test]
-    fn detects_collision_across_two_files() {
+    fn detects_conflict_across_two_files() {
         let mappings = vec![
             mapping("a.container", "8080:80").unwrap(),
-            mapping("b.container", "8080:8081").unwrap(),
+            mapping("b.container", "8080-8090:8081").unwrap(),
             mapping("c.container", "9090:90").unwrap(),
+            mapping("d.pod", "8085:80").unwrap(),
         ];
-        let collisions = find_collisions(&mappings);
-        assert_eq!(collisions.len(), 1);
-        assert_eq!(collisions[0].mappings.len(), 2);
+        assert_eq!(conflicts_with(&mappings[0], &mappings), vec!["b.container"]);
+        assert_eq!(
+            conflicts_with(&mappings[1], &mappings),
+            vec!["a.container", "d.pod"]
+        );
+        assert!(conflicts_with(&mappings[2], &mappings).is_empty());
     }
 
     #[test]
-    fn no_collision_for_same_file_or_different_ports() {
+    fn only_the_colliding_port_of_a_file_is_flagged() {
+        let mappings = vec![
+            mapping("a.container", "8080:80").unwrap(),
+            mapping("a.container", "9000:90").unwrap(),
+            mapping("b.container", "8080:80").unwrap(),
+        ];
+        assert_eq!(conflicts_with(&mappings[0], &mappings), vec!["b.container"]);
+        assert!(conflicts_with(&mappings[1], &mappings).is_empty());
+    }
+
+    #[test]
+    fn no_conflict_for_same_file_or_different_protocol() {
         let mappings = vec![
             mapping("a.container", "8080:80").unwrap(),
             mapping("a.container", "8080:81").unwrap(),
+            mapping("b.container", "8080:80/udp").unwrap(),
         ];
-        assert!(find_collisions(&mappings).is_empty());
+        assert!(conflicts_with(&mappings[0], &mappings).is_empty());
+        assert!(conflicts_with(&mappings[2], &mappings).is_empty());
     }
 
     #[test]
-    fn dynamic_ports_excluded_from_collisions() {
+    fn dynamic_ports_never_conflict() {
         let mappings = vec![
             mapping("a.container", "80").unwrap(),
             mapping("b.container", "80").unwrap(),
         ];
-        assert!(find_collisions(&mappings).is_empty());
+        assert!(conflicts_with(&mappings[0], &mappings).is_empty());
+    }
+
+    #[test]
+    fn parses_exposed_port_forms() {
+        let e = parse_exposed("80").unwrap();
+        assert_eq!(
+            (e.range.start, e.range.end, e.protocol),
+            (80, 80, Protocol::Tcp)
+        );
+        let e = parse_exposed("8000-8010/udp").unwrap();
+        assert_eq!(
+            (e.range.start, e.range.end, e.protocol),
+            (8000, 8010, Protocol::Udp)
+        );
+        assert!(parse_exposed("80/sctp").is_none());
+        assert!(parse_exposed("http").is_none());
+    }
+
+    #[test]
+    fn serves_matches_container_port_and_protocol() {
+        let m = mapping("web.pod", "8081:80").unwrap();
+        assert!(serves(&[parse_exposed("80/tcp").unwrap()], &m));
+        assert!(serves(&[parse_exposed("79-81").unwrap()], &m));
+        assert!(!serves(&[parse_exposed("80/udp").unwrap()], &m));
+        assert!(!serves(&[parse_exposed("443").unwrap()], &m));
+        assert!(!serves(&[], &m));
+    }
+
+    #[test]
+    fn declared_exposed_reads_container_section_only() {
+        let unit = QuadletUnit {
+            file_name: "a.container".into(),
+            group: String::new(),
+            path: "/tmp/a.container".into(),
+            kind: UnitKind::Container,
+            sections: vec![crate::quadlet::model::Section {
+                name: "Container".into(),
+                entries: [
+                    ("Image", "x"),
+                    ("ExposePort", "80"),
+                    ("ExposePort", "53/udp"),
+                    ("ExposePort", "bad"),
+                ]
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            }],
+            raw: String::new(),
+        };
+        assert_eq!(declared_exposed(&unit).len(), 2);
     }
 }

@@ -4,6 +4,29 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-09-27
+
+### Added
+
+- **Unit logs grouped by run**: each restart starts a new run, marked by a
+  "New run" divider. A "Latest run only" toggle (on by default, remembered
+  per browser) hides earlier runs' output, including live lines as soon as
+  the new run logs. Timestamps are shown in your browser's local time.
+
+### Changed
+
+- The Ports screen's Owner column is now **Container**: a port published by
+  a pod names the member container(s) serving it, based on their
+  `ExposePort=` or their image's `EXPOSE`. A member whose image isn't pulled
+  yet gets a "Pull image" button.
+- Port collision notes name the conflicting units and flag only the
+  colliding mapping, not every port of the file.
+
+### Fixed
+
+- Live log lines containing carriage returns (e.g. progress bars) no longer
+  gain extra blank lines; they render the same as after a reload.
+
 ## [0.3.4] - 2026-09-23
 
 ### Fixed
@@ -99,6 +122,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.3.5]: https://github.com/RazMag/sooth/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/RazMag/sooth/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/RazMag/sooth/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/RazMag/sooth/compare/v0.3.1...v0.3.2
