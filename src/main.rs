@@ -10,6 +10,7 @@ mod error;
 mod events;
 mod health;
 mod hostenv;
+mod imageinfo;
 mod journal;
 mod logging;
 mod quadlet;
