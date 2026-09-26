@@ -23,7 +23,7 @@ pub async fn logs_page(
         .await
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "failed to read initial journal tail");
-            String::new()
+            Vec::new()
         });
     Ok(templates::logs::logs_page(
         &unit,
@@ -44,9 +44,16 @@ pub async fn logs_stream(
     let lines = LinesStream::new(reader.lines());
     let stream = futures_util::stream::unfold((child, lines), |(child, mut lines)| async move {
         match lines.next().await {
-            Some(Ok(line)) => Some((Ok(Event::default().data(line)), (child, lines))),
+            Some(Ok(line)) => Some((line, (child, lines))),
             _ => None,
         }
+    })
+    // Old-run marking is logs.js's job for live lines (it knows which run is
+    // latest as they arrive), so every fragment goes out unmarked.
+    .filter_map(|line| async move {
+        let line = journal::parse_json_line(&line)?;
+        let html = templates::logs::log_line(&line, false).into_string();
+        Some(Ok(Event::default().data(html)))
     });
 
     let mut shutdown = state.shutdown.clone();
