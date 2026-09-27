@@ -93,7 +93,7 @@ fn status_line(status: &UpdateStatus, csrf: &str) -> Markup {
                     &format!("v{version} downloaded and ready to install."),
                 )),
                 UpdateState::Applying => p.field-hint {
-                    "Downloaded -- sooth will restart automatically to install it."
+                    "Downloaded -- Sooth will restart automatically to install it."
                 },
                 UpdateState::Error(msg) => (banner(BannerKind::Error, msg)),
             }

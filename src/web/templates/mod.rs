@@ -141,7 +141,7 @@ fn head_tag(title: &str) -> Markup {
         head {
             meta charset="utf-8";
             meta name="viewport" content="width=device-width, initial-scale=1";
-            title { (title) " · sooth" }
+            title { (title) " · Sooth" }
             link rel="icon" type="image/svg+xml" href=(favicon_href());
             script {
                 (maud::PreEscaped(
@@ -174,7 +174,7 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                 div.app-shell {
                     div.nav-scrim data-nav-scrim {}
                     nav.sidebar {
-                        a.brand href="/" { (brand_mark()) span { "sooth" } }
+                        a.brand href="/" { (brand_mark()) span { "Sooth" } }
                         ul.nav-list {
                             @for item in NavItem::all() {
                                 li {
@@ -215,7 +215,7 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                             button.btn-icon type="button" data-nav-toggle aria-label="Open menu" {
                                 (icon(Icon::Menu))
                             }
-                            a.brand href="/" { (brand_mark()) span { "sooth" } }
+                            a.brand href="/" { (brand_mark()) span { "Sooth" } }
                         }
                         div.content-inner {
                             @if let Some(h) = health { (health_banners(h)) }
@@ -292,7 +292,7 @@ fn health_banners(health: Health) -> Markup {
         @if health.linger_enabled == Some(false) {
             (banner(
                 BannerKind::Warn,
-                "Linger isn't enabled for this user, so sooth and everything it manages will \
+                "Linger isn't enabled for this user, so Sooth and everything it manages will \
                  stop when you log out. Run `loginctl enable-linger $USER` to keep them running.",
             ))
         }
@@ -767,7 +767,7 @@ pub fn login_page(error: Option<&str>) -> Markup {
             (head_tag("Sign in"))
             body.login-body {
                 main.login-card {
-                    h1 { (brand_mark()) span { "sooth" } }
+                    h1 { (brand_mark()) span { "Sooth" } }
                     @if let Some(msg) = error { (banner(BannerKind::Error, msg)) }
                     form method="post" action="/login" {
                         div.field {

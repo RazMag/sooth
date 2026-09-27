@@ -64,7 +64,7 @@ pub fn page(p: EnvironmentPage<'_>) -> Markup {
             button.btn.btn-primary type="submit" { "Add variable" }
         }
 
-        h2 { "Managed by sooth" }
+        h2 { "Managed by Sooth" }
         @if managed.is_empty() {
             p.empty { "No variables set yet — add one above." }
         } @else {
