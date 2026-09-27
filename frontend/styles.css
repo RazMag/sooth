@@ -1109,10 +1109,37 @@
     font-size: 0.82rem;
     font-style: italic;
   }
-  .data-table tr.is-collapsed { display: none; }
-  /* While the filter box holds a needle, reveal matches even inside collapsed
-     groups; rows the filter itself hid (`[hidden]`) stay hidden. */
-  .data-table[data-filtering] tr.is-collapsed:not([hidden]) { display: table-row; }
+  .data-table tr.is-collapsed,
+  .data-table tr.pod-collapsed { display: none; }
+  /* While the filter box holds a needle (`data-filtering` on the tbody),
+     reveal matches even inside collapsed groups and pods; rows the filter
+     itself hid (`[hidden]`) stay hidden. */
+  .data-table [data-filtering] tr.is-collapsed:not([hidden]),
+  .data-table [data-filtering] tr.pod-collapsed:not([hidden]) { display: table-row; }
+
+  /* Pod tree: a pod row heads the units it owns (`tr[data-pod-member]`, one
+     indent step deeper -- see `templates::list::PodTree`). Its chevron sits
+     between the grip and the name; plain rows in a table with any pod get a
+     same-width spacer so every top-level name starts at the same x. The
+     children's guide bar is tinted with the accent so a pod's units read
+     apart from a group's nesting. */
+  .pod-toggle {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-right: 0.3rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--color-muted);
+    cursor: pointer;
+  }
+  .pod-toggle:hover { color: var(--color-ink); }
+  .pod-toggle[aria-expanded="false"] .group-chevron { transform: rotate(-90deg); }
+  .pod-toggle-spacer { display: inline-block; width: 0.9rem; margin-right: 0.3rem; }
+  .data-table tr[data-pod] .group-count { margin-left: 0.15rem; vertical-align: 0.05rem; }
+  .data-table tbody tr[data-pod-member] .row-indent {
+    border-left-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  }
 
   /* Unit detail: one action toolbar + two-column layout w/ facts rail */
   .detail-toolbar {

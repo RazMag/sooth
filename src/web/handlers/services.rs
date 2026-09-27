@@ -11,7 +11,7 @@ use crate::web::templates::list::ListContext;
 use crate::web::templates::services::Stats;
 use crate::web::templates::{self};
 
-const KINDS: &[UnitKind] = &[UnitKind::Container, UnitKind::Pod];
+const KINDS: &[UnitKind] = templates::services::SPEC.kinds;
 
 fn compute_stats(units: &[(QuadletUnit, UnitStatus)]) -> Stats {
     let running = units.iter().filter(|(_, s)| s.is_active()).count();
