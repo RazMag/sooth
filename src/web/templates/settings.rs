@@ -130,12 +130,12 @@ pub fn github_token_summary(status: &GithubTokenStatus) -> Markup {
             }
             (_, true, Some(s)) => {
                 span.badge.badge-warn { "Restart needed" }
-                " A new GitHub token" (ending(s)) " is saved but not in use until sooth restarts"
+                " A new GitHub token" (ending(s)) " is saved but not in use until Sooth restarts"
                 @if let Some(a) = &status.active { " (still using the one" (ending(a)) ")" } "."
             }
             (_, true, None) => {
                 span.badge.badge-warn { "Restart needed" }
-                " The GitHub token was removed, but sooth keeps using it until it restarts."
+                " The GitHub token was removed, but Sooth keeps using it until it restarts."
             }
         }
     }
@@ -289,7 +289,7 @@ pub fn page(
                     (text_field(
                         "quadlet_dir", "Quadlet directory", &values.quadlet_dir,
                         html! {
-                            "Folder sooth reads " code { ".container" } " / " code { ".pod" } " / "
+                            "Folder Sooth reads " code { ".container" } " / " code { ".pod" } " / "
                             code { ".volume" } " / … unit files from. Leave as the default unless "
                             "your quadlets live elsewhere."
                         },
@@ -309,7 +309,7 @@ pub fn page(
                         }
                         p.field-hint {
                             "Adds the " code { "Secure" } " flag to the login cookie so browsers only "
-                            "send it over HTTPS. Turn on when sooth runs behind a TLS-terminating "
+                            "send it over HTTPS. Turn on when Sooth runs behind a TLS-terminating "
                             "reverse proxy; leave off for plain-HTTP localhost."
                         }
                         @if locks.cookie_secure { (env_note("SOOTH_COOKIE_SECURE")) }
@@ -349,7 +349,7 @@ pub fn page(
                                 form="github-token-form" autocomplete="off" placeholder="ghp_…";
                             p.field-hint {
                                 "Leave blank and save to remove the saved token. Applied the "
-                                "next time sooth restarts."
+                                "next time Sooth restarts."
                             }
                         }
                         button.btn.btn-primary type="submit" form="github-token-form" { "Save token" }
@@ -370,7 +370,7 @@ pub fn page(
                             dd { "Shows a banner here when a newer version exists, then lets you "
                                  "download and install it on your own schedule." }
                             dt { code { "Auto" } }
-                            dd { "Downloads and installs automatically, restarting sooth when it does." }
+                            dd { "Downloads and installs automatically, restarting Sooth when it does." }
                         }
                     }
                     div.field {
@@ -408,7 +408,7 @@ pub fn page(
                 div.card.settings-save-card {
                     p.field-hint {
                         "Everything above is saved together. Server, filesystem, security, "
-                        "and diagnostics changes take effect on the next restart of sooth; "
+                        "and diagnostics changes take effect on the next restart of Sooth; "
                         "Updates changes apply immediately."
                     }
                     button #settings-save.btn.btn-primary type="submit" { "Save changes" }
@@ -426,13 +426,13 @@ pub fn page(
             h2 { "Restart" }
             div.card {
                 p.field-hint {
-                    "Restarts sooth in place to apply everything saved above. In-memory "
+                    "Restarts Sooth in place to apply everything saved above. In-memory "
                     "sessions are cleared (everyone signs in again) and the dashboard is "
                     "briefly unavailable while it comes back."
                 }
                 form #restart-form method="post" action="/settings/restart" {
                     (csrf_input(csrf))
-                    button.btn.btn-restart type="submit" { "Restart sooth now" }
+                    button.btn.btn-restart type="submit" { "Restart Sooth now" }
                 }
             }
         }
@@ -450,7 +450,7 @@ pub fn page(
                         (csrf_input(csrf))
                         p.field-hint {
                             "Sets a new dashboard login password. Saved to the config file and "
-                            "applied the next time sooth restarts."
+                            "applied the next time Sooth restarts."
                         }
                         div.field {
                             label for="current_password" { "Current password" }
@@ -509,7 +509,7 @@ pub fn health_card(health: Health) -> Markup {
                         Some(false) => td {
                             (status_pill(false, "Disabled", ""))
                             p.field-hint {
-                                "sooth and everything it manages will stop when you log out. Run "
+                                "Sooth and everything it manages will stop when you log out. Run "
                                 code { "loginctl enable-linger $USER" } " to keep them running."
                             }
                         },
@@ -536,7 +536,8 @@ pub fn restarting_page() -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "Restarting · sooth" }
+                title { "Restarting · Sooth" }
+                link rel="icon" type="image/svg+xml" href=(super::favicon_href());
                 link rel="stylesheet" href="/static/style.css";
                 noscript { meta http-equiv="refresh" content="6;url=/"; }
             }
@@ -544,7 +545,7 @@ pub fn restarting_page() -> Markup {
                 main.login-card {
                     h1 { "Restarting…" }
                     p.field-hint {
-                        "sooth is restarting to apply your saved settings. This page "
+                        "Sooth is restarting to apply your saved settings. This page "
                         "returns to the dashboard automatically once it's back."
                     }
                 }

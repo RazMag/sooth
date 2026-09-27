@@ -40,10 +40,10 @@ pub async fn page(
     );
     let message = match query.saved.as_deref() {
         Some("password") => {
-            Some("Password saved. Restart sooth for the new password to take effect.")
+            Some("Password saved. Restart Sooth for the new password to take effect.")
         }
-        Some("github_token") => Some("GitHub token saved. Restart sooth for it to take effect."),
-        Some(_) => Some("Saved. Restart sooth for changes to take effect."),
+        Some("github_token") => Some("GitHub token saved. Restart Sooth for it to take effect."),
+        Some(_) => Some("Saved. Restart Sooth for changes to take effect."),
         None => None,
     };
     let self_update_status = state.self_update.snapshot();

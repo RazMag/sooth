@@ -90,7 +90,7 @@ fn render(
     let body = html! {
         (page_header("Git Sync", html! {}))
         p.page-meta {
-            "Keep a group directory in sync with a git repository. sooth checks each "
+            "Keep a group directory in sync with a git repository. Sooth checks each "
             "remote on its own interval and fast-forwards the local checkout when it "
             "moves; files inside a synced group are managed by the remote and are "
             "overwritten on the next sync, so don't hand-edit them here."
@@ -268,7 +268,7 @@ fn sync_card(
                             "Also permanently delete " code { (config.group) } " and its files from disk"
                         }
                         p.field-hint {
-                            "Left unchecked, sooth just stops checking this repo and leaves \""
+                            "Left unchecked, Sooth just stops checking this repo and leaves \""
                             (config.group) "\" on disk as an ordinary, no-longer-synced group."
                         }
                     }
