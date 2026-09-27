@@ -150,10 +150,11 @@ fn parse_port_range(s: &str) -> Option<HostPortRange> {
     }
 }
 
-/// A port a container says it serves -- a `ExposePort=` line in its quadlet
-/// or an `EXPOSE` baked into its image. Informational only (podman publishes
-/// nothing for it), but it's the one declared signal of which container in a
-/// pod is meant to receive a pod-published port.
+/// A port a container says it serves -- an `ExposeHostPort=` line in its
+/// quadlet (podman's `--expose`) or an `EXPOSE` baked into its image.
+/// Informational only (podman publishes nothing for it), but it's the one
+/// declared signal of which container in a pod is meant to receive a
+/// pod-published port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExposedPort {
     pub range: HostPortRange,
@@ -161,7 +162,7 @@ pub struct ExposedPort {
 }
 
 /// Parses `80`, `80/tcp` or `8000-8010/udp` -- the shape of both
-/// `ExposePort=` values and an image's `Config.ExposedPorts` keys.
+/// `ExposeHostPort=` values and an image's `Config.ExposedPorts` keys.
 pub fn parse_exposed(s: &str) -> Option<ExposedPort> {
     let s = s.trim();
     let (port, protocol) = match s.rsplit_once('/') {
@@ -176,7 +177,7 @@ pub fn parse_exposed(s: &str) -> Option<ExposedPort> {
     })
 }
 
-/// Every `ExposePort=` in a Container unit's `[Container]` section.
+/// Every `ExposeHostPort=` in a Container unit's `[Container]` section.
 /// Unparsable values are skipped. Empty for every other kind.
 pub fn declared_exposed(unit: &QuadletUnit) -> Vec<ExposedPort> {
     if unit.kind != UnitKind::Container {
@@ -186,7 +187,7 @@ pub fn declared_exposed(unit: &QuadletUnit) -> Vec<ExposedPort> {
         .map(|s| {
             s.entries
                 .iter()
-                .filter(|(k, _)| k == "ExposePort")
+                .filter(|(k, _)| k == "ExposeHostPort")
                 .filter_map(|(_, v)| parse_exposed(v))
                 .collect()
         })
@@ -388,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn declared_exposed_reads_container_section_only() {
+    fn declared_exposed_reads_expose_host_port() {
         let unit = QuadletUnit {
             file_name: "a.container".into(),
             group: String::new(),
@@ -398,9 +399,11 @@ mod tests {
                 name: "Container".into(),
                 entries: [
                     ("Image", "x"),
-                    ("ExposePort", "80"),
-                    ("ExposePort", "53/udp"),
-                    ("ExposePort", "bad"),
+                    ("ExposeHostPort", "80"),
+                    ("ExposeHostPort", "5000-5002/udp"),
+                    ("ExposeHostPort", "bad"),
+                    // Not a quadlet key -- podman's generator rejects it.
+                    ("ExposePort", "443"),
                 ]
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -408,6 +411,12 @@ mod tests {
             }],
             raw: String::new(),
         };
-        assert_eq!(declared_exposed(&unit).len(), 2);
+        assert_eq!(
+            declared_exposed(&unit),
+            [
+                parse_exposed("80").unwrap(),
+                parse_exposed("5000-5002/udp").unwrap()
+            ]
+        );
     }
 }
