@@ -31,7 +31,7 @@ use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 use crate::web::core;
 
-pub use icons::{Icon, icon};
+pub use icons::{Icon, brand_mark, favicon_href, icon};
 
 /// Which sidebar link (if any) is "active" for the current page. `None` for
 /// pages outside the sidebar entirely (login, the generic `/units` fallback,
@@ -142,6 +142,7 @@ fn head_tag(title: &str) -> Markup {
             meta charset="utf-8";
             meta name="viewport" content="width=device-width, initial-scale=1";
             title { (title) " · sooth" }
+            link rel="icon" type="image/svg+xml" href=(favicon_href());
             script {
                 (maud::PreEscaped(
                     "try{var p=localStorage.getItem('sooth-theme');\
@@ -173,7 +174,7 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                 div.app-shell {
                     div.nav-scrim data-nav-scrim {}
                     nav.sidebar {
-                        a.brand href="/" { "sooth" }
+                        a.brand href="/" { (brand_mark()) span { "sooth" } }
                         ul.nav-list {
                             @for item in NavItem::all() {
                                 li {
@@ -214,7 +215,7 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                             button.btn-icon type="button" data-nav-toggle aria-label="Open menu" {
                                 (icon(Icon::Menu))
                             }
-                            a.brand href="/" { "sooth" }
+                            a.brand href="/" { (brand_mark()) span { "sooth" } }
                         }
                         div.content-inner {
                             @if let Some(h) = health { (health_banners(h)) }
@@ -766,7 +767,7 @@ pub fn login_page(error: Option<&str>) -> Markup {
             (head_tag("Sign in"))
             body.login-body {
                 main.login-card {
-                    h1 { "sooth" }
+                    h1 { (brand_mark()) span { "sooth" } }
                     @if let Some(msg) = error { (banner(BannerKind::Error, msg)) }
                     form method="post" action="/login" {
                         div.field {

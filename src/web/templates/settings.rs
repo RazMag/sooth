@@ -537,6 +537,7 @@ pub fn restarting_page() -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { "Restarting · sooth" }
+                link rel="icon" type="image/svg+xml" href=(super::favicon_href());
                 link rel="stylesheet" href="/static/style.css";
                 noscript { meta http-equiv="refresh" content="6;url=/"; }
             }

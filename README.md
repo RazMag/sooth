@@ -366,3 +366,7 @@ released and skips the build if so, rather than re-publishing or failing.
 Never push to `release` directly — always through a PR from `main`, so the
 two branches never drift into having different content merged in a
 different order.
+
+## Credits
+
+Logo: [Font Awesome Free](https://fontawesome.com) `wand-sparkles`, licensed [CC BY 4.0](https://fontawesome.com/license/free).
