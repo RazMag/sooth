@@ -102,6 +102,19 @@ opens `Connection::session()` on startup and exits if it fails).
   only ever gates *drop targets* — a synced group's own header still gets a
   drag grip like any other, since dragging it *is* now allowed) — the server
   check is still the authoritative one.
+- **Pod tree in every list table.** Every list handler loads pods on top of
+  its `ListSpec::kinds` (`templates::list::with_pods`), and
+  `templates::list::PodTree` renders each unit `refs::owning_pod` assigns
+  to a listed pod as a child row directly under it: a container via `Pod=`,
+  a volume/network/image/build only when *every* consumer belongs to that
+  one pod (shared or unused resources stay top-level -- a row renders once
+  per table, since its status badge's SSE id must stay unique). A child
+  renders in its *pod's* group section even if filed elsewhere (a chip
+  names its real group); section counts follow where rows render. A pod
+  outside the table's kinds (e.g. on Volumes) only appears to head its
+  units, with its columns left blank. Pod rows carry `data-pod`, children
+  `data-pod-member`; `frontend/podtree.js` collapses them with its own
+  `pod-collapsed` class (pods start expanded, unlike groups).
 - **One implementation, six mount points.** Per-unit behavior does not vary
   by kind — don't add kind-specific handler modules. The detail page
   dispatches on `unit.kind` (the loaded unit's real kind, not the URL
@@ -135,7 +148,7 @@ opens `Connection::session()` on startup and exits if it fails).
   htmx, its SSE extension, and CodeMirror 6. `frontend/styles.css` →
   `static/style.css` (Tailwind v4; classes are scanned from
   `src/web/templates`).
-- Progressive enhancement only: `initTheme/Filter/Nav/Menus/Logs/Editors/EnvVars/Secrets`.
+- Progressive enhancement only: `initTheme/Filter/Groups/PodTree/Nav/Menus/Logs/Editors/EnvVars/Secrets`.
   The DOM-scanning ones are idempotent and re-run on `htmx:afterSwap`.
 - The code editor (`frontend/editor.js`) keeps the underlying `<textarea>` in
   sync so a normal form submit still carries `contents`, and debounce-posts

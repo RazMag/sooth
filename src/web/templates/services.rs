@@ -8,7 +8,7 @@ use maud::{Markup, html};
 use super::list::{Column, ListContext, ListSpec, RowCtx, kind_cell};
 use super::{Icon, NavItem, icon, ports_cell_live, shell};
 use crate::health::Health;
-use crate::quadlet::QuadletUnit;
+use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 
 fn ports_cell(ctx: &RowCtx) -> Markup {
@@ -29,6 +29,7 @@ pub const COLUMNS: &[Column] = &[
 pub const SPEC: ListSpec = ListSpec {
     title: "Services",
     active_nav: Some(NavItem::Services),
+    kinds: &[UnitKind::Container, UnitKind::Pod],
     columns: COLUMNS,
     new_href: "/containers/new",
     empty_hint: "No services yet — create a container or pod to get started.",

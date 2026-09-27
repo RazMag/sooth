@@ -28,6 +28,11 @@ CSS/JS embedded, so it runs from any directory.
   only home for `.kube` units.
 - **Ports** — every declared `PublishPort=` across Containers and Pods, with
   conflicting host ports flagged.
+- **Pod tree** — every list table nests a pod's units under its row: its
+  member containers (`Pod=`), plus any volume, network, image, or build used
+  only by that pod. Pods show up on the Volumes/Networks/Images tables too,
+  whenever they own something there. Each pod collapses on its own
+  (remembered per browser).
 - **Environment** — the host `${NAME}` variables a quadlet file can
   interpolate. sooth manages its own set through an `environment.d` drop-in
   (`~/.config/environment.d/50-sooth.conf`) and also pushes each change to
@@ -302,7 +307,8 @@ per request, so you don't restart the server. Without watch, restart
 skips the frontend build entirely (e.g. a read-only checkout).
 
 `scripts/run-dev.sh` (or `just dev`) builds and runs sooth against a
-throwaway scratch quadlet directory (seeded with one demo unit) instead of
+throwaway scratch quadlet directory (seeded with a demo container and a
+demo pod -- two containers, a network and a volume) instead of
 your real `~/.config/containers/systemd`, so you can poke at the dashboard
 without touching anything real:
 

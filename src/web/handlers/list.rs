@@ -2,8 +2,10 @@
 //! all-kinds fallback). Each is a thin pair (full page + `/rows` refresh
 //! fragment) over `core::load_units_for_kinds` and the generic
 //! `templates::list` renderer -- only the `ListSpec` (title, columns, kinds)
-//! differs per section. Containers/Pods live on the combined Services home
-//! page instead (`handlers::services`), not as their own list here.
+//! differs per section. Pods are loaded into every list (`with_pods`) so
+//! each can head the units it owns in the table's pod tree. Containers/Pods
+//! live on the combined Services home page instead (`handlers::services`),
+//! not as their own list here.
 
 use axum::extract::State;
 use axum::response::IntoResponse;
@@ -13,7 +15,7 @@ use crate::config::AppState;
 use crate::error::{FragmentError, PageError};
 use crate::quadlet::{UnitKind, discovery};
 use crate::web::core;
-use crate::web::templates::list::{Column, ListContext, ListSpec, kind_cell};
+use crate::web::templates::list::{Column, ListContext, ListSpec, kind_cell, with_pods};
 use crate::web::templates::{self, NavItem};
 
 const ALL_UNITS_COLUMNS: &[Column] = &[Column {
@@ -24,6 +26,7 @@ const ALL_UNITS_COLUMNS: &[Column] = &[Column {
 const VOLUMES_SPEC: ListSpec = ListSpec {
     title: "Volumes",
     active_nav: Some(NavItem::Volumes),
+    kinds: VOLUMES_KINDS,
     columns: templates::volumes::COLUMNS,
     new_href: "/volumes/new",
     empty_hint: "No volumes yet.",
@@ -33,6 +36,7 @@ const VOLUMES_KINDS: &[UnitKind] = &[UnitKind::Volume];
 const NETWORKS_SPEC: ListSpec = ListSpec {
     title: "Networks",
     active_nav: Some(NavItem::Networks),
+    kinds: NETWORKS_KINDS,
     columns: templates::networks::COLUMNS,
     new_href: "/networks/new",
     empty_hint: "No networks yet.",
@@ -42,6 +46,7 @@ const NETWORKS_KINDS: &[UnitKind] = &[UnitKind::Network];
 const IMAGES_SPEC: ListSpec = ListSpec {
     title: "Images",
     active_nav: Some(NavItem::Images),
+    kinds: IMAGES_KINDS,
     columns: templates::images::COLUMNS,
     new_href: "/images/new",
     empty_hint: "No images or builds yet.",
@@ -51,6 +56,7 @@ const IMAGES_KINDS: &[UnitKind] = &[UnitKind::Image, UnitKind::Build];
 const ALL_UNITS_SPEC: ListSpec = ListSpec {
     title: "All units",
     active_nav: None,
+    kinds: ALL_UNITS_KINDS,
     columns: ALL_UNITS_COLUMNS,
     new_href: "/units/new",
     empty_hint: "No quadlet files found yet.",
@@ -66,7 +72,7 @@ const ALL_UNITS_KINDS: &[UnitKind] = &[
 ];
 
 macro_rules! list_handlers {
-    ($page_fn:ident, $rows_fn:ident, $kinds:expr, $spec:expr) => {
+    ($page_fn:ident, $rows_fn:ident, $spec:expr) => {
         pub async fn $page_fn(
             State(state): State<AppState>,
             session: Session,
@@ -74,7 +80,8 @@ macro_rules! list_handlers {
             let csrf = crate::auth::csrf::current(&session)
                 .await
                 .unwrap_or_default();
-            let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
+            let kinds = with_pods($spec.kinds);
+            let (units, all) = core::load_units_and_siblings(&state, &kinds).await?;
             let known = discovery::list_groups(&state.quadlet_dir);
             let synced = state.git_sync.synced_groups();
             let missing = core::missing_refs(&state, &units).await;
@@ -99,7 +106,8 @@ macro_rules! list_handlers {
             let csrf = crate::auth::csrf::current(&session)
                 .await
                 .unwrap_or_default();
-            let (units, all) = core::load_units_and_siblings(&state, $kinds).await?;
+            let kinds = with_pods($spec.kinds);
+            let (units, all) = core::load_units_and_siblings(&state, &kinds).await?;
             let known = discovery::list_groups(&state.quadlet_dir);
             let synced = state.git_sync.synced_groups();
             let missing = core::missing_refs(&state, &units).await;
@@ -118,12 +126,7 @@ macro_rules! list_handlers {
     };
 }
 
-list_handlers!(volumes_page, volumes_rows, VOLUMES_KINDS, &VOLUMES_SPEC);
-list_handlers!(networks_page, networks_rows, NETWORKS_KINDS, &NETWORKS_SPEC);
-list_handlers!(images_page, images_rows, IMAGES_KINDS, &IMAGES_SPEC);
-list_handlers!(
-    all_units_page,
-    all_units_rows,
-    ALL_UNITS_KINDS,
-    &ALL_UNITS_SPEC
-);
+list_handlers!(volumes_page, volumes_rows, &VOLUMES_SPEC);
+list_handlers!(networks_page, networks_rows, &NETWORKS_SPEC);
+list_handlers!(images_page, images_rows, &IMAGES_SPEC);
+list_handlers!(all_units_page, all_units_rows, &ALL_UNITS_SPEC);

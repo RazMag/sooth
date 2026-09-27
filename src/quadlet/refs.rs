@@ -160,6 +160,60 @@ pub fn pod_own_refs(pod: &QuadletUnit, all: &[QuadletUnit]) -> (Vec<String>, Vec
     )
 }
 
+/// The `.pod` quadlet in `all` a Container's `Pod=` names, if it exists.
+fn container_pod<'a>(container: &QuadletUnit, all: &'a [QuadletUnit]) -> Option<&'a str> {
+    let name = container.section("Container")?.get("Pod")?.trim();
+    all.iter()
+        .find(|u| u.kind == UnitKind::Pod && u.file_name == name)
+        .map(|u| u.file_name.as_str())
+}
+
+/// The pod `unit` belongs to, for the list tables' pod tree -- the file name
+/// of a `.pod` quadlet in `all`:
+/// - a Container: the pod its `Pod=` names;
+/// - a Volume/Network: the one pod that every consumer ([`consumers_of`])
+///   belongs to -- the pod itself declaring it in `[Pod]`, or one of its
+///   member containers;
+/// - an Image/Build: likewise, over the containers whose `Image=` names it.
+///
+/// A resource shared with a standalone container or with a second pod has no
+/// single owner (`None`) -- a tree row can only have one parent, and each
+/// unit renders exactly once per table. So does anything unused, and every
+/// Pod/Kube.
+pub fn owning_pod<'a>(unit: &QuadletUnit, all: &'a [QuadletUnit]) -> Option<&'a str> {
+    let consumers: Vec<&'a QuadletUnit> = match unit.kind {
+        UnitKind::Container => return container_pod(unit, all),
+        UnitKind::Volume | UnitKind::Network => {
+            let names = consumers_of(unit, all);
+            all.iter()
+                .filter(|u| names.contains(&u.file_name))
+                .collect()
+        }
+        UnitKind::Image | UnitKind::Build => all
+            .iter()
+            .filter(|u| u.kind == UnitKind::Container)
+            .filter(|u| {
+                u.section("Container")
+                    .and_then(|s| s.get("Image"))
+                    .is_some_and(|v| v.trim() == unit.file_name)
+            })
+            .collect(),
+        UnitKind::Pod | UnitKind::Kube => return None,
+    };
+    let mut owner = None;
+    for consumer in consumers {
+        let pod = match consumer.kind {
+            UnitKind::Pod => Some(consumer.file_name.as_str()),
+            _ => container_pod(consumer, all),
+        }?;
+        if owner.is_some_and(|o| o != pod) {
+            return None;
+        }
+        owner = Some(pod);
+    }
+    owner
+}
+
 /// The podman secret names a unit consumes: every `Secret=` in a Container's
 /// `[Container]` section, trimmed to the name (the first `,`-delimited
 /// segment of `NAME[,type=…,target=…]`). Sorted and deduplicated. Empty for
@@ -352,6 +406,75 @@ mod tests {
             ],
         );
         assert_eq!(secret_refs(&web), vec!["db-pass", "tls-key"]);
+    }
+
+    #[test]
+    fn owning_pod_resolves_members_and_exclusive_resources() {
+        let all = vec![
+            unit(
+                "web.pod",
+                UnitKind::Pod,
+                "Pod",
+                &[("Network", "front.network")],
+            ),
+            unit("db.pod", UnitKind::Pod, "Pod", &[]),
+            unit(
+                "app.container",
+                UnitKind::Container,
+                "Container",
+                &[
+                    ("Pod", "web.pod"),
+                    ("Image", "app.build"),
+                    ("Volume", "data.volume:/data"),
+                    ("Volume", "shared.volume:/s"),
+                ],
+            ),
+            unit(
+                "pg.container",
+                UnitKind::Container,
+                "Container",
+                &[("Pod", "db.pod"), ("Volume", "shared.volume:/s")],
+            ),
+            unit(
+                "solo.container",
+                UnitKind::Container,
+                "Container",
+                &[("Volume", "loose.volume:/x"), ("Image", "base.image")],
+            ),
+            unit(
+                "stray.container",
+                UnitKind::Container,
+                "Container",
+                &[("Pod", "gone.pod")],
+            ),
+            unit("front.network", UnitKind::Network, "Network", &[]),
+            unit("data.volume", UnitKind::Volume, "Volume", &[]),
+            unit("shared.volume", UnitKind::Volume, "Volume", &[]),
+            unit("loose.volume", UnitKind::Volume, "Volume", &[]),
+            unit("unused.volume", UnitKind::Volume, "Volume", &[]),
+            unit("app.build", UnitKind::Build, "Build", &[]),
+            unit("base.image", UnitKind::Image, "Image", &[]),
+        ];
+        let pod = |name: &str| {
+            let u = all.iter().find(|u| u.file_name == name).unwrap();
+            owning_pod(u, &all)
+        };
+        assert_eq!(pod("app.container"), Some("web.pod"));
+        assert_eq!(pod("pg.container"), Some("db.pod"));
+        // `Pod=` naming a quadlet that isn't on disk has no owner to nest under.
+        assert_eq!(pod("stray.container"), None);
+        assert_eq!(pod("solo.container"), None);
+        // Declared by the pod itself.
+        assert_eq!(pod("front.network"), Some("web.pod"));
+        // Used only by a member.
+        assert_eq!(pod("data.volume"), Some("web.pod"));
+        assert_eq!(pod("app.build"), Some("web.pod"));
+        // Shared across two pods, used by a standalone container, or unused.
+        assert_eq!(pod("shared.volume"), None);
+        assert_eq!(pod("loose.volume"), None);
+        assert_eq!(pod("unused.volume"), None);
+        assert_eq!(pod("base.image"), None);
+        assert_eq!(pod("web.pod"), None);
     }
 
     #[test]
