@@ -21,7 +21,7 @@ pub struct UnitRef<'a> {
 pub struct PodTargets<'a> {
     pub containers: Vec<UnitRef<'a>>,
     /// True when `containers` is narrowed to the members that declare the
-    /// container port (`ExposePort=` or image `EXPOSE`); false when none
+    /// container port (`ExposeHostPort=` or image `EXPOSE`); false when none
     /// does and `containers` is every member.
     pub matched: bool,
 }
@@ -118,7 +118,7 @@ pub fn ports_rows(rows: &[PortRow], csrf: &str, pull_error: Option<(&str, &str)>
                                 "via pod " a href=(row.owner.href) { (row.owner.file_name) }
                             }
                             @if !targets.matched && targets.containers.len() > 1 {
-                                div.cell-secondary title="Add ExposePort= to the container that serves it, or pull its image so its EXPOSE can be read" {
+                                div.cell-secondary title="Add ExposeHostPort= to the container that serves it, or pull its image so its EXPOSE can be read" {
                                     "none declares port " (row.mapping.container_port) "/" (row.mapping.protocol.as_str())
                                 }
                             }
@@ -137,7 +137,7 @@ pub fn ports_page(rows: &[PortRow], csrf: &str, health: Health) -> Markup {
         p.page-meta {
             "Declared " code { "PublishPort=" } " entries across Containers and Pods. "
             "A pod's ports are shown against the member that declares the container port ("
-            code { "ExposePort=" } " or its image's " code { "EXPOSE" } "), else every member."
+            code { "ExposeHostPort=" } " or its image's " code { "EXPOSE" } "), else every member."
         }
         @if rows.is_empty() {
             p.empty { "No published ports declared yet." }

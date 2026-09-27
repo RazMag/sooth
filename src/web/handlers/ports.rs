@@ -35,7 +35,7 @@ async fn with_rows<T>(
     let mut mappings = ports::extract(&unit_refs);
     mappings.sort_by_key(|m| m.host_port.map(|r| r.start).unwrap_or(u16::MAX));
 
-    // Which port(s) each pod member says it serves: its own `ExposePort=`
+    // Which port(s) each pod member says it serves: its own `ExposeHostPort=`
     // plus its image's `EXPOSE`. Only pods with published ports need this,
     // and each distinct image is inspected once, concurrently.
     let member_files: Vec<String> = units
