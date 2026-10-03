@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use axum::extract::State;
 use axum::response::IntoResponse;
 use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{FragmentError, PageError};
+use crate::quadlet::ports::SplitPorts;
 use crate::quadlet::{QuadletUnit, UnitKind, discovery};
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -23,6 +26,19 @@ fn compute_stats(units: &[(QuadletUnit, UnitStatus)]) -> Stats {
     }
 }
 
+/// Every listed pod's published ports, split onto the members serving them.
+async fn split_ports(
+    units: &[(QuadletUnit, UnitStatus)],
+    all: &[QuadletUnit],
+) -> HashMap<String, SplitPorts> {
+    let pods: Vec<&QuadletUnit> = units
+        .iter()
+        .map(|(u, _)| u)
+        .filter(|u| u.kind == UnitKind::Pod)
+        .collect();
+    core::split_pod_ports(&pods, all).await
+}
+
 pub async fn page(
     State(state): State<AppState>,
     session: Session,
@@ -34,6 +50,7 @@ pub async fn page(
     let known = discovery::list_groups(&state.quadlet_dir);
     let synced = state.git_sync.synced_groups();
     let missing = core::missing_refs(&state, &units).await;
+    let ports = split_ports(&units, &all).await;
     let stats = compute_stats(&units);
     Ok(templates::services::services_page(
         &units,
@@ -44,6 +61,7 @@ pub async fn page(
             known: &known,
             synced: &synced,
             missing: &missing,
+            ports: Some(&ports),
         },
         state.health.get(),
     ))
@@ -60,6 +78,7 @@ pub async fn rows(
     let known = discovery::list_groups(&state.quadlet_dir);
     let synced = state.git_sync.synced_groups();
     let missing = core::missing_refs(&state, &units).await;
+    let ports = split_ports(&units, &all).await;
     Ok(templates::list::list_rows(
         &templates::services::SPEC,
         &units,
@@ -69,6 +88,7 @@ pub async fn rows(
             known: &known,
             synced: &synced,
             missing: &missing,
+            ports: Some(&ports),
         },
     ))
 }

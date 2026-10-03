@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-
 use axum::Form;
 use axum::extract::State;
 use axum::response::IntoResponse;
-use futures_util::future::join_all;
 use serde::Deserialize;
 use tower_sessions::Session;
 
@@ -36,8 +33,7 @@ async fn with_rows<T>(
     mappings.sort_by_key(|m| m.host_port.map(|r| r.start).unwrap_or(u16::MAX));
 
     // Which port(s) each pod member says it serves: its own `ExposeHostPort=`
-    // plus its image's `EXPOSE`. Only pods with published ports need this,
-    // and each distinct image is inspected once, concurrently.
+    // plus its image's `EXPOSE`. Only pods with published ports need this.
     let member_files: Vec<String> = units
         .iter()
         .filter(|(u, _)| {
@@ -45,43 +41,12 @@ async fn with_rows<T>(
         })
         .flat_map(|(pod, _)| refs::pod_members(pod, &unit_refs))
         .collect();
-    let member_images: HashMap<&str, String> = member_files
+    let member_units: Vec<&QuadletUnit> = unit_refs
         .iter()
-        .filter_map(|f| {
-            let u = unit_refs.iter().find(|u| &u.file_name == f)?;
-            Some((u.file_name.as_str(), refs::container_image(u, &all)?))
-        })
+        .filter(|u| member_files.contains(&u.file_name))
         .collect();
-    let mut images: Vec<&String> = member_images.values().collect();
-    images.sort();
-    images.dedup();
-    let image_ports: HashMap<&String, Vec<ports::ExposedPort>> = images
-        .iter()
-        .copied()
-        .zip(join_all(images.iter().map(|i| imageinfo::exposed_ports(i))).await)
-        .filter_map(|(i, p)| Some((i, p?)))
-        .collect();
-    let exposed: HashMap<&str, Vec<ports::ExposedPort>> = member_files
-        .iter()
-        .filter_map(|f| unit_refs.iter().find(|u| &u.file_name == f))
-        .map(|u| {
-            let mut e = ports::declared_exposed(u);
-            if let Some(p) = member_images
-                .get(u.file_name.as_str())
-                .and_then(|i| image_ports.get(i))
-            {
-                e.extend(p);
-            }
-            (u.file_name.as_str(), e)
-        })
-        .collect();
-    // Members whose image podman couldn't inspect -- almost always "not
-    // pulled yet" -- and that a pull could fix (not a local `.build`).
-    let unpulled: HashMap<&str, &String> = member_images
-        .iter()
-        .filter(|(f, i)| !image_ports.contains_key(i) && !builds_locally(f, &unit_refs))
-        .map(|(f, i)| (*f, i))
-        .collect();
+    let core::MemberExposure { exposed, unpulled } =
+        core::member_exposure(&member_units, &all).await;
 
     let unit_ref = |file_name: &str| {
         units
@@ -154,16 +119,6 @@ async fn with_rows<T>(
     Ok(render(&rows))
 }
 
-/// Whether a container's `Image=` names a `.build` quadlet -- a locally
-/// built image there's nothing to pull for.
-fn builds_locally(file_name: &str, units: &[QuadletUnit]) -> bool {
-    units
-        .iter()
-        .find(|u| u.file_name == file_name)
-        .and_then(|u| u.section("Container")?.get("Image"))
-        .is_some_and(|i| i.trim().ends_with(".build"))
-}
-
 async fn csrf(session: &Session) -> String {
     crate::auth::csrf::current(session)
         .await
@@ -219,7 +174,7 @@ pub async fn pull(
     let image = all
         .iter()
         .find(|u| u.kind == UnitKind::Container && u.file_name == form.file_name)
-        .filter(|_| !builds_locally(&form.file_name, &all))
+        .filter(|_| !core::builds_locally(&form.file_name, &all))
         .and_then(|u| refs::container_image(u, &all))
         .ok_or_else(|| AppError::NotFound(format!("no pullable image for {}", form.file_name)))?;
     let error = imageinfo::pull(&image).await.err();

@@ -374,6 +374,38 @@
   .port-map { display: inline-flex; align-items: baseline; white-space: nowrap; }
   .port-dest { color: var(--color-muted); font-family: var(--font-mono); font-size: 0.82em; }
   .mono { font-family: var(--font-mono); font-size: 0.85em; }
+  /* "+N more": the ports past the first few are hidden until a
+     visually-hidden checkbox is checked by its label, which sits last in the
+     list -- so the opened ports continue the same wrapped list and "show
+     less" ends it (see `templates::ports_summary`). A folded list wraps at
+     about its collapsed width, so opening it grows the row taller rather
+     than the column wider. */
+  .port-list-long { max-width: 24rem; }
+  .port-more-toggle {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .port-more-toggle:not(:checked) ~ .port-extra { display: none; }
+  .port-more-label {
+    align-self: center;
+    cursor: pointer;
+    color: var(--color-accent);
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .port-more-label:hover { text-decoration: underline; }
+  .port-more-toggle:focus-visible ~ .port-more-label {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 0.2rem;
+  }
+  .port-more-toggle:not(:checked) ~ .port-more-label .port-more-less,
+  .port-more-toggle:checked ~ .port-more-label .port-more-count { display: none; }
 
   .port-link,
   .port-static {
@@ -991,6 +1023,8 @@
      group header above it, so the row's padding lives on the wrapper. */
   .data-table tbody td:first-child:has(> .row-indent) { padding: 0; }
   .row-indent { padding: 0.6rem 0.65rem 0.6rem calc(var(--gpad) + var(--depth, 0) * var(--gstep)); }
+  /* Keep a file name on one line -- broken at its hyphens it reads as two. */
+  .row-indent > a { white-space: nowrap; }
 
   /* The guide bar: for any nested row (depth >= 1) drop the deep left padding,
      push the content box in by the *parent's* indent with a margin, and draw a
@@ -1118,11 +1152,11 @@
   .data-table [data-filtering] tr.pod-collapsed:not([hidden]) { display: table-row; }
 
   /* Pod tree: a pod row heads the units it owns (`tr[data-pod-member]`, one
-     indent step deeper -- see `templates::list::PodTree`). Its chevron sits
-     between the grip and the name; plain rows in a table with any pod get a
-     same-width spacer so every top-level name starts at the same x. The
-     children's guide bar is tinted with the accent so a pod's units read
-     apart from a group's nesting. */
+     indent step deeper -- see `templates::list::PodTree`), counted by kind on
+     its secondary line. Its chevron sits between the grip and the name;
+     plain rows in a table with any pod get a same-width spacer so every
+     top-level name starts at the same x. The children's guide bar is tinted
+     with the accent so a pod's units read apart from a group's nesting. */
   .pod-toggle {
     display: inline-flex;
     vertical-align: middle;
@@ -1136,7 +1170,6 @@
   .pod-toggle:hover { color: var(--color-ink); }
   .pod-toggle[aria-expanded="false"] .group-chevron { transform: rotate(-90deg); }
   .pod-toggle-spacer { display: inline-block; width: 0.9rem; margin-right: 0.3rem; }
-  .data-table tr[data-pod] .group-count { margin-left: 0.15rem; vertical-align: 0.05rem; }
   .data-table tbody tr[data-pod-member] .row-indent {
     border-left-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
   }

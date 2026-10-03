@@ -27,6 +27,7 @@ use uuid::Uuid;
 use crate::health::Health;
 use crate::hostenv::EnvVar;
 use crate::quadlet::autoupdate::AutoUpdateMode;
+use crate::quadlet::ports::{PortMapping, SplitPorts};
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -782,6 +783,11 @@ pub fn login_page(error: Option<&str>) -> Markup {
     }
 }
 
+/// How many mappings [`ports_summary`] shows before folding the rest behind
+/// a "+N more" toggle -- a pod publishing dozens of ports would otherwise
+/// swallow the table's width and stretch its row several lines tall.
+const PORTS_SHOWN: usize = 4;
+
 /// A summary of a Container/Pod unit's declared `PublishPort=` entries, e.g.
 /// `8080:80  53:53/udp` -- shared by the Services list column and the
 /// Container/Pod detail Overview. When `active`, a static host port is
@@ -789,31 +795,86 @@ pub fn login_page(error: Option<&str>) -> Markup {
 /// link (pill) to the same host on that port; when the unit isn't running
 /// the same port renders as a greyed, unclickable pill instead. The
 /// container-port half stays muted beside it.
+///
+/// Past [`PORTS_SHOWN`] the rest are hidden behind a "+N more" toggle (never
+/// cut to a lone extra one). It's a visually-hidden checkbox plus a `<label>`
+/// rather than a `<details>`, whose summary would have to come first and so
+/// split the list where it opens: the hidden pills sit right after the shown
+/// ones and the label last, so opening it just continues the list, with
+/// "show less" at its end. Pure CSS (`.port-more-toggle:checked ~ …`).
 pub fn ports_summary(unit: &QuadletUnit, active: bool) -> Markup {
     let mappings = crate::quadlet::ports::extract(std::slice::from_ref(unit));
+    port_list(&mappings, active, &unit.service_name())
+}
+
+/// The Services list's Ports cell once a pod's published ports have been
+/// split between it and its members (`core::split_pod_ports`): a member
+/// shows the pod ports it serves, the pod the ones none of them do, plus a
+/// note of how many moved -- so a collapsed pod still says where they went.
+pub fn split_ports_summary(unit: &QuadletUnit, active: bool, split: &SplitPorts) -> Markup {
+    let moved = split.moved;
+    html! {
+        @if !split.mappings.is_empty() || moved == 0 {
+            (port_list(&split.mappings, active, &unit.service_name()))
+        }
+        @if moved > 0 {
+            div.cell-secondary title="Published by this pod and shown on the containers that serve them, matched as on the Ports screen" {
+                (moved) @if moved == 1 { " port" } @else { " ports" } " on its containers"
+            }
+        }
+    }
+}
+
+/// `mappings` as a wrapping list of pills, or a muted dash when empty --
+/// the body of [`ports_summary`] and [`split_ports_summary`]. `key` (the
+/// unit's service name) keeps the "+N more" toggle's id unique per page.
+fn port_list(mappings: &[PortMapping], active: bool, key: &str) -> Markup {
     if mappings.is_empty() {
         return html! { span.muted { "—" } };
     }
+    let shown = if mappings.len() > PORTS_SHOWN + 1 {
+        PORTS_SHOWN
+    } else {
+        mappings.len()
+    };
+    let (head, rest) = mappings.split_at(shown);
+    let toggle_id = format!("ports-more-{}", dom_id(key));
     html! {
-        span.port-list {
-            @for m in &mappings {
-                span.port-map {
-                    @match m.host_port {
-                        Some(range) if range.start == range.end => {
-                            @if active {
-                                span data-host-port=(range.start.to_string()) { (range.start) }
-                            } @else {
-                                span.port-static title="Service not running" { (range.start) }
-                            }
-                            span.port-dest { ":" (m.container_port) }
-                        }
-                        Some(range) => {
-                            span.mono { (format!("{}-{}", range.start, range.end)) }
-                            span.port-dest { ":" (m.container_port) }
-                        }
-                        None => { span.port-dest { (m.container_port) " (dynamic)" } }
-                    }
+        span class={"port-list" @if !rest.is_empty() { " port-list-long" }} {
+            @if !rest.is_empty() {
+                input.port-more-toggle type="checkbox" id=(toggle_id);
+            }
+            @for m in head { (port_map(m, active, false)) }
+            @for m in rest { (port_map(m, active, true)) }
+            @if !rest.is_empty() {
+                label.port-more-label for=(toggle_id) title={(mappings.len()) " published ports"} {
+                    span.port-more-count { "+" (rest.len()) " more" }
+                    span.port-more-less { "show less" }
                 }
+            }
+        }
+    }
+}
+
+/// One `HOST:CONTAINER` pill of [`ports_summary`]; `extra` ones are hidden
+/// until its "+N more" toggle is checked.
+fn port_map(m: &PortMapping, active: bool, extra: bool) -> Markup {
+    html! {
+        span class={"port-map" @if extra { " port-extra" }} {
+            @match m.host_port {
+                Some(range) if range.start == range.end => {
+                    @if active {
+                        span data-host-port=(range.start.to_string()) { (range.start) }
+                    } @else {
+                        span.port-static title="Service not running" { (range.start) }
+                    }
+                    span.port-dest { ":" (m.container_port) }
+                }
+                Some(range) => {
+                    span.mono { (format!("{}-{}", range.start, range.end)) }
+                    span.port-dest { ":" (m.container_port) }
+                }
+                None => { span.port-dest { (m.container_port) " (dynamic)" } }
             }
         }
     }
@@ -832,6 +893,23 @@ pub fn ports_cell_live(unit: &QuadletUnit, status: &UnitStatus) -> Markup {
         span.ports-live hx-get={(base) "/ports"}
             hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
             (ports_summary(unit, status.is_active()))
+        }
+    }
+}
+
+/// [`ports_cell_live`] for a row whose ports were split with its pod's (see
+/// [`split_ports_summary`]); its refresh asks for the same split view back.
+pub fn split_ports_cell_live(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    split: &SplitPorts,
+) -> Markup {
+    let base = core::unit_url(unit);
+    let service = unit.service_name();
+    html! {
+        span.ports-live hx-get={(base) "/ports?split=1"}
+            hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
+            (split_ports_summary(unit, status.is_active(), split))
         }
     }
 }

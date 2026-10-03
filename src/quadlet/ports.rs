@@ -205,6 +205,58 @@ pub fn serves(exposed: &[ExposedPort], mapping: &PortMapping) -> bool {
         .any(|e| e.protocol == mapping.protocol && e.range.overlaps(target))
 }
 
+/// The ports a list row shows once a pod's `PublishPort=` mappings have been
+/// split between the pod and its members (see [`split_pod_ports`]).
+#[derive(Debug, Clone, Default)]
+pub struct SplitPorts {
+    /// For a member: the pod mappings it serves. For the pod: the ones no
+    /// member serves.
+    pub mappings: Vec<PortMapping>,
+    /// For the pod: how many of its mappings moved to its members. Always 0
+    /// for a member.
+    pub moved: usize,
+}
+
+/// Splits a pod's published ports between the pod and the `members` (file
+/// name + exposed ports) that serve them, as the Ports screen matches them:
+/// a mapping goes to every member whose exposed ports cover its container
+/// port ([`serves`]); one no member serves stays on the pod. Returns the
+/// pod's entry (keyed `pod_file`) plus one per member that serves anything.
+pub fn split_pod_ports(
+    pod_file: &str,
+    pod_mappings: &[PortMapping],
+    members: &[(String, Vec<ExposedPort>)],
+) -> Vec<(String, SplitPorts)> {
+    let mut pod = SplitPorts::default();
+    let mut by_member: Vec<(String, SplitPorts)> = Vec::new();
+    for m in pod_mappings {
+        let serving: Vec<&String> = members
+            .iter()
+            .filter(|(_, exposed)| serves(exposed, m))
+            .map(|(file, _)| file)
+            .collect();
+        if serving.is_empty() {
+            pod.mappings.push(m.clone());
+            continue;
+        }
+        pod.moved += 1;
+        for file in serving {
+            match by_member.iter_mut().find(|(f, _)| f == file) {
+                Some((_, split)) => split.mappings.push(m.clone()),
+                None => by_member.push((
+                    file.clone(),
+                    SplitPorts {
+                        mappings: vec![m.clone()],
+                        moved: 0,
+                    },
+                )),
+            }
+        }
+    }
+    by_member.push((pod_file.to_string(), pod));
+    by_member
+}
+
 /// File names of every *other* quadlet whose static host-port range overlaps
 /// `mapping`'s on the same protocol -- the units it really conflicts with.
 /// Empty for a dynamic host port. Sorted and deduplicated. Keyed per mapping
@@ -386,6 +438,41 @@ mod tests {
         assert!(!serves(&[parse_exposed("80/udp").unwrap()], &m));
         assert!(!serves(&[parse_exposed("443").unwrap()], &m));
         assert!(!serves(&[], &m));
+    }
+
+    #[test]
+    fn split_pod_ports_moves_served_ports_to_members() {
+        let pod: Vec<PortMapping> = ["8080:80", "8443:443", "5353:53/udp", "9000:9000"]
+            .iter()
+            .map(|raw| mapping("web.pod", raw).unwrap())
+            .collect();
+        let exposed = |list: &[&str]| -> Vec<ExposedPort> {
+            list.iter().map(|s| parse_exposed(s).unwrap()).collect()
+        };
+        let members = vec![
+            ("web.container".to_string(), exposed(&["80", "443"])),
+            ("dns.container".to_string(), exposed(&["53/udp"])),
+            ("proxy.container".to_string(), exposed(&["80"])),
+            ("idle.container".to_string(), exposed(&[])),
+        ];
+        let split = split_pod_ports("web.pod", &pod, &members);
+        let raws = |file: &str| -> Vec<&str> {
+            split
+                .iter()
+                .find(|(f, _)| f == file)
+                .map(|(_, s)| s.mappings.iter().map(|m| m.raw.as_str()).collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(raws("web.container"), ["8080:80", "8443:443"]);
+        // Served by two members: shown on both.
+        assert_eq!(raws("proxy.container"), ["8080:80"]);
+        assert_eq!(raws("dns.container"), ["5353:53/udp"]);
+        // No member serves 9000, so it stays on the pod.
+        assert_eq!(raws("web.pod"), ["9000:9000"]);
+        let pod_entry = &split.iter().find(|(f, _)| f == "web.pod").unwrap().1;
+        assert_eq!(pod_entry.moved, 3);
+        // A member that serves nothing gets no entry.
+        assert!(split.iter().all(|(f, _)| f != "idle.container"));
     }
 
     #[test]

@@ -22,7 +22,10 @@ CSS/JS embedded, so it runs from any directory.
 ## Features
 
 - **Services** landing page — Containers and Pods combined, with a
-  total/running/failed stat bar.
+  total/running/failed stat bar. A pod's published ports show on the member
+  container that serves them (by its `ExposeHostPort=` or its image's
+  `EXPOSE`, as on the Ports screen); only ports none of them serve stay on
+  the pod row.
 - Dedicated **Volumes**, **Networks**, and **Images** (Image + Build units)
   sections, plus a generic `/units` listing that covers every kind and is the
   only home for `.kube` units.
