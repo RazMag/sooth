@@ -94,6 +94,7 @@ macro_rules! list_handlers {
                     known: &known,
                     synced: &synced,
                     missing: &missing,
+                    ports: None,
                 },
                 state.health.get(),
             ))
@@ -120,6 +121,7 @@ macro_rules! list_handlers {
                     known: &known,
                     synced: &synced,
                     missing: &missing,
+                    ports: None,
                 },
             ))
         }

@@ -14,9 +14,9 @@ use serde::Deserialize;
 use tower_sessions::Session;
 
 use crate::config::AppState;
-use crate::error::FragmentError;
+use crate::error::{AppError, FragmentError};
 use crate::quadlet::autoupdate::AutoUpdateMode;
-use crate::quadlet::discovery;
+use crate::quadlet::{UnitKind, discovery, refs};
 use crate::web::{core, templates};
 
 #[derive(Deserialize)]
@@ -95,13 +95,47 @@ pub async fn config(
 /// `sse:status-{service}` event, so a stopped -> running transition upgrades
 /// the greyed pills into live links (via `ports.js` on `htmx:afterSwap`)
 /// without a reload -- the badge's SSE swap alone never touches this cell.
+///
+/// `?split=1` is the Services list's view, where a pod's ports are split
+/// onto the members serving them (`core::split_pod_ports`): it re-derives
+/// this unit's share -- for a pod or one of its members -- falling back to
+/// the unit's own ports when it has none.
 pub async fn ports_cell(
     State(state): State<AppState>,
     Path(file_name): Path<String>,
+    Query(query): Query<PortsQuery>,
 ) -> Result<maud::Markup, FragmentError> {
-    let unit = discovery::load_by_name(&state.quadlet_dir, &file_name)?;
+    let all = discovery::load_all(&state.quadlet_dir)?;
+    let unit = all
+        .iter()
+        .find(|u| u.file_name == file_name)
+        .ok_or_else(|| AppError::NotFound(file_name.clone()))?;
     let status = state.systemd.status(&unit.service_name()).await?;
-    Ok(templates::ports_summary(&unit, status.is_active()))
+    if query.split.is_some() {
+        let pod = match unit.kind {
+            UnitKind::Pod => Some(unit),
+            _ => refs::owning_pod(unit, &all)
+                .and_then(|p| all.iter().find(|u| u.file_name == p))
+                .filter(|_| unit.kind == UnitKind::Container),
+        };
+        if let Some(pod) = pod {
+            let split = core::split_pod_ports(&[pod], &all).await;
+            if let Some(mine) = split.get(&unit.file_name) {
+                return Ok(templates::split_ports_summary(
+                    unit,
+                    status.is_active(),
+                    mine,
+                ));
+            }
+        }
+    }
+    Ok(templates::ports_summary(unit, status.is_active()))
+}
+
+#[derive(Deserialize)]
+pub struct PortsQuery {
+    /// Present (any value) for the Services list's split view.
+    split: Option<String>,
 }
 
 #[derive(Deserialize)]

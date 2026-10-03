@@ -27,7 +27,7 @@ use uuid::Uuid;
 use crate::health::Health;
 use crate::hostenv::EnvVar;
 use crate::quadlet::autoupdate::AutoUpdateMode;
-use crate::quadlet::ports::PortMapping;
+use crate::quadlet::ports::{PortMapping, SplitPorts};
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -807,8 +807,26 @@ pub fn ports_summary(unit: &QuadletUnit, active: bool) -> Markup {
     port_list(&mappings, active, &unit.service_name())
 }
 
+/// The Services list's Ports cell once a pod's published ports have been
+/// split between it and its members (`core::split_pod_ports`): a member
+/// shows the pod ports it serves, the pod the ones none of them do, plus a
+/// note of how many moved -- so a collapsed pod still says where they went.
+pub fn split_ports_summary(unit: &QuadletUnit, active: bool, split: &SplitPorts) -> Markup {
+    let moved = split.moved;
+    html! {
+        @if !split.mappings.is_empty() || moved == 0 {
+            (port_list(&split.mappings, active, &unit.service_name()))
+        }
+        @if moved > 0 {
+            div.cell-secondary title="Published by this pod and shown on the containers that serve them, matched as on the Ports screen" {
+                (moved) @if moved == 1 { " port" } @else { " ports" } " on its containers"
+            }
+        }
+    }
+}
+
 /// `mappings` as a wrapping list of pills, or a muted dash when empty --
-/// the body of [`ports_summary`]. `key` (the
+/// the body of [`ports_summary`] and [`split_ports_summary`]. `key` (the
 /// unit's service name) keeps the "+N more" toggle's id unique per page.
 fn port_list(mappings: &[PortMapping], active: bool, key: &str) -> Markup {
     if mappings.is_empty() {
@@ -875,6 +893,23 @@ pub fn ports_cell_live(unit: &QuadletUnit, status: &UnitStatus) -> Markup {
         span.ports-live hx-get={(base) "/ports"}
             hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
             (ports_summary(unit, status.is_active()))
+        }
+    }
+}
+
+/// [`ports_cell_live`] for a row whose ports were split with its pod's (see
+/// [`split_ports_summary`]); its refresh asks for the same split view back.
+pub fn split_ports_cell_live(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    split: &SplitPorts,
+) -> Markup {
+    let base = core::unit_url(unit);
+    let service = unit.service_name();
+    html! {
+        span.ports-live hx-get={(base) "/ports?split=1"}
+            hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
+            (split_ports_summary(unit, status.is_active(), split))
         }
     }
 }

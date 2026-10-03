@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use futures_util::future::join_all;
 use tower_sessions::Session;
 use tracing::Instrument;
 
@@ -13,7 +14,9 @@ use crate::auth;
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
+use crate::imageinfo;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
+use crate::quadlet::ports::{self, ExposedPort, SplitPorts};
 use crate::quadlet::refs::{self, MissingRefs};
 use crate::quadlet::{QuadletUnit, UnitKind, containerref, discovery, install, naming, writer};
 use crate::systemd::UnitStatus;
@@ -140,6 +143,119 @@ pub async fn missing_refs(
         .map(|(u, _)| (u.file_name.clone(), stores.missing(u)))
         .filter(|(_, m)| !m.is_empty())
         .collect()
+}
+
+/// Which ports a set of pod members say they serve, for matching a
+/// pod-published port to the member behind it.
+pub struct MemberExposure {
+    /// Each member's own `ExposeHostPort=` plus its image's `EXPOSE`, by
+    /// file name.
+    pub exposed: HashMap<String, Vec<ExposedPort>>,
+    /// Members whose image podman couldn't inspect -- almost always "not
+    /// pulled yet" -- and that a pull could fix (not a local `.build`), with
+    /// that image.
+    pub unpulled: HashMap<String, String>,
+}
+
+/// Gathers [`MemberExposure`] for `members`, inspecting each distinct image
+/// once, concurrently (`imageinfo` is best-effort: an unreadable image just
+/// contributes no ports). `all` resolves an `Image=foo.image` / `foo.build`
+/// to the image it names. Shared by the Ports screen and the Services list,
+/// so both match ports to members the same way.
+pub async fn member_exposure(members: &[&QuadletUnit], all: &[QuadletUnit]) -> MemberExposure {
+    let member_images: HashMap<&str, String> = members
+        .iter()
+        .filter_map(|u| Some((u.file_name.as_str(), refs::container_image(u, all)?)))
+        .collect();
+    let mut images: Vec<&String> = member_images.values().collect();
+    images.sort();
+    images.dedup();
+    let image_ports: HashMap<&String, Vec<ExposedPort>> = images
+        .iter()
+        .copied()
+        .zip(join_all(images.iter().map(|i| imageinfo::exposed_ports(i))).await)
+        .filter_map(|(i, p)| Some((i, p?)))
+        .collect();
+    let exposed = members
+        .iter()
+        .map(|u| {
+            let mut e = ports::declared_exposed(u);
+            if let Some(p) = member_images
+                .get(u.file_name.as_str())
+                .and_then(|i| image_ports.get(i))
+            {
+                e.extend(p);
+            }
+            (u.file_name.clone(), e)
+        })
+        .collect();
+    let unpulled = member_images
+        .iter()
+        .filter(|(f, i)| !image_ports.contains_key(i) && !builds_locally(f, all))
+        .map(|(f, i)| (f.to_string(), i.clone()))
+        .collect();
+    MemberExposure { exposed, unpulled }
+}
+
+/// Whether a container's `Image=` names a `.build` quadlet -- a locally
+/// built image there's nothing to pull for.
+pub fn builds_locally(file_name: &str, units: &[QuadletUnit]) -> bool {
+    units
+        .iter()
+        .find(|u| u.file_name == file_name)
+        .and_then(|u| u.section("Container")?.get("Image"))
+        .is_some_and(|i| i.trim().ends_with(".build"))
+}
+
+/// The Services list's Ports column for `pods` and their members: each pod's
+/// published ports moved onto the member(s) serving them, the rest left on
+/// the pod (`ports::split_pod_ports`), keyed by file name. Pods without
+/// `PublishPort=` lines -- and so their members -- get no entry; those rows
+/// show their own ports as usual.
+pub async fn split_pod_ports(
+    pods: &[&QuadletUnit],
+    all: &[QuadletUnit],
+) -> HashMap<String, SplitPorts> {
+    let pods: Vec<(&QuadletUnit, Vec<ports::PortMapping>)> = pods
+        .iter()
+        .map(|p| (*p, ports::extract(std::slice::from_ref(*p))))
+        .filter(|(_, m)| !m.is_empty())
+        .collect();
+    let members: Vec<(&str, Vec<&QuadletUnit>)> = pods
+        .iter()
+        .map(|(pod, _)| {
+            let names = refs::pod_members(pod, all);
+            let units = all
+                .iter()
+                .filter(|u| names.contains(&u.file_name))
+                .collect();
+            (pod.file_name.as_str(), units)
+        })
+        .collect();
+    let every_member: Vec<&QuadletUnit> = members.iter().flat_map(|(_, m)| m).copied().collect();
+    let exposure = member_exposure(&every_member, all).await;
+    let mut out = HashMap::new();
+    for (pod, mappings) in &pods {
+        let pod_members: Vec<(String, Vec<ExposedPort>)> = members
+            .iter()
+            .find(|(p, _)| *p == pod.file_name)
+            .map(|(_, units)| {
+                units
+                    .iter()
+                    .map(|u| {
+                        let exposed = exposure.exposed.get(&u.file_name).cloned();
+                        (u.file_name.clone(), exposed.unwrap_or_default())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.extend(ports::split_pod_ports(
+            &pod.file_name,
+            mappings,
+            &pod_members,
+        ));
+    }
+    out
 }
 
 pub struct ActionOutcome {

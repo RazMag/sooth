@@ -12,6 +12,7 @@ use super::{
     known_groups_datalist, page_header, shell, status_badge,
 };
 use crate::health::Health;
+use crate::quadlet::ports::SplitPorts;
 use crate::quadlet::refs::{self, MissingRefs};
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
@@ -34,6 +35,10 @@ pub struct ListContext<'a> {
     pub known: &'a [String],
     pub synced: &'a [String],
     pub missing: &'a HashMap<String, MissingRefs>,
+    /// Pods' published ports split onto the members serving them, by file
+    /// name (`core::split_pod_ports`) -- only for a table with a Ports
+    /// column (Services); `None` elsewhere.
+    pub ports: Option<&'a HashMap<String, SplitPorts>>,
 }
 
 /// What a column cell can draw on: the row's own unit and live status, plus
@@ -44,6 +49,9 @@ pub struct RowCtx<'a> {
     pub unit: &'a QuadletUnit,
     pub status: &'a UnitStatus,
     pub all_units: &'a [QuadletUnit],
+    /// This row's share of its pod's published ports, when they were split
+    /// (see [`ListContext::ports`]).
+    pub split_ports: Option<&'a SplitPorts>,
 }
 
 pub struct Column {
@@ -117,6 +125,7 @@ fn row(
         unit,
         status,
         all_units,
+        split_ports: lists.ports.and_then(|p| p.get(&unit.file_name)),
     };
     let move_url = format!("{}/move", core::unit_url(unit));
     // A member of `media/arr` renders one indent step past the "arr" header,
