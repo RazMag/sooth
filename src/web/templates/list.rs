@@ -87,7 +87,9 @@ enum TreePos<'a> {
     /// toggles, in a table that has any.
     Plain { spacer: bool },
     /// A pod heading `children` rows of its own.
-    Pod { children: usize },
+    Pod {
+        children: &'a [&'a (QuadletUnit, UnitStatus)],
+    },
     /// A unit shown under `pod` (see `refs::owning_pod`).
     Child { pod: &'a QuadletUnit },
 }
@@ -153,11 +155,6 @@ fn row(
                         _ => {}
                     }
                     a href=(core::unit_url(unit)) { (unit.file_name) }
-                    @if let TreePos::Pod { children } = place.tree {
-                        " " span.group-count title={
-                            (children) @if children == 1 { " unit" } @else { " units" } " in this pod"
-                        } { (children) }
-                    }
                     @if unit.is_template() {
                         " " span.chip.chip-muted title="Template unit — managed read-only, use the CLI to instantiate it" { "template" }
                     }
@@ -173,8 +170,15 @@ fn row(
                     @if let Some(m) = lists.missing.get(&unit.file_name) {
                         " " (missing_badge(unit, m))
                     }
-                    @if let Some(desc) = unit.description() {
-                        div.cell-secondary { (desc) }
+                    @match (unit.description(), place.tree) {
+                        (desc, TreePos::Pod { children }) => {
+                            div.cell-secondary {
+                                @if let Some(desc) = desc { (desc) " · " }
+                                (kind_counts(children))
+                            }
+                        }
+                        (Some(desc), _) => { div.cell-secondary { (desc) } }
+                        (None, _) => {}
                     }
                 }
             }
@@ -192,6 +196,31 @@ fn row(
             td { (kebab_menu(unit, status, csrf, lists.known)) }
         }
     }
+}
+
+/// A pod's units summed up by kind, in the order they're listed under it --
+/// "2 containers", or "2 containers, 1 volume, 1 network" on a table that
+/// lists several kinds. Shown on the pod row's secondary line.
+fn kind_counts(children: &[&(QuadletUnit, UnitStatus)]) -> String {
+    let mut counts: Vec<(UnitKind, usize)> = Vec::new();
+    for (unit, _) in children {
+        match counts.iter_mut().find(|(k, _)| *k == unit.kind) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((unit.kind, 1)),
+        }
+    }
+    counts
+        .iter()
+        .map(|(kind, n)| {
+            let noun = kind.extension();
+            if *n == 1 {
+                format!("1 {noun}")
+            } else {
+                format!("{n} {noun}s")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// A row's "N missing" badge, linking to the unit's detail page (which lists
@@ -391,9 +420,7 @@ fn entry_rows(
     let pos = if kids.is_empty() {
         TreePos::Plain { spacer: has_pods }
     } else {
-        TreePos::Pod {
-            children: kids.len(),
-        }
+        TreePos::Pod { children: kids }
     };
     let top = Place {
         group,
@@ -660,6 +687,20 @@ mod tests {
         let tree = PodTree::build(&volumes, &units, &all);
         assert_eq!(names(&tree.tops), ["web.pod", "loose.volume"]);
         assert_eq!(names(&tree.children["web.pod"]), ["data.volume"]);
+    }
+
+    #[test]
+    fn kind_counts_groups_by_kind_in_order() {
+        let entry = |name: &str, kind| (unit(name, kind, "", &[]), UnitStatus::not_found());
+        let rows = [
+            entry("a.container", UnitKind::Container),
+            entry("b.container", UnitKind::Container),
+            entry("data.volume", UnitKind::Volume),
+            entry("front.network", UnitKind::Network),
+        ];
+        let refs: Vec<_> = rows.iter().collect();
+        assert_eq!(kind_counts(&refs), "2 containers, 1 volume, 1 network");
+        assert_eq!(kind_counts(&refs[..1]), "1 container");
     }
 
     #[test]
