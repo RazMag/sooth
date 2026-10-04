@@ -1,6 +1,8 @@
 //! A tiny inline-SVG icon set (Lucide path data, ISC-licensed), rendered
 //! server-side. No icon font, no JS, no dependency -- every icon inherits
-//! `currentColor` and a 24x24 viewBox, sized by CSS on the parent.
+//! `currentColor` and a 24x24 viewBox, sized by CSS on the parent. The one
+//! exception is the brand mark ([`brand_mark`] / [`favicon_href`]), which is
+//! Font Awesome's filled 512x512 `wand-sparkles` instead.
 
 use maud::{Markup, PreEscaped};
 
@@ -126,4 +128,28 @@ pub fn icon(which: Icon) -> Markup {
     PreEscaped(format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{body}</svg>"#
     ))
+}
+
+/// sooth's logo: Font Awesome Free `wand-sparkles` (solid), CC BY 4.0,
+/// <https://fontawesome.com/license/free>.
+const BRAND_PATH: &str = "M464 6.1c9.5-8.5 24-8.1 33 .9l8 8c9 9 9.4 23.5 .9 33l-85.8 95.9c-2.6 2.9-4.1 6.7-4.1 10.7l0 21.4c0 8.8-7.2 16-16 16l-15.8 0c-4.6 0-8.9 1.9-11.9 5.3L100.7 500.9c-6.3 7.1-15.3 11.1-24.8 11.1-8.8 0-17.3-3.5-23.5-9.8L9.7 459.7c-6.2-6.2-9.7-14.7-9.7-23.5 0-9.5 4-18.5 11.1-24.8l111.6-99.8c3.4-3 5.3-7.4 5.3-11.9l0-27.6c0-8.8 7.2-16 16-16l34.6 0c3.9 0 7.7-1.5 10.7-4.1L464 6.1zM432 288c3.6 0 6.7 2.4 7.7 5.8l14.8 51.7 51.7 14.8c3.4 1 5.8 4.1 5.8 7.7s-2.4 6.7-5.8 7.7l-51.7 14.8-14.8 51.7c-1 3.4-4.1 5.8-7.7 5.8s-6.7-2.4-7.7-5.8l-14.8-51.7-51.7-14.8c-3.4-1-5.8-4.1-5.8-7.7s2.4-6.7 5.8-7.7l51.7-14.8 14.8-51.7c1-3.4 4.1-5.8 7.7-5.8zM87.7 69.8l14.8 51.7 51.7 14.8c3.4 1 5.8 4.1 5.8 7.7s-2.4 6.7-5.8 7.7l-51.7 14.8-14.8 51.7c-1 3.4-4.1 5.8-7.7 5.8s-6.7-2.4-7.7-5.8L57.5 166.5 5.8 151.7c-3.4-1-5.8-4.1-5.8-7.7s2.4-6.7 5.8-7.7l51.7-14.8 14.8-51.7c1-3.4 4.1-5.8 7.7-5.8s6.7 2.4 7.7 5.8zM208 0c3.7 0 6.9 2.5 7.8 6.1l6.8 27.3 27.3 6.8c3.6 .9 6.1 4.1 6.1 7.8s-2.5 6.9-6.1 7.8l-27.3 6.8-6.8 27.3c-.9 3.6-4.1 6.1-7.8 6.1s-6.9-2.5-7.8-6.1l-6.8-27.3-27.3-6.8c-3.6-.9-6.1-4.1-6.1-7.8s2.5-6.9 6.1-7.8l27.3-6.8 6.8-27.3c.9-3.6 4.1-6.1 7.8-6.1z";
+
+/// The logo mark shown beside the "sooth" wordmark. Filled with
+/// `currentColor`; `.brand-mark` in CSS sizes and colors it.
+pub fn brand_mark() -> Markup {
+    PreEscaped(format!(
+        r#"<svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor" aria-hidden="true"><path d="{BRAND_PATH}"/></svg>"#
+    ))
+}
+
+/// The same mark as a `data:` SVG favicon. A favicon can't inherit page CSS,
+/// so it carries the light/dark accent colors (`--color-accent` in
+/// `frontend/styles.css`) itself; `#` is the only character that must be
+/// percent-encoded in a `data:` URI.
+pub fn favicon_href() -> String {
+    format!(
+        "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'>\
+         <style>path{{fill:%233d6fdd}}@media (prefers-color-scheme:dark){{path{{fill:%235b8cff}}}}</style>\
+         <path d='{BRAND_PATH}'/></svg>"
+    )
 }

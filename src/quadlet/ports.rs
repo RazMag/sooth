@@ -150,10 +150,11 @@ fn parse_port_range(s: &str) -> Option<HostPortRange> {
     }
 }
 
-/// A port a container says it serves -- a `ExposePort=` line in its quadlet
-/// or an `EXPOSE` baked into its image. Informational only (podman publishes
-/// nothing for it), but it's the one declared signal of which container in a
-/// pod is meant to receive a pod-published port.
+/// A port a container says it serves -- an `ExposeHostPort=` line in its
+/// quadlet (podman's `--expose`) or an `EXPOSE` baked into its image.
+/// Informational only (podman publishes nothing for it), but it's the one
+/// declared signal of which container in a pod is meant to receive a
+/// pod-published port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExposedPort {
     pub range: HostPortRange,
@@ -161,7 +162,7 @@ pub struct ExposedPort {
 }
 
 /// Parses `80`, `80/tcp` or `8000-8010/udp` -- the shape of both
-/// `ExposePort=` values and an image's `Config.ExposedPorts` keys.
+/// `ExposeHostPort=` values and an image's `Config.ExposedPorts` keys.
 pub fn parse_exposed(s: &str) -> Option<ExposedPort> {
     let s = s.trim();
     let (port, protocol) = match s.rsplit_once('/') {
@@ -176,7 +177,7 @@ pub fn parse_exposed(s: &str) -> Option<ExposedPort> {
     })
 }
 
-/// Every `ExposePort=` in a Container unit's `[Container]` section.
+/// Every `ExposeHostPort=` in a Container unit's `[Container]` section.
 /// Unparsable values are skipped. Empty for every other kind.
 pub fn declared_exposed(unit: &QuadletUnit) -> Vec<ExposedPort> {
     if unit.kind != UnitKind::Container {
@@ -186,7 +187,7 @@ pub fn declared_exposed(unit: &QuadletUnit) -> Vec<ExposedPort> {
         .map(|s| {
             s.entries
                 .iter()
-                .filter(|(k, _)| k == "ExposePort")
+                .filter(|(k, _)| k == "ExposeHostPort")
                 .filter_map(|(_, v)| parse_exposed(v))
                 .collect()
         })
@@ -202,6 +203,58 @@ pub fn serves(exposed: &[ExposedPort], mapping: &PortMapping) -> bool {
     exposed
         .iter()
         .any(|e| e.protocol == mapping.protocol && e.range.overlaps(target))
+}
+
+/// The ports a list row shows once a pod's `PublishPort=` mappings have been
+/// split between the pod and its members (see [`split_pod_ports`]).
+#[derive(Debug, Clone, Default)]
+pub struct SplitPorts {
+    /// For a member: the pod mappings it serves. For the pod: the ones no
+    /// member serves.
+    pub mappings: Vec<PortMapping>,
+    /// For the pod: how many of its mappings moved to its members. Always 0
+    /// for a member.
+    pub moved: usize,
+}
+
+/// Splits a pod's published ports between the pod and the `members` (file
+/// name + exposed ports) that serve them, as the Ports screen matches them:
+/// a mapping goes to every member whose exposed ports cover its container
+/// port ([`serves`]); one no member serves stays on the pod. Returns the
+/// pod's entry (keyed `pod_file`) plus one per member that serves anything.
+pub fn split_pod_ports(
+    pod_file: &str,
+    pod_mappings: &[PortMapping],
+    members: &[(String, Vec<ExposedPort>)],
+) -> Vec<(String, SplitPorts)> {
+    let mut pod = SplitPorts::default();
+    let mut by_member: Vec<(String, SplitPorts)> = Vec::new();
+    for m in pod_mappings {
+        let serving: Vec<&String> = members
+            .iter()
+            .filter(|(_, exposed)| serves(exposed, m))
+            .map(|(file, _)| file)
+            .collect();
+        if serving.is_empty() {
+            pod.mappings.push(m.clone());
+            continue;
+        }
+        pod.moved += 1;
+        for file in serving {
+            match by_member.iter_mut().find(|(f, _)| f == file) {
+                Some((_, split)) => split.mappings.push(m.clone()),
+                None => by_member.push((
+                    file.clone(),
+                    SplitPorts {
+                        mappings: vec![m.clone()],
+                        moved: 0,
+                    },
+                )),
+            }
+        }
+    }
+    by_member.push((pod_file.to_string(), pod));
+    by_member
 }
 
 /// File names of every *other* quadlet whose static host-port range overlaps
@@ -388,7 +441,42 @@ mod tests {
     }
 
     #[test]
-    fn declared_exposed_reads_container_section_only() {
+    fn split_pod_ports_moves_served_ports_to_members() {
+        let pod: Vec<PortMapping> = ["8080:80", "8443:443", "5353:53/udp", "9000:9000"]
+            .iter()
+            .map(|raw| mapping("web.pod", raw).unwrap())
+            .collect();
+        let exposed = |list: &[&str]| -> Vec<ExposedPort> {
+            list.iter().map(|s| parse_exposed(s).unwrap()).collect()
+        };
+        let members = vec![
+            ("web.container".to_string(), exposed(&["80", "443"])),
+            ("dns.container".to_string(), exposed(&["53/udp"])),
+            ("proxy.container".to_string(), exposed(&["80"])),
+            ("idle.container".to_string(), exposed(&[])),
+        ];
+        let split = split_pod_ports("web.pod", &pod, &members);
+        let raws = |file: &str| -> Vec<&str> {
+            split
+                .iter()
+                .find(|(f, _)| f == file)
+                .map(|(_, s)| s.mappings.iter().map(|m| m.raw.as_str()).collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(raws("web.container"), ["8080:80", "8443:443"]);
+        // Served by two members: shown on both.
+        assert_eq!(raws("proxy.container"), ["8080:80"]);
+        assert_eq!(raws("dns.container"), ["5353:53/udp"]);
+        // No member serves 9000, so it stays on the pod.
+        assert_eq!(raws("web.pod"), ["9000:9000"]);
+        let pod_entry = &split.iter().find(|(f, _)| f == "web.pod").unwrap().1;
+        assert_eq!(pod_entry.moved, 3);
+        // A member that serves nothing gets no entry.
+        assert!(split.iter().all(|(f, _)| f != "idle.container"));
+    }
+
+    #[test]
+    fn declared_exposed_reads_expose_host_port() {
         let unit = QuadletUnit {
             file_name: "a.container".into(),
             group: String::new(),
@@ -398,9 +486,11 @@ mod tests {
                 name: "Container".into(),
                 entries: [
                     ("Image", "x"),
-                    ("ExposePort", "80"),
-                    ("ExposePort", "53/udp"),
-                    ("ExposePort", "bad"),
+                    ("ExposeHostPort", "80"),
+                    ("ExposeHostPort", "5000-5002/udp"),
+                    ("ExposeHostPort", "bad"),
+                    // Not a quadlet key -- podman's generator rejects it.
+                    ("ExposePort", "443"),
                 ]
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -408,6 +498,12 @@ mod tests {
             }],
             raw: String::new(),
         };
-        assert_eq!(declared_exposed(&unit).len(), 2);
+        assert_eq!(
+            declared_exposed(&unit),
+            [
+                parse_exposed("80").unwrap(),
+                parse_exposed("5000-5002/udp").unwrap()
+            ]
+        );
     }
 }

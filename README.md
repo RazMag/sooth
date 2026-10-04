@@ -22,12 +22,20 @@ CSS/JS embedded, so it runs from any directory.
 ## Features
 
 - **Services** landing page — Containers and Pods combined, with a
-  total/running/failed stat bar.
+  total/running/failed stat bar. A pod's published ports show on the member
+  container that serves them (by its `ExposeHostPort=` or its image's
+  `EXPOSE`, as on the Ports screen); only ports none of them serve stay on
+  the pod row.
 - Dedicated **Volumes**, **Networks**, and **Images** (Image + Build units)
   sections, plus a generic `/units` listing that covers every kind and is the
   only home for `.kube` units.
 - **Ports** — every declared `PublishPort=` across Containers and Pods, with
   conflicting host ports flagged.
+- **Pod tree** — every list table nests a pod's units under its row: its
+  member containers (`Pod=`), plus any volume, network, image, or build used
+  only by that pod. Pods show up on the Volumes/Networks/Images tables too,
+  whenever they own something there. Each pod collapses on its own
+  (remembered per browser).
 - **Environment** — the host `${NAME}` variables a quadlet file can
   interpolate. sooth manages its own set through an `environment.d` drop-in
   (`~/.config/environment.d/50-sooth.conf`) and also pushes each change to
@@ -302,7 +310,8 @@ per request, so you don't restart the server. Without watch, restart
 skips the frontend build entirely (e.g. a read-only checkout).
 
 `scripts/run-dev.sh` (or `just dev`) builds and runs sooth against a
-throwaway scratch quadlet directory (seeded with one demo unit) instead of
+throwaway scratch quadlet directory (seeded with a demo container and a
+demo pod -- two containers, a network and a volume) instead of
 your real `~/.config/containers/systemd`, so you can poke at the dashboard
 without touching anything real:
 
@@ -366,3 +375,7 @@ released and skips the build if so, rather than re-publishing or failing.
 Never push to `release` directly — always through a PR from `main`, so the
 two branches never drift into having different content merged in a
 different order.
+
+## Credits
+
+Logo: [Font Awesome Free](https://fontawesome.com) `wand-sparkles`, licensed [CC BY 4.0](https://fontawesome.com/license/free).

@@ -4,6 +4,39 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-10-04
+
+### Added
+
+- **Pods in every unit table**: a pod row now heads the units it owns: its
+  member containers, plus any volume, network, image or build that only that
+  pod uses. Shared or unused resources stay at the top level. The Volumes,
+  Networks, Images and All units tables show a pod whenever it owns something
+  there. Pod rows collapse separately from groups (expanded by default,
+  remembered per browser), and filtering keeps a matching unit's pod visible.
+- **Logo and favicon**: a wand-sparkles mark beside the wordmark (sidebar,
+  mobile top bar, login page) and as a favicon that follows the light/dark
+  accent color.
+
+### Changed
+
+- On the Services list, a port a pod publishes now shows on the member
+  container that serves it. Only ports no member serves stay on the pod row,
+  with a note saying how many moved. A pod's detail page still lists all of
+  its ports.
+- A pod row shows its unit count by kind ("2 containers, 1 volume") on its
+  second line instead of as a pill next to the name.
+- Long port lists fold after four mappings behind a "+N more" toggle, in the
+  tables and on the detail page's Overview. File names no longer wrap.
+- The product name is capitalized as "Sooth" throughout the UI.
+
+### Fixed
+
+- Matching a pod's port to the member that serves it now reads
+  `ExposeHostPort=`. 0.3.5 looked for `ExposePort=`, which isn't a quadlet
+  key, so it always fell back to the image's `EXPOSE` or to every member.
+- Filtering now shows matching units inside collapsed groups.
+
 ## [0.3.5] - 2026-09-27
 
 ### Added
@@ -122,6 +155,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.3.6]: https://github.com/RazMag/sooth/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/RazMag/sooth/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/RazMag/sooth/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/RazMag/sooth/compare/v0.3.2...v0.3.3

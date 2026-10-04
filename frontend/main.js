@@ -7,6 +7,7 @@ import "htmx-ext-sse";
 import { initTheme } from "./theme.js";
 import { initFilter } from "./filter.js";
 import { initGroups } from "./groups.js";
+import { initPodTree } from "./podtree.js";
 import { initDragDrop } from "./dragdrop.js";
 import { initGitSync } from "./gitsync.js";
 import { initNav } from "./nav.js";
@@ -30,6 +31,7 @@ function boot() {
   initTheme();
   initFilter();
   initGroups();
+  initPodTree();
   initDragDrop();
   initGitSync();
   initNav();
@@ -54,6 +56,7 @@ if (document.readyState === "loading") {
 
 document.addEventListener("htmx:afterSwap", () => {
   initGroups();
+  initPodTree();
   initGitSync();
   initLogs();
   initEditors();

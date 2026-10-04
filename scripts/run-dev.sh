@@ -2,9 +2,10 @@
 #
 # Runs sooth against a scratch quadlet directory instead of your real
 # ~/.config/containers/systemd, so you can poke at the dashboard without
-# touching anything real. Builds the binary, seeds one demo quadlet file
-# (unless --no-seed), and either prompts for a password via
-# `sooth --hash-password` or uses one you pass with --hash.
+# touching anything real. Builds the binary, seeds a demo container and a
+# demo pod (two containers, a network, a volume; unless --no-seed), and
+# either prompts for a password via `sooth --hash-password` or uses one you
+# pass with --hash.
 #
 # POSIX sh, no fish required.
 #
@@ -144,6 +145,20 @@ fi
 if [ -z "$no_seed_flag" ] && [ ! -e "$scratch/demo.container" ]; then
     echo "==> seeding $scratch/demo.container"
     printf '[Container]\nImage=docker.io/library/alpine\nExec=sleep infinity\n' > "$scratch/demo.container"
+fi
+
+# A demo pod with two member containers, a network and a shared volume --
+# exercises the list tables' pod tree and the Ports screen. The pod publishes
+# 8088 -> 80, which webapp-web serves (`ExposeHostPort=`, podman's `--expose`).
+if [ -z "$no_seed_flag" ] && [ ! -e "$scratch/webapp.pod" ]; then
+    echo "==> seeding the webapp demo pod in $scratch"
+    printf '[Network]\n' > "$scratch/webapp.network"
+    printf '[Volume]\n' > "$scratch/webapp-data.volume"
+    printf '[Pod]\nPublishPort=8088:80\nNetwork=webapp.network\n' > "$scratch/webapp.pod"
+    printf '[Container]\nImage=docker.io/library/nginx:alpine\nPod=webapp.pod\nExposeHostPort=80\nVolume=webapp-data.volume:/usr/share/nginx/html:ro\n' \
+        > "$scratch/webapp-web.container"
+    printf '[Container]\nImage=docker.io/library/alpine\nPod=webapp.pod\nExec=sleep infinity\nVolume=webapp-data.volume:/data\n' \
+        > "$scratch/webapp-worker.container"
 fi
 
 if [ -n "$hash_flag" ]; then

@@ -6,13 +6,18 @@
 use maud::{Markup, html};
 
 use super::list::{Column, ListContext, ListSpec, RowCtx, kind_cell};
-use super::{Icon, NavItem, icon, ports_cell_live, shell};
+use super::{Icon, NavItem, icon, ports_cell_live, shell, split_ports_cell_live};
 use crate::health::Health;
-use crate::quadlet::QuadletUnit;
+use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 
+/// A pod's published ports show on the member(s) serving them, the rest on
+/// the pod itself (see `ListContext::ports`); any other row shows its own.
 fn ports_cell(ctx: &RowCtx) -> Markup {
-    ports_cell_live(ctx.unit, ctx.status)
+    match ctx.split_ports {
+        Some(split) => split_ports_cell_live(ctx.unit, ctx.status, split),
+        None => ports_cell_live(ctx.unit, ctx.status),
+    }
 }
 
 pub const COLUMNS: &[Column] = &[
@@ -29,6 +34,7 @@ pub const COLUMNS: &[Column] = &[
 pub const SPEC: ListSpec = ListSpec {
     title: "Services",
     active_nav: Some(NavItem::Services),
+    kinds: &[UnitKind::Container, UnitKind::Pod],
     columns: COLUMNS,
     new_href: "/containers/new",
     empty_hint: "No services yet — create a container or pod to get started.",
