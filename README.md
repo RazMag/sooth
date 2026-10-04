@@ -31,11 +31,14 @@ CSS/JS embedded, so it runs from any directory.
   only home for `.kube` units.
 - **Ports** — every declared `PublishPort=` across Containers and Pods, with
   conflicting host ports flagged.
-- **Pod tree** — every list table nests a pod's units under its row: its
-  member containers (`Pod=`), plus any volume, network, image, or build used
-  only by that pod. Pods show up on the Volumes/Networks/Images tables too,
-  whenever they own something there. Each pod collapses on its own
-  (remembered per browser).
+- **Pods and Directories layouts** — every list table is a branch tree you
+  can switch between two layouts (remembered per browser).
+  - **Pods** nests a pod's units under its row: its member containers
+    (`Pod=`), plus any volume, network, image, or build used only by that
+    pod. A resource several pods share appears as a linked leaf under each
+    of them, and everything else sits under "Standalone". Each pod
+    collapses on its own.
+  - **Directories** shows your group folders, with drag-and-drop filing.
 - **Environment** — the host `${NAME}` variables a quadlet file can
   interpolate. sooth manages its own set through an `environment.d` drop-in
   (`~/.config/environment.d/50-sooth.conf`) and also pushes each change to

@@ -4,6 +4,36 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Pods and Directories layouts** for every unit table (Services, Volumes,
+  Networks, Images, All units), switched from the toolbar and remembered per
+  browser.
+  - **Pods** (the default) draws a branch tree. Each pod heads the units it
+    owns, a resource several pods share shows as a linked leaf under each of
+    them, and everything else hangs off a "Standalone" heading.
+  - **Directories** shows your group folders, with a chip naming each unit's
+    pod. Dragging units between groups and "Add group" live here.
+- A pod row on the Services table counts its running containers, updated
+  live.
+- A container's row links the volumes, networks, and image or build it uses.
+- The Services table has an Image column; the Images table has a Used by
+  column.
+
+### Changed
+
+- Each row starts with a colored kind icon, replacing the Kind and Type
+  columns.
+- Pod and folder rows are shaded and connected to their units by branch
+  lines. The table sits in a rounded card.
+- Autostart and auto-update show as small icons next to a row's status.
+  Hover them for details.
+- Volumes list "Used by" before "Driver", and Networks list "Subnet" first.
+- A pod's Ports cell says "4 served by members" instead of "4 ports on its
+  containers" for the ports shown on its member containers.
+
 ## [0.3.6] - 2026-10-04
 
 ### Added

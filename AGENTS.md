@@ -81,7 +81,7 @@ opens `Connection::session()` on startup and exits if it fails).
   directories are first-class and **user-managed**: emptying one (moving or
   deleting its last unit) does **not** delete it. `discovery::list_groups`
   walks dirs (not just files) so an empty group still renders as a
-  (drop-target) collapsible section; the group-header ⋯ menu and drag re-parent
+  (drop-target) collapsible section in the Directories layout; the group-header ⋯ menu and drag re-parent
   drive `/groups/{move,rename,delete}` (delete refused while units remain).
   `writer::move_dir` renames the directory with every unit inside keeping its
   service name; `core::move_group_dir` rejects a move into the group itself or
@@ -102,19 +102,37 @@ opens `Connection::session()` on startup and exits if it fails).
   only ever gates *drop targets* — a synced group's own header still gets a
   drag grip like any other, since dragging it *is* now allowed) — the server
   check is still the authoritative one.
-- **Pod tree in every list table.** Every list handler loads pods on top of
-  its `ListSpec::kinds` (`templates::list::with_pods`), and
-  `templates::list::PodTree` renders each unit `refs::owning_pod` assigns
-  to a listed pod as a child row directly under it: a container via `Pod=`,
-  a volume/network/image/build only when *every* consumer belongs to that
-  one pod (shared or unused resources stay top-level -- a row renders once
-  per table, since its status badge's SSE id must stay unique). A child
-  renders in its *pod's* group section even if filed elsewhere (a chip
-  names its real group); section counts follow where rows render. A pod
-  outside the table's kinds (e.g. on Volumes) only appears to head its
-  units, with its columns left blank. Pod rows carry `data-pod`, children
+- **Two list layouts, Pods and Directories.** Every list table renders as a
+  branch tree in one of two `templates::list::ListView`s, picked from the
+  toolbar (`?view=pods|dirs`) and kept **in the session**
+  (`handlers::list::resolve_list_view`) so the `/rows` refresh on
+  `units-changed` redraws the same layout. Every list handler loads pods on
+  top of its `ListSpec::kinds` (`templates::list::with_pods`).
+  - *Pods* (default): `templates::list::PodTree` hangs each unit
+    `refs::owning_pod` assigns to a listed pod under that pod's trunk row (a
+    container via `Pod=`, a volume/network/image/build only when *every*
+    consumer belongs to that one pod). Everything else hangs off a synthetic
+    "Standalone" trunk (`data-pod=":standalone"`), omitted when the table has
+    no pod trunks at all. A resource with no single owner but some consuming
+    pods (`refs::consuming_pods`) also gets a link-only `tr.tree-leaf` under
+    each of them -- no status badge, menu or grip, since a unit's live badge
+    must render exactly once per table (its SSE id stays unique). No group
+    sections and no drag-and-drop here: rows carry no `data-move-url`, and
+    `dragdrop.js` also bails unless `data-view="dirs"`. A row's folder shows
+    as a chip instead.
+  - *Directories*: the group sections (below), units flat inside them, a pod
+    member carrying a chip naming its pod. Pods outside the table's kinds
+    aren't drawn. "Add group" and drag-and-drop live only here.
+
+  Both layouts draw branch connectors from server-computed `Rails` (one
+  `.rail` column per tree level; `DirShape` works them out for nested
+  groups), not CSS indentation. Trunk rows carry `data-pod`, children
   `data-pod-member`; `frontend/podtree.js` collapses them with its own
-  `pod-collapsed` class (pods start expanded, unlike groups).
+  `pod-collapsed` class (trunks start expanded, groups collapsed) and
+  re-counts each pod's "N/M running" from its members' badges after every
+  swap. Each row starts with a `kind_dot` (no Kind/Type column); a
+  container's second line links its volume/network/image quadlets
+  (`refs::container_resources`).
 - **One implementation, six mount points.** Per-unit behavior does not vary
   by kind — don't add kind-specific handler modules. The detail page
   dispatches on `unit.kind` (the loaded unit's real kind, not the URL
