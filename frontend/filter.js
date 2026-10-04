@@ -3,8 +3,9 @@
 // `<tbody id="rows-id">`. Group header rows (`tr.group-row`) are never hidden
 // by the needle themselves; while a needle is active the tbody gets
 // `data-filtering`, which the CSS uses to reveal rows inside collapsed groups
-// and pods so a match is never buried. A pod row stays visible while any of
-// its units matches, so a match keeps its context.
+// and pods so a match is never buried. In the Pods layout a trunk row (a pod,
+// or the Standalone heading) stays visible while any row under it matches,
+// so a match keeps its context.
 export function initFilter() {
   document.addEventListener("input", (e) => {
     const input = e.target.closest("[data-filter-target]");
