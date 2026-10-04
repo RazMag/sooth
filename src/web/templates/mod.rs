@@ -426,7 +426,7 @@ pub fn autoupdate_control(unit: &QuadletUnit, csrf: &str) -> Markup {
             hx-trigger="change" hx-target="this" hx-swap="outerHTML" {
             (csrf_input(csrf))
             span.autoupdate-label {
-                (icon(Icon::Restart))
+                (icon(Icon::AutoUpdate))
                 span { "Auto-update" }
             }
             span.autoupdate-select {
@@ -448,7 +448,7 @@ pub fn autoupdate_icon(unit: &QuadletUnit) -> Markup {
     html! {
         @if let Some(m) = autoupdate_mode(unit) {
             span.status-icon title={"Auto-update: " (m.as_str()) " -- updates when podman-auto-update runs"} {
-                (icon(Icon::Refresh))
+                (icon(Icon::AutoUpdate))
             }
         }
     }

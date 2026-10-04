@@ -25,6 +25,7 @@ pub enum Icon {
     Stop,
     Restart,
     Refresh,
+    AutoUpdate,
     Power,
     Edit,
     Logs,
@@ -84,6 +85,9 @@ pub fn icon(which: Icon) -> Markup {
         }
         Icon::Refresh => {
             r#"<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>"#
+        }
+        Icon::AutoUpdate => {
+            r#"<path d="M12 2a10 10 0 0 1 7.38 16.75"/><path d="m16 12-4-4-4 4"/><path d="M12 16V8"/><path d="M2.5 8.875a10 10 0 0 0-.5 3"/><path d="M2.83 16a10 10 0 0 0 2.43 3.4"/><path d="M4.636 5.235a10 10 0 0 1 .891-.857"/><path d="M8.644 21.42a10 10 0 0 0 7.631-.38"/>"#
         }
         Icon::Power => r#"<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/>"#,
         Icon::Edit => {
