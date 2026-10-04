@@ -323,6 +323,12 @@ scripts/run-dev.sh                 # prompts for a password, fresh scratch dir
 scripts/run-dev.sh --port 8123 --dir /tmp/sooth-scratch --no-seed
 ```
 
+It also skips your real `~/.config/sooth/config.toml`. Each scratch dir gets
+its own empty config at `.sooth-dev/config.toml`, so a self-update or git sync
+you configured for real use can't swap the release binary over your build or
+clone into the scratch dir. Pass `--config <path>` to use a specific config
+instead.
+
 `--fake-no-podman` and `--fake-linger-disabled` exercise the Settings "System"
 card and the dashboard warning banner (see `src/health.rs`) by running sooth
 inside a `bwrap` sandbox that hides just the relevant path -- your real

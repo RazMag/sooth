@@ -24,7 +24,7 @@ cargo clippy --all-targets
 cargo fmt --check
 npm ci && npm run build   # rebuild static/style.css + static/app.js after a frontend/** edit
 npm run watch             # sub-second static/ rebuilds while iterating; debug server re-reads per request
-scripts/run-dev.sh      # run against a throwaway scratch quadlet dir
+scripts/run-dev.sh      # run against a throwaway scratch quadlet dir + its own empty config
 ```
 
 `justfile` wraps these as `just build|release|test|fmt|fmt-check|lint|check`,
