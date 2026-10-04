@@ -4,7 +4,7 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-10-04
 
 ### Added
 
@@ -185,6 +185,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.4.0]: https://github.com/RazMag/sooth/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/RazMag/sooth/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/RazMag/sooth/compare/v0.3.4...v0.3.5
 [0.3.4]: https://github.com/RazMag/sooth/compare/v0.3.3...v0.3.4
