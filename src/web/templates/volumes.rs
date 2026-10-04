@@ -16,12 +16,12 @@ fn used_by_cell(ctx: &RowCtx) -> Markup {
 
 pub const COLUMNS: &[Column] = &[
     Column {
-        header: "Driver",
-        cell: driver_cell,
-    },
-    Column {
         header: "Used by",
         cell: used_by_cell,
+    },
+    Column {
+        header: "Driver",
+        cell: driver_cell,
     },
 ];
 

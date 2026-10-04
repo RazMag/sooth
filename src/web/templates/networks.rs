@@ -11,7 +11,7 @@ fn driver_cell(ctx: &RowCtx) -> Markup {
 }
 
 fn subnet_cell(ctx: &RowCtx) -> Markup {
-    html! { (ctx.unit.section("Network").and_then(|s| s.get("Subnet")).unwrap_or("—")) }
+    html! { code.cell-code { (ctx.unit.section("Network").and_then(|s| s.get("Subnet")).unwrap_or("—")) } }
 }
 
 fn used_by_cell(ctx: &RowCtx) -> Markup {
@@ -20,12 +20,12 @@ fn used_by_cell(ctx: &RowCtx) -> Markup {
 
 pub const COLUMNS: &[Column] = &[
     Column {
-        header: "Driver",
-        cell: driver_cell,
-    },
-    Column {
         header: "Subnet",
         cell: subnet_cell,
+    },
+    Column {
+        header: "Driver",
+        cell: driver_cell,
     },
     Column {
         header: "Used by",

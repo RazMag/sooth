@@ -7,6 +7,16 @@
 # either prompts for a password via `sooth --hash-password` or uses one you
 # pass with --hash.
 #
+# sooth never reads your real ~/.config/sooth/config.toml here: the run gets
+# its own empty config at <scratch dir>/.sooth-dev/config.toml (a dot-dir, so
+# quadlet discovery and the fs watch ignore it). Your real config can turn on
+# self-update -- which would swap the release binary over target/*/sooth and
+# re-exec it, so you'd be looking at the release instead of your working
+# tree -- and git syncs, which would clone into the scratch dir. Settings
+# saved from the dashboard land in the scratch config and persist across
+# runs that reuse the same --dir. Pass --config to use a specific file instead
+# (including your real one, if that's really what you want).
+#
 # POSIX sh, no fish required.
 #
 # Usage:
@@ -14,6 +24,7 @@
 #   scripts/run-dev.sh --hash '$argon2id$...'  # skip the prompt
 #   scripts/run-dev.sh --dir /path/to/dir     # reuse an existing scratch dir
 #   scripts/run-dev.sh --port 8123 --release --no-seed
+#   scripts/run-dev.sh --config ./my-test-config.toml
 #
 # --fake-no-podman / --fake-linger-disabled exercise the Settings "System"
 # card and the dashboard warning banner (see src/health.rs) without actually
@@ -37,8 +48,10 @@ set -u
 
 usage() {
     echo "Usage: run-dev.sh [--dir <path>] [--port <n>] [--hash <argon2-hash>] [--release] [--no-seed]"
-    echo "                  [--fake-no-podman] [--fake-linger-disabled]"
+    echo "                  [--config <path>] [--fake-no-podman] [--fake-linger-disabled]"
     echo ""
+    echo "  --config <path>         Use this sooth config file instead of the scratch dir's"
+    echo "                          own empty one (<dir>/.sooth-dev/config.toml)."
     echo "  --fake-no-podman        Hide podman's quadlet generator (in a bwrap sandbox,"
     echo "                          not on your real system) so the health check reads"
     echo "                          \"Not found\"."
@@ -49,6 +62,7 @@ usage() {
 dir_flag=
 port_flag=
 hash_flag=
+config_flag=
 release_flag=
 no_seed_flag=
 fake_no_podman_flag=
@@ -72,6 +86,15 @@ while [ $# -gt 0 ]; do
             ;;
         --port=*)
             port_flag=${1#--port=}
+            shift
+            ;;
+        --config)
+            [ $# -ge 2 ] || { echo "error: $1 requires a value" >&2; exit 1; }
+            config_flag=$2
+            shift 2
+            ;;
+        --config=*)
+            config_flag=${1#--config=}
             shift
             ;;
         --hash)
@@ -161,6 +184,18 @@ if [ -z "$no_seed_flag" ] && [ ! -e "$scratch/webapp.pod" ]; then
         > "$scratch/webapp-worker.container"
 fi
 
+if [ -n "$config_flag" ]; then
+    config=$config_flag
+    echo "==> using config $config"
+else
+    config=$scratch/.sooth-dev/config.toml
+    if [ ! -e "$config" ]; then
+        mkdir -p -- "$scratch/.sooth-dev" || exit 1
+        : > "$config" || exit 1
+    fi
+    echo "==> using scratch config $config (not ~/.config/sooth)"
+fi
+
 if [ -n "$hash_flag" ]; then
     hash=$hash_flag
 else
@@ -186,7 +221,8 @@ if [ -n "$fake_no_podman_flag" ] || [ -n "$fake_linger_disabled_flag" ]; then
 fi
 
 echo "==> starting sooth on http://127.0.0.1:$port  (quadlet dir: $scratch)"
-env SOOTH_QUADLET_DIR="$scratch" \
+env SOOTH_CONFIG="$config" \
+    SOOTH_QUADLET_DIR="$scratch" \
     SOOTH_AUTH_PASSWORD_HASH="$hash" \
     SOOTH_BIND_ADDR="127.0.0.1:$port" \
     $sandbox "$bin"

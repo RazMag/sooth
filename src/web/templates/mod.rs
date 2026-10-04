@@ -372,6 +372,39 @@ pub fn autostart_pill(enabled: bool) -> Markup {
     }
 }
 
+/// The list-table form of [`autostart_pill`]: just an icon, same tooltip.
+pub fn autostart_icon(enabled: bool) -> Markup {
+    html! {
+        @if enabled {
+            span.status-icon title="Autostart -- starts on login (has an [Install] section)" {
+                (icon(Icon::Power))
+            }
+        }
+    }
+}
+
+/// `text` with a soft line break offered after each `/` -- for image
+/// references and paths in narrow table columns, which otherwise can't wrap
+/// and squeeze the name column instead.
+pub fn soft_wrap_path(text: &str) -> Markup {
+    html! {
+        @for (i, part) in text.split('/').enumerate() {
+            @if i > 0 { "/" wbr; }
+            (part)
+        }
+    }
+}
+
+/// A unit kind's round, tinted icon -- the list tables' stand-in for a Kind
+/// column (`templates::list::kind_icon` picks the glyph).
+pub fn kind_dot(kind: UnitKind) -> Markup {
+    html! {
+        span class={"kind-dot kind-" (kind.extension())} title=(kind.primary_section()) {
+            (icon(list::kind_icon(kind)))
+        }
+    }
+}
+
 /// Reads a container's current `[Container]` `AutoUpdate=` policy from the
 /// parsed model (`None` == off / absent / unrecognised).
 fn autoupdate_mode(unit: &QuadletUnit) -> Option<AutoUpdateMode> {
@@ -408,14 +441,14 @@ pub fn autoupdate_control(unit: &QuadletUnit, csrf: &str) -> Markup {
     }
 }
 
-/// A read-only chip for list rows showing a container's `AutoUpdate=` policy
-/// when one is set -- nothing for "off" or for a non-container unit (which has
-/// no `[Container]` section).
-pub fn autoupdate_pill(unit: &QuadletUnit) -> Markup {
+/// A read-only icon for list rows showing a container's `AutoUpdate=` policy
+/// (named in its tooltip) when one is set -- nothing for "off" or for a
+/// non-container unit (which has no `[Container]` section).
+pub fn autoupdate_icon(unit: &QuadletUnit) -> Markup {
     html! {
         @if let Some(m) = autoupdate_mode(unit) {
-            span.chip title="Auto-updates when podman-auto-update runs" {
-                "Auto-update: " (m.as_str())
+            span.status-icon title={"Auto-update: " (m.as_str()) " -- updates when podman-auto-update runs"} {
+                (icon(Icon::Refresh))
             }
         }
     }
@@ -818,8 +851,9 @@ pub fn split_ports_summary(unit: &QuadletUnit, active: bool, split: &SplitPorts)
             (port_list(&split.mappings, active, &unit.service_name()))
         }
         @if moved > 0 {
-            div.cell-secondary title="Published by this pod and shown on the containers that serve them, matched as on the Ports screen" {
-                (moved) @if moved == 1 { " port" } @else { " ports" } " on its containers"
+            // The Ports column header already says what the number counts.
+            div.cell-secondary title="Published by this pod, but listed on the member container that serves each one (matched as on the Ports screen)" {
+                (moved) @if moved == 1 { " served by a member" } @else { " served by members" }
             }
         }
     }

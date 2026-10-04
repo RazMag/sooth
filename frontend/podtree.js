@@ -1,11 +1,17 @@
-// Collapsible pod rows in the list tables. A pod row (`tr[data-pod]`) heads
-// the rows of the units it owns (`tr[data-pod-member]`, see
-// `templates::list::PodTree`); its chevron hides/shows them. Unlike groups,
-// pods start *expanded* -- the relation is the point -- so the server renders
-// every child visible and this module only applies a per-browser set of
-// *collapsed* pod file names from localStorage. Children are hidden with
-// their own `pod-collapsed` class so a collapsed group (`is-collapsed`,
-// groups.js) and a collapsed pod never fight over one class.
+// Collapsible pod rows in the Pods layout of the list tables. A pod row
+// (`tr[data-pod]`) heads the rows of the units it owns or shares
+// (`tr[data-pod-member]`, see `templates::list::PodTree`) -- as does the
+// synthetic "Standalone" trunk (`data-pod=":standalone"`) for everything
+// else; its chevron hides/shows them. Trunks start *expanded* -- the
+// relation is the point -- so the server renders every child visible and
+// this module only applies a per-browser set of *collapsed* pod keys from
+// localStorage. Children are hidden with their own `pod-collapsed` class so
+// they never fight `groups.js`'s `is-collapsed`.
+//
+// It also keeps each pod row's "N/M running" summary (`[data-pod-summary]`)
+// current: member badges swap in place over SSE, which re-runs this module
+// via `htmx:afterSwap`, so the count is re-read from the badges here rather
+// than re-fetched.
 
 const KEY = "sooth:pods-collapsed";
 
@@ -26,6 +32,18 @@ function saveCollapsed(set) {
   }
 }
 
+function refreshSummaries(root) {
+  for (const summary of root.querySelectorAll("tr[data-pod] [data-pod-summary]")) {
+    const pod = summary.closest("tr").dataset.pod;
+    const members = [
+      ...root.querySelectorAll(`tr[data-pod-member="${CSS.escape(pod)}"]`),
+    ].filter((row) => row.querySelector(".kind-dot.kind-container"));
+    if (members.length === 0) continue;
+    const running = members.filter((row) => row.querySelector(".badge-running")).length;
+    summary.textContent = `${running}/${members.length} running`;
+  }
+}
+
 function apply(root, collapsed) {
   for (const row of root.querySelectorAll("tr[data-pod]")) {
     const btn = row.querySelector(".pod-toggle");
@@ -34,6 +52,7 @@ function apply(root, collapsed) {
   for (const row of root.querySelectorAll("tr[data-pod-member]")) {
     row.classList.toggle("pod-collapsed", collapsed.has(row.dataset.podMember));
   }
+  refreshSummaries(root);
 }
 
 export function initPodTree() {

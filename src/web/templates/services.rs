@@ -5,7 +5,7 @@
 
 use maud::{Markup, html};
 
-use super::list::{Column, ListContext, ListSpec, RowCtx, kind_cell};
+use super::list::{Column, ListContext, ListSpec, RowCtx};
 use super::{Icon, NavItem, icon, ports_cell_live, shell, split_ports_cell_live};
 use crate::health::Health;
 use crate::quadlet::{QuadletUnit, UnitKind};
@@ -20,10 +20,20 @@ fn ports_cell(ctx: &RowCtx) -> Markup {
     }
 }
 
+/// A container's `Image=` as written (an `.image`/`.build` quadlet name or a
+/// registry reference); blank for a pod.
+fn image_cell(ctx: &RowCtx) -> Markup {
+    html! {
+        @if let Some(image) = ctx.unit.section("Container").and_then(|s| s.get("Image")) {
+            code.cell-code { (super::soft_wrap_path(image)) }
+        }
+    }
+}
+
 pub const COLUMNS: &[Column] = &[
     Column {
-        header: "Kind",
-        cell: kind_cell,
+        header: "Image",
+        cell: image_cell,
     },
     Column {
         header: "Ports",

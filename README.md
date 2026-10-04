@@ -31,11 +31,14 @@ CSS/JS embedded, so it runs from any directory.
   only home for `.kube` units.
 - **Ports** — every declared `PublishPort=` across Containers and Pods, with
   conflicting host ports flagged.
-- **Pod tree** — every list table nests a pod's units under its row: its
-  member containers (`Pod=`), plus any volume, network, image, or build used
-  only by that pod. Pods show up on the Volumes/Networks/Images tables too,
-  whenever they own something there. Each pod collapses on its own
-  (remembered per browser).
+- **Pods and Directories layouts** — every list table is a branch tree you
+  can switch between two layouts (remembered per browser).
+  - **Pods** nests a pod's units under its row: its member containers
+    (`Pod=`), plus any volume, network, image, or build used only by that
+    pod. A resource several pods share appears as a linked leaf under each
+    of them, and everything else sits under "Standalone". Each pod
+    collapses on its own.
+  - **Directories** shows your group folders, with drag-and-drop filing.
 - **Environment** — the host `${NAME}` variables a quadlet file can
   interpolate. sooth manages its own set through an `environment.d` drop-in
   (`~/.config/environment.d/50-sooth.conf`) and also pushes each change to
@@ -319,6 +322,12 @@ without touching anything real:
 scripts/run-dev.sh                 # prompts for a password, fresh scratch dir
 scripts/run-dev.sh --port 8123 --dir /tmp/sooth-scratch --no-seed
 ```
+
+It also skips your real `~/.config/sooth/config.toml`. Each scratch dir gets
+its own empty config at `.sooth-dev/config.toml`, so a self-update or git sync
+you configured for real use can't swap the release binary over your build or
+clone into the scratch dir. Pass `--config <path>` to use a specific config
+instead.
 
 `--fake-no-podman` and `--fake-linger-disabled` exercise the Settings "System"
 card and the dashboard warning banner (see `src/health.rs`) by running sooth

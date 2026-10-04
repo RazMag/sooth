@@ -3,25 +3,56 @@
 //! fragment) over `core::load_units_for_kinds` and the generic
 //! `templates::list` renderer -- only the `ListSpec` (title, columns, kinds)
 //! differs per section. Pods are loaded into every list (`with_pods`) so
-//! each can head the units it owns in the table's pod tree. Containers/Pods
+//! each can head the units it owns in the Pods layout. The layout itself
+//! (`ListView`) is per browser: `?view=` on a page load sets it in the
+//! session, and every page and `/rows` refresh reads it back
+//! ([`resolve_list_view`]). Containers/Pods
 //! live on the combined Services home page instead (`handlers::services`),
 //! not as their own list here.
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::response::IntoResponse;
+use serde::Deserialize;
 use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{FragmentError, PageError};
 use crate::quadlet::{UnitKind, discovery};
 use crate::web::core;
-use crate::web::templates::list::{Column, ListContext, ListSpec, kind_cell, with_pods};
+use crate::web::templates::list::{Column, ListContext, ListSpec, ListView, with_pods};
 use crate::web::templates::{self, NavItem};
 
-const ALL_UNITS_COLUMNS: &[Column] = &[Column {
-    header: "Kind",
-    cell: kind_cell,
-}];
+/// Every kind mixes here; each row's kind dot says which it is.
+const ALL_UNITS_COLUMNS: &[Column] = &[];
+
+const VIEW_KEY: &str = "list_view";
+
+/// `?view=pods|dirs` -- the toolbar's layout switch.
+#[derive(Deserialize)]
+pub struct ViewQuery {
+    pub view: Option<String>,
+}
+
+/// The list layout for this browser: a valid `requested` one (a page load's
+/// `?view=`) is stored in the session and used; otherwise whatever the
+/// session last stored, else the default. Shared by every list page and
+/// `/rows` fragment, so a `units-changed` refresh keeps the layout the page
+/// was drawn with.
+pub async fn resolve_list_view(session: &Session, requested: Option<&str>) -> ListView {
+    if let Some(view) = requested.and_then(ListView::parse) {
+        if let Err(e) = session.insert(VIEW_KEY, view.as_str()).await {
+            tracing::warn!(error = %e, "could not store list layout in session");
+        }
+        return view;
+    }
+    session
+        .get::<String>(VIEW_KEY)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|v| ListView::parse(&v))
+        .unwrap_or_default()
+}
 
 const VOLUMES_SPEC: ListSpec = ListSpec {
     title: "Volumes",
@@ -76,6 +107,7 @@ macro_rules! list_handlers {
         pub async fn $page_fn(
             State(state): State<AppState>,
             session: Session,
+            Query(query): Query<ViewQuery>,
         ) -> Result<impl IntoResponse, PageError> {
             let csrf = crate::auth::csrf::current(&session)
                 .await
@@ -85,6 +117,7 @@ macro_rules! list_handlers {
             let known = discovery::list_groups(&state.quadlet_dir);
             let synced = state.git_sync.synced_groups();
             let missing = core::missing_refs(&state, &units).await;
+            let view = resolve_list_view(&session, query.view.as_deref()).await;
             Ok(templates::list::list_page(
                 $spec,
                 &units,
@@ -95,6 +128,7 @@ macro_rules! list_handlers {
                     synced: &synced,
                     missing: &missing,
                     ports: None,
+                    view,
                 },
                 state.health.get(),
             ))
@@ -112,6 +146,7 @@ macro_rules! list_handlers {
             let known = discovery::list_groups(&state.quadlet_dir);
             let synced = state.git_sync.synced_groups();
             let missing = core::missing_refs(&state, &units).await;
+            let view = resolve_list_view(&session, None).await;
             Ok(templates::list::list_rows(
                 $spec,
                 &units,
@@ -122,6 +157,7 @@ macro_rules! list_handlers {
                     synced: &synced,
                     missing: &missing,
                     ports: None,
+                    view,
                 },
             ))
         }
