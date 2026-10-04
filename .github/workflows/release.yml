@@ -18,7 +18,7 @@ jobs:
     env:
       SOOTH_SKIP_FRONTEND_BUILD: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -38,7 +38,7 @@ jobs:
       tag: v${{ steps.read.outputs.version }}
       already_released: ${{ steps.check.outputs.exists }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: read
         run: |
           pkg=$(sed -nE 's/^version = "(.*)"$/\1/p' Cargo.toml | head -1)
@@ -79,7 +79,7 @@ jobs:
     env:
       SOOTH_SKIP_FRONTEND_BUILD: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -91,7 +91,7 @@ jobs:
           out="sooth-${{ matrix.target }}"
           cp "target/${{ matrix.target }}/release/sooth" "$out"
           chmod +x "$out"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sooth-${{ matrix.target }}
           path: sooth-${{ matrix.target }}
@@ -102,7 +102,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -117,7 +117,7 @@ jobs:
       # `target_commitish` are explicit rather than relying on this being a
       # tag push (it isn't anymore): this creates the tag against the exact
       # commit that triggered the run.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
