@@ -1,8 +1,9 @@
-//! Cross-unit reference resolution: which Container/Pod quadlets consume a
-//! given Volume or Network unit (`consumers_of`), and the reverse for a
-//! Pod specifically -- which containers are its members and which
-//! Volumes/Networks its own `[Pod]` section declares (`pod_members`,
-//! `pod_own_refs`), for the pod detail page's "part of this pod" rows.
+//! Cross-unit reference resolution: which quadlets consume a given
+//! Volume/Network/Image/Build unit (`consumers_of`) and which pod owns it
+//! (`owning_pod`, the list tables' pod tree); and for a Pod specifically --
+//! which containers are its members and which Volumes/Networks its own
+//! `[Pod]` section declares (`pod_members`, `pod_own_refs`), for the pod
+//! detail page's "part of this pod" rows.
 //! Pure and unit-testable -- `&[QuadletUnit]` in, referencing file names
 //! out; no D-Bus, no filesystem. Also which podman secrets a Container
 //! consumes via `Secret=` (`secret_refs` / `secret_consumers` /
@@ -12,7 +13,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use super::model::{QuadletUnit, UnitKind};
+use super::model::{QuadletUnit, Section, UnitKind};
 use super::naming;
 
 /// The podman-visible resource name a Volume/Network quadlet produces: the
@@ -33,15 +34,20 @@ fn resource_name(target: &QuadletUnit) -> Option<String> {
     )
 }
 
-/// File names of every Container/Pod unit in `all` that references `target`
-/// (a Volume or Network quadlet) -- either by its quadlet file name
-/// (`Volume=data.volume:/x`, the form podman-systemd.unit(5) recommends) or
-/// by the podman resource name it generates (`Volume=systemd-data:/x`).
-/// Sorted and deduplicated. Empty for any other kind.
+/// File names of every unit in `all` that consumes `target`, sorted and
+/// deduplicated:
+/// - a Volume/Network: every Container/Pod that references it -- either by
+///   its quadlet file name (`Volume=data.volume:/x`, the form
+///   podman-systemd.unit(5) recommends) or by the podman resource name it
+///   generates (`Volume=systemd-data:/x`);
+/// - an Image/Build: every Container whose `Image=` names its quadlet file.
+///
+/// Empty for any other kind.
 pub fn consumers_of(target: &QuadletUnit, all: &[QuadletUnit]) -> Vec<String> {
     let key = match target.kind {
         UnitKind::Volume => "Volume",
         UnitKind::Network => "Network",
+        UnitKind::Image | UnitKind::Build => return image_consumers(target, all),
         _ => return Vec::new(),
     };
     let Some(resource) = resource_name(target) else {
@@ -70,6 +76,23 @@ pub fn consumers_of(target: &QuadletUnit, all: &[QuadletUnit]) -> Vec<String> {
         .collect();
     out.sort();
     out.dedup();
+    out
+}
+
+/// The Containers in `all` whose `Image=` names `image` (an `.image` /
+/// `.build` quadlet) by file name. Sorted.
+fn image_consumers(image: &QuadletUnit, all: &[QuadletUnit]) -> Vec<String> {
+    let mut out: Vec<String> = all
+        .iter()
+        .filter(|u| u.kind == UnitKind::Container)
+        .filter(|u| {
+            u.section("Container")
+                .and_then(|s| s.get("Image"))
+                .is_some_and(|v| v.trim() == image.file_name)
+        })
+        .map(|u| u.file_name.clone())
+        .collect();
+    out.sort();
     out
 }
 
@@ -130,34 +153,37 @@ pub fn pod_own_refs(pod: &QuadletUnit, all: &[QuadletUnit]) -> (Vec<String>, Vec
     let Some(section) = pod.section("Pod") else {
         return (Vec::new(), Vec::new());
     };
-    let resolve = |key: &str, kind: UnitKind| -> Vec<String> {
-        let mut out: Vec<String> = section
-            .entries
-            .iter()
-            .filter(|(k, _)| k.as_str() == key)
-            .filter_map(|(_, v)| {
-                let source = v.split(':').next().unwrap_or(v).trim();
-                if source.is_empty() {
-                    return None;
-                }
-                Some(
-                    all.iter()
-                        .filter(|u| u.kind == kind)
-                        .find(|u| {
-                            u.file_name == source || resource_name(u).as_deref() == Some(source)
-                        })
-                        .map_or_else(|| source.to_string(), |u| u.file_name.clone()),
-                )
-            })
-            .collect();
-        out.sort();
-        out.dedup();
-        out
-    };
     (
-        resolve("Network", UnitKind::Network),
-        resolve("Volume", UnitKind::Volume),
+        resolve_refs(section, "Network", UnitKind::Network, all),
+        resolve_refs(section, "Volume", UnitKind::Volume, all),
     )
+}
+
+/// Every `key=` reference in `section` to a resource of `kind`, trimmed to
+/// the part before any `:OPTS`/`:DEST` and resolved to a quadlet file name
+/// in `all` (by file name or generated resource name) where one matches.
+/// Unresolved values pass through as written. Sorted and deduplicated.
+fn resolve_refs(section: &Section, key: &str, kind: UnitKind, all: &[QuadletUnit]) -> Vec<String> {
+    let mut out: Vec<String> = section
+        .entries
+        .iter()
+        .filter(|(k, _)| k.as_str() == key)
+        .filter_map(|(_, v)| {
+            let source = v.split(':').next().unwrap_or(v).trim();
+            if source.is_empty() {
+                return None;
+            }
+            Some(
+                all.iter()
+                    .filter(|u| u.kind == kind)
+                    .find(|u| u.file_name == source || resource_name(u).as_deref() == Some(source))
+                    .map_or_else(|| source.to_string(), |u| u.file_name.clone()),
+            )
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// The `.pod` quadlet in `all` a Container's `Pod=` names, if it exists.
@@ -181,37 +207,33 @@ fn container_pod<'a>(container: &QuadletUnit, all: &'a [QuadletUnit]) -> Option<
 /// unit renders exactly once per table. So does anything unused, and every
 /// Pod/Kube.
 pub fn owning_pod<'a>(unit: &QuadletUnit, all: &'a [QuadletUnit]) -> Option<&'a str> {
-    let consumers: Vec<&'a QuadletUnit> = match unit.kind {
-        UnitKind::Container => return container_pod(unit, all),
-        UnitKind::Volume | UnitKind::Network => {
-            let names = consumers_of(unit, all);
-            all.iter()
-                .filter(|u| names.contains(&u.file_name))
-                .collect()
-        }
-        UnitKind::Image | UnitKind::Build => all
-            .iter()
-            .filter(|u| u.kind == UnitKind::Container)
-            .filter(|u| {
-                u.section("Container")
-                    .and_then(|s| s.get("Image"))
-                    .is_some_and(|v| v.trim() == unit.file_name)
-            })
-            .collect(),
-        UnitKind::Pod | UnitKind::Kube => return None,
-    };
+    if unit.kind == UnitKind::Container {
+        return container_pod(unit, all);
+    }
+    let names = consumers_of(unit, all);
+    if names.is_empty() {
+        return None;
+    }
     let mut owner = None;
-    for consumer in consumers {
-        let pod = match consumer.kind {
-            UnitKind::Pod => Some(consumer.file_name.as_str()),
-            _ => container_pod(consumer, all),
-        }?;
+    for consumer in all.iter().filter(|u| names.contains(&u.file_name)) {
+        let pod = consumer_pod(consumer, all)?;
         if owner.is_some_and(|o| o != pod) {
             return None;
         }
         owner = Some(pod);
     }
     owner
+}
+
+/// The pod a consumer stands for: a Pod itself, or a Container's `Pod=`.
+fn consumer_pod<'a>(consumer: &QuadletUnit, all: &'a [QuadletUnit]) -> Option<&'a str> {
+    match consumer.kind {
+        UnitKind::Pod => all
+            .iter()
+            .find(|u| u.kind == UnitKind::Pod && u.file_name == consumer.file_name)
+            .map(|u| u.file_name.as_str()),
+        _ => container_pod(consumer, all),
+    }
 }
 
 /// The podman secret names a unit consumes: every `Secret=` in a Container's
@@ -666,8 +688,35 @@ mod tests {
 
     #[test]
     fn ignores_non_resource_kinds() {
-        let img = unit("x.image", UnitKind::Image, "Image", &[]);
-        assert!(consumers_of(&img, std::slice::from_ref(&img)).is_empty());
+        let pod = unit("x.pod", UnitKind::Pod, "Pod", &[]);
+        assert!(consumers_of(&pod, std::slice::from_ref(&pod)).is_empty());
+    }
+
+    #[test]
+    fn image_consumers_are_containers_naming_the_quadlet() {
+        let img = unit("base.image", UnitKind::Image, "Image", &[]);
+        let all = vec![
+            img.clone(),
+            unit(
+                "b.container",
+                UnitKind::Container,
+                "Container",
+                &[("Image", " base.image ")],
+            ),
+            unit(
+                "a.container",
+                UnitKind::Container,
+                "Container",
+                &[("Image", "base.image")],
+            ),
+            unit(
+                "c.container",
+                UnitKind::Container,
+                "Container",
+                &[("Image", "docker.io/library/base")],
+            ),
+        ];
+        assert_eq!(consumers_of(&img, &all), vec!["a.container", "b.container"]);
     }
 
     #[test]
