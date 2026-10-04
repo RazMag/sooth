@@ -1040,8 +1040,9 @@
    * kind dot / name. A `.rail-through` column carries an ancestor's vertical
    * line past this row; the last one, `.rail-elbow`, is the row's own curved
    * branch -- `.rail-more` when siblings follow, so its line continues to
-   * the row's bottom edge. Rails stretch to the row's full height, so the
-   * lines join up across rows of any height. */
+   * the row's bottom edge. The lines overshoot their rail and are clipped at
+   * the cell's edges, so they join up across rows of any height without
+   * the rail itself having to be row-tall (see `--rail-reach`). */
   .data-table { --gstep: 1.25rem; --gpad: 0.65rem; --tree-line: color-mix(in srgb, var(--color-faint) 75%, transparent); }
 
   .tree-wrap {
@@ -1061,10 +1062,14 @@
   }
   .tree-table tbody tr:last-child > td { border-bottom: 0; }
   .tree-table td { vertical-align: middle; }
-  /* `height: 1px` on the cell lets `.tree-cell`'s `height: 100%` resolve to
-     the full row height even when another cell (a long port list) makes the
-     row taller than the name -- otherwise the rails would stop short. */
-  .tree-table tbody td:first-child { padding-top: 0; padding-bottom: 0; height: 1px; }
+  /* A row can be taller than its name (a long port list in another cell),
+     and a percentage height can't make `.tree-cell` fill it: Firefox
+     resolves `height: 100%` inside a table cell against the cell's
+     *specified* height, not the row's. So the rails stay name-tall,
+     centred like the rest of the cell, and their lines reach past them;
+     `clip-path` trims that overshoot to the cell (inset box-shadows, the
+     drag-over marker, are inside the clip and unaffected). */
+  .tree-table tbody td:first-child { padding-top: 0; padding-bottom: 0; clip-path: inset(0); }
   .tree-table .group-head-cell { padding: 0 var(--gpad); }
   .tree-table .group-kebab-cell { padding: 0.3rem 0.65rem; }
 
@@ -1072,7 +1077,6 @@
     display: flex;
     align-items: center;
     gap: 0.45rem;
-    height: 100%;
     min-height: 2.75rem;
   }
   .tree-cell > .drag-handle { margin: 0; }
@@ -1082,15 +1086,17 @@
   .tree-title > a { white-space: nowrap; }
   .tree-label { font-weight: 600; }
 
-  .rails { display: flex; flex: none; align-self: stretch; }
+  /* `--rail-reach`: how far a line overshoots its rail -- just has to beat
+     the tallest row, which the cell's clip then trims it back to. */
+  .rails { --rail-reach: 100vh; display: flex; flex: none; align-self: stretch; }
   .rail { position: relative; width: var(--gstep); }
   .rail-through::after,
   .rail-elbow.rail-more::after {
     content: "";
     position: absolute;
     left: calc(var(--gstep) / 2);
-    top: 0;
-    bottom: 0;
+    top: calc(-1 * var(--rail-reach));
+    bottom: calc(-1 * var(--rail-reach));
     border-left: 1.5px solid var(--tree-line);
   }
   .rail-elbow.rail-more::after { top: 50%; }
@@ -1098,8 +1104,8 @@
     content: "";
     position: absolute;
     left: calc(var(--gstep) / 2);
-    top: 0;
-    height: 50%;
+    top: calc(-1 * var(--rail-reach));
+    bottom: 50%;
     width: calc(var(--gstep) / 2);
     border-left: 1.5px solid var(--tree-line);
     border-bottom: 1.5px solid var(--tree-line);

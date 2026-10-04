@@ -4,6 +4,18 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-04
+
+### Changed
+
+- Auto-update has its own icon (an upward arrow in a circle), on list rows and
+  the detail page, so it no longer looks like the restart action.
+
+### Fixed
+
+- In Firefox, the tree's branch lines no longer break above and below a tall
+  row, such as one with a long port list.
+
 ## [0.4.0] - 2026-10-04
 
 ### Added
@@ -185,6 +197,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.4.1]: https://github.com/RazMag/sooth/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/RazMag/sooth/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/RazMag/sooth/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/RazMag/sooth/compare/v0.3.4...v0.3.5
