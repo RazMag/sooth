@@ -851,8 +851,9 @@ pub fn split_ports_summary(unit: &QuadletUnit, active: bool, split: &SplitPorts)
             (port_list(&split.mappings, active, &unit.service_name()))
         }
         @if moved > 0 {
-            div.cell-secondary title="Published by this pod and shown on the containers that serve them, matched as on the Ports screen" {
-                (moved) @if moved == 1 { " port" } @else { " ports" } " on its containers"
+            // The Ports column header already says what the number counts.
+            div.cell-secondary title="Published by this pod, but listed on the member container that serves each one (matched as on the Ports screen)" {
+                (moved) @if moved == 1 { " served by a member" } @else { " served by members" }
             }
         }
     }
