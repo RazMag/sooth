@@ -5,10 +5,6 @@ use super::list::{Column, RowCtx};
 use crate::quadlet::{QuadletUnit, UnitKind, refs};
 use crate::systemd::UnitStatus;
 
-fn type_cell(ctx: &RowCtx) -> Markup {
-    html! { (ctx.unit.kind.primary_section()) }
-}
-
 fn image_source(unit: &QuadletUnit) -> &str {
     match unit.kind {
         UnitKind::Image => unit
@@ -31,11 +27,8 @@ fn used_by_cell(ctx: &RowCtx) -> Markup {
     super::unit_links(ctx.all_units, &refs::consumers_of(ctx.unit, ctx.all_units))
 }
 
+// Image vs Build reads off each row's kind dot -- no "Type" column.
 pub const COLUMNS: &[Column] = &[
-    Column {
-        header: "Type",
-        cell: type_cell,
-    },
     Column {
         header: "Source",
         cell: source_cell,
