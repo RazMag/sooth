@@ -37,6 +37,20 @@
   --color-ok: #1c9d5d;
   --color-ok-soft: #e7f5ec;
 
+  /* Unit kinds -- the list tables' kind dots and resource chips. */
+  --color-kind-pod: #7552d1;
+  --color-kind-pod-soft: #f0ecfb;
+  --color-kind-container: #3d6fdd;
+  --color-kind-container-soft: #eaf0fd;
+  --color-kind-volume: #0f8783;
+  --color-kind-volume-soft: #e2f3f2;
+  --color-kind-network: #c0621c;
+  --color-kind-network-soft: #fbeee3;
+  --color-kind-image: #b0428a;
+  --color-kind-image-soft: #f8e9f2;
+  --color-kind-kube: #56677f;
+  --color-kind-kube-soft: #eceff3;
+
   --shadow-pop: 0 6px 24px -6px rgb(15 18 23 / 0.16), 0 2px 6px -2px rgb(15 18 23 / 0.08);
 
   --breakpoint-nav: 60rem;
@@ -64,6 +78,19 @@
     --color-ok: #35c46f;
     --color-ok-soft: #15301f;
 
+    --color-kind-pod: #a58bff;
+    --color-kind-pod-soft: #251f3d;
+    --color-kind-container: #6d9bff;
+    --color-kind-container-soft: #1a2540;
+    --color-kind-volume: #3fc4bf;
+    --color-kind-volume-soft: #12302f;
+    --color-kind-network: #f0954a;
+    --color-kind-network-soft: #3a2716;
+    --color-kind-image: #e57ab8;
+    --color-kind-image-soft: #3a1d2e;
+    --color-kind-kube: #9aa7ba;
+    --color-kind-kube-soft: #232831;
+
     --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.55), 0 2px 8px -2px rgb(0 0 0 / 0.4);
   }
 
@@ -86,6 +113,18 @@
       --color-warn-soft: #362d18;
       --color-ok: #35c46f;
       --color-ok-soft: #15301f;
+      --color-kind-pod: #a58bff;
+      --color-kind-pod-soft: #251f3d;
+      --color-kind-container: #6d9bff;
+      --color-kind-container-soft: #1a2540;
+      --color-kind-volume: #3fc4bf;
+      --color-kind-volume-soft: #12302f;
+      --color-kind-network: #f0954a;
+      --color-kind-network-soft: #3a2716;
+      --color-kind-image: #e57ab8;
+      --color-kind-image-soft: #3a1d2e;
+      --color-kind-kube: #9aa7ba;
+      --color-kind-kube-soft: #232831;
       --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.55), 0 2px 8px -2px rgb(0 0 0 / 0.4);
     }
   }
@@ -995,55 +1034,169 @@
     pointer-events: none;
   }
 
-  /* Collapsible group sections in the list tables ------ *
-   * Nesting is shown three ways: the header spells out the parent path
-   * (`media/` faint, then the leaf bold); every row of a nested section is
-   * indented one `--gstep` per level; and a guide bar sits on the boundary
-   * between a child and its parent's indent. `--depth` is set inline per row. */
-  .data-table { --gstep: 1.35rem; --gpad: 0.65rem; }
+  /* Branch-tree list tables (`templates::list`) ------------- *
+   * Each row's first cell is a `.tree-cell` flex row: a `.rails` strip of
+   * `.rail` columns (one `--gstep` wide per tree level), then the grip / toggle /
+   * kind dot / name. A `.rail-through` column carries an ancestor's vertical
+   * line past this row; the last one, `.rail-elbow`, is the row's own curved
+   * branch -- `.rail-more` when siblings follow, so its line continues to
+   * the row's bottom edge. Rails stretch to the row's full height, so the
+   * lines join up across rows of any height. */
+  .data-table { --gstep: 1.25rem; --gpad: 0.65rem; --tree-line: color-mix(in srgb, var(--color-faint) 75%, transparent); }
 
-  /* A group header keeps a unit row's column shape: a wide first cell (name,
-     drag grip, toggle) plus the trailing kebab cell -- so the ⋯ menu lands in
-     the exact same column, at the same x, as every unit row's kebab, and the
-     nesting indent (which only moves content inside the first cell) never
-     shifts it. */
-  .data-table tr.group-row > td { background: var(--color-raised); vertical-align: middle; }
-  .data-table tr.group-row:hover > td { background: var(--color-raised); }
-  .data-table tr.group-row > .group-head-cell { padding: 0; }
-  .data-table tr.group-row > .group-kebab-cell { padding: 0.3rem 0.65rem; }
-  .group-row-inner {
+  .tree-wrap {
+    border: 1px solid var(--color-line);
+    border-radius: 0.75rem;
+    background: var(--color-surface);
+    overflow: hidden;
+    overflow-x: auto;
+  }
+  .tree-table th {
+    background: var(--color-canvas);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--color-faint);
+  }
+  .tree-table tbody tr:last-child > td { border-bottom: 0; }
+  .tree-table td { vertical-align: middle; }
+  /* `height: 1px` on the cell lets `.tree-cell`'s `height: 100%` resolve to
+     the full row height even when another cell (a long port list) makes the
+     row taller than the name -- otherwise the rails would stop short. */
+  .tree-table tbody td:first-child { padding-top: 0; padding-bottom: 0; height: 1px; }
+  .tree-table .group-head-cell { padding: 0 var(--gpad); }
+  .tree-table .group-kebab-cell { padding: 0.3rem 0.65rem; }
+
+  .tree-cell {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.4rem 0.65rem 0.4rem calc(var(--gpad) + var(--depth, 0) * var(--gstep));
+    gap: 0.45rem;
+    height: 100%;
+    min-height: 2.75rem;
   }
-  .group-row-inner .drag-handle { margin: 0; }
-
-  /* First-cell wrapper on unit / empty rows -- carries the same indent as the
-     group header above it, so the row's padding lives on the wrapper. */
-  .data-table tbody td:first-child:has(> .row-indent) { padding: 0; }
-  .row-indent { padding: 0.6rem 0.65rem 0.6rem calc(var(--gpad) + var(--depth, 0) * var(--gstep)); }
+  .tree-cell > .drag-handle { margin: 0; }
+  .tree-name { min-width: 0; padding: 0.45rem 0; }
+  .tree-title { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; }
   /* Keep a file name on one line -- broken at its hyphens it reads as two. */
-  .row-indent > a { white-space: nowrap; }
+  .tree-title > a { white-space: nowrap; }
+  .tree-label { font-weight: 600; }
 
-  /* The guide bar: for any nested row (depth >= 1) drop the deep left padding,
-     push the content box in by the *parent's* indent with a margin, and draw a
-     rule on its left edge -- so the bar always lands exactly on the
-     child/parent seam regardless of how deep the nesting goes. */
-  .data-table tbody tr[data-depth]:not([data-depth="0"]) .group-row-inner,
-  .data-table tbody tr[data-depth]:not([data-depth="0"]) .row-indent {
-    margin-left: calc((var(--depth) - 1) * var(--gstep) + var(--gpad));
-    padding-left: 0.7rem;
-    border-left: 2px solid var(--color-line-strong);
+  .rails { display: flex; flex: none; align-self: stretch; }
+  .rail { position: relative; width: var(--gstep); }
+  .rail-through::after,
+  .rail-elbow.rail-more::after {
+    content: "";
+    position: absolute;
+    left: calc(var(--gstep) / 2);
+    top: 0;
+    bottom: 0;
+    border-left: 1.5px solid var(--tree-line);
   }
-  .data-table tbody tr.drag-over .row-indent,
-  .data-table tbody tr.group-row.drag-over .group-row-inner {
-    border-left-color: var(--color-accent);
+  .rail-elbow.rail-more::after { top: 50%; }
+  .rail-elbow::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--gstep) / 2);
+    top: 0;
+    height: 50%;
+    width: calc(var(--gstep) / 2);
+    border-left: 1.5px solid var(--tree-line);
+    border-bottom: 1.5px solid var(--tree-line);
+    border-bottom-left-radius: 0.55rem;
   }
-  .data-table tbody tr.drag-forbidden .row-indent,
-  .data-table tbody tr.group-row.drag-forbidden .group-row-inner {
-    border-left-color: var(--color-danger);
+  .tree-table tbody tr.drag-over .rail-elbow::before { border-color: var(--color-accent); }
+  .tree-table tbody tr.drag-forbidden .rail-elbow::before { border-color: var(--color-danger); }
+
+  /* Kind dot: the round, tinted icon in front of every unit's name (and a
+     folder's, and the Standalone trunk's). */
+  .kind-dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 50%;
+    background: var(--kind-soft, var(--color-raised));
+    color: var(--kind, var(--color-muted));
   }
+  .kind-dot svg { width: 0.9rem; height: 0.9rem; }
+  .kind-pod { --kind: var(--color-kind-pod); --kind-soft: var(--color-kind-pod-soft); }
+  .kind-container { --kind: var(--color-kind-container); --kind-soft: var(--color-kind-container-soft); }
+  .kind-volume { --kind: var(--color-kind-volume); --kind-soft: var(--color-kind-volume-soft); }
+  .kind-network { --kind: var(--color-kind-network); --kind-soft: var(--color-kind-network-soft); }
+  .kind-image,
+  .kind-build { --kind: var(--color-kind-image); --kind-soft: var(--color-kind-image-soft); }
+  .kind-kube { --kind: var(--color-kind-kube); --kind-soft: var(--color-kind-kube-soft); }
+  .kind-folder { background: var(--color-surface); color: var(--color-muted); border: 1px solid var(--color-line); }
+  .kind-standalone { background: transparent; color: var(--color-faint); border: 1px dashed var(--color-line-strong); }
+
+  /* Trunk rows -- a pod, the Standalone heading, a group directory -- are
+     shaded, so the branches read as hanging off them. */
+  .data-table tr.tree-trunk > td,
+  .data-table tr.group-row > td { background: var(--color-raised); }
+  .data-table tr.tree-trunk:hover > td,
+  .data-table tr.group-row:hover > td { background: var(--color-raised); }
+  .tree-trunk .tree-title > a { font-weight: 600; }
+
+  /* A shared resource's link-only leaf under each pod that uses it. */
+  .tree-leaf .tree-cell { min-height: 2rem; }
+  .tree-leaf .tree-name { padding: 0.2rem 0; }
+  .tree-leaf .kind-dot { width: 1.25rem; height: 1.25rem; }
+  .tree-leaf .kind-dot svg { width: 0.7rem; height: 0.7rem; }
+  .tree-leaf .tree-title > a { color: var(--color-muted); font-size: 0.82rem; }
+
+  .chip-folder, .chip-pod, .tree-leaf .chip { gap: 0.25rem; font-weight: 500; }
+  .chip-folder svg, .chip-pod svg, .tree-leaf .chip svg { width: 0.72rem; height: 0.72rem; }
+  .chip-pod {
+    background: var(--color-kind-pod-soft);
+    color: var(--color-kind-pod);
+    text-decoration: none;
+  }
+  .chip-pod:hover { text-decoration: none; background: var(--color-kind-pod); color: var(--color-surface); }
+
+  /* A container's volumes / networks / image on its second line. */
+  .unit-refs { display: flex; flex-wrap: wrap; gap: 0.15rem 0.7rem; }
+  .unit-ref { display: inline-flex; align-items: center; gap: 0.2rem; color: var(--color-muted); white-space: nowrap; }
+  .unit-ref:hover { color: var(--color-ink); }
+  .unit-ref svg { width: 0.75rem; height: 0.75rem; }
+  .cell-code { font-size: 0.8rem; color: var(--color-muted); overflow-wrap: break-word; }
+  /* The name column carries the tree, chips and second line -- give it the
+     room, and let detail columns (image refs, subnets) wrap instead. */
+  .tree-table th:first-child { width: 42%; }
+
+  /* Status: the live badge, then autostart / auto-update as bare icons. */
+  .status-cell { display: flex; align-items: center; gap: 0.4rem; }
+  .tree-table .badge { border: 0; background: none; padding: 0; }
+  .status-icon { display: inline-flex; color: var(--color-faint); }
+  .status-icon svg { width: 0.85rem; height: 0.85rem; }
+
+  /* Toolbar Pods / Directories switch. */
+  .view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+  .view-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.65rem;
+    font-size: 0.8rem;
+    color: var(--color-muted);
+    background: var(--color-surface);
+  }
+  .view-opt + .view-opt { border-left: 1px solid var(--color-line-strong); }
+  .view-opt svg { width: 0.85rem; height: 0.85rem; }
+  .view-opt:hover { text-decoration: none; color: var(--color-ink); }
+  .view-opt.is-active { background: var(--color-accent-soft); color: var(--color-accent); }
+
+  /* A group header keeps a unit row's column shape: a wide first cell (rails,
+     drag grip, toggle) plus the trailing kebab cell -- so the ⋯ menu lands in
+     the exact same column, at the same x, as every unit row's kebab. */
+  .data-table tr.group-row > td { vertical-align: middle; }
   .group-toggle {
     display: flex;
     align-items: center;
@@ -1128,7 +1281,6 @@
   .group-chevron svg { width: 0.9rem; height: 0.9rem; }
   .group-toggle[aria-expanded="false"] .group-chevron { transform: rotate(-90deg); }
   .group-name { color: var(--color-ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .group-parent { color: var(--color-faint); font-weight: 500; }
   .group-count {
     padding: 0.05rem 0.4rem;
     border-radius: 999px;
@@ -1138,7 +1290,7 @@
     font-weight: 500;
     color: var(--color-muted);
   }
-  .data-table tr.group-empty .row-indent {
+  .data-table tr.group-empty .tree-cell {
     color: var(--color-muted);
     font-size: 0.82rem;
     font-style: italic;
@@ -1151,16 +1303,10 @@
   .data-table [data-filtering] tr.is-collapsed:not([hidden]),
   .data-table [data-filtering] tr.pod-collapsed:not([hidden]) { display: table-row; }
 
-  /* Pod tree: a pod row heads the units it owns (`tr[data-pod-member]`, one
-     indent step deeper -- see `templates::list::PodTree`), counted by kind on
-     its secondary line. Its chevron sits between the grip and the name;
-     plain rows in a table with any pod get a same-width spacer so every
-     top-level name starts at the same x. The children's guide bar is tinted
-     with the accent so a pod's units read apart from a group's nesting. */
+  /* A pod's (or Standalone's) chevron, collapsing the rows under it --
+     `frontend/podtree.js`. */
   .pod-toggle {
     display: inline-flex;
-    vertical-align: middle;
-    margin-right: 0.3rem;
     padding: 0;
     border: 0;
     background: none;
@@ -1169,10 +1315,6 @@
   }
   .pod-toggle:hover { color: var(--color-ink); }
   .pod-toggle[aria-expanded="false"] .group-chevron { transform: rotate(-90deg); }
-  .pod-toggle-spacer { display: inline-block; width: 0.9rem; margin-right: 0.3rem; }
-  .data-table tbody tr[data-pod-member] .row-indent {
-    border-left-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
-  }
 
   /* Unit detail: one action toolbar + two-column layout w/ facts rail */
   .detail-toolbar {

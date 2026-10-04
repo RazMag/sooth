@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use tower_sessions::Session;
 
@@ -10,6 +10,7 @@ use crate::quadlet::ports::SplitPorts;
 use crate::quadlet::{QuadletUnit, UnitKind, discovery};
 use crate::systemd::UnitStatus;
 use crate::web::core;
+use crate::web::handlers::list::{ViewQuery, resolve_list_view};
 use crate::web::templates::list::ListContext;
 use crate::web::templates::services::Stats;
 use crate::web::templates::{self};
@@ -42,6 +43,7 @@ async fn split_ports(
 pub async fn page(
     State(state): State<AppState>,
     session: Session,
+    Query(query): Query<ViewQuery>,
 ) -> Result<impl IntoResponse, PageError> {
     let csrf = crate::auth::csrf::current(&session)
         .await
@@ -52,6 +54,7 @@ pub async fn page(
     let missing = core::missing_refs(&state, &units).await;
     let ports = split_ports(&units, &all).await;
     let stats = compute_stats(&units);
+    let view = resolve_list_view(&session, query.view.as_deref()).await;
     Ok(templates::services::services_page(
         &units,
         &stats,
@@ -62,6 +65,7 @@ pub async fn page(
             synced: &synced,
             missing: &missing,
             ports: Some(&ports),
+            view,
         },
         state.health.get(),
     ))
@@ -79,6 +83,7 @@ pub async fn rows(
     let synced = state.git_sync.synced_groups();
     let missing = core::missing_refs(&state, &units).await;
     let ports = split_ports(&units, &all).await;
+    let view = resolve_list_view(&session, None).await;
     Ok(templates::list::list_rows(
         &templates::services::SPEC,
         &units,
@@ -89,6 +94,7 @@ pub async fn rows(
             synced: &synced,
             missing: &missing,
             ports: Some(&ports),
+            view,
         },
     ))
 }

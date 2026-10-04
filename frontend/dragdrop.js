@@ -1,4 +1,6 @@
-// Drag rows and group headers around the list tables to re-file them.
+// Drag rows and group headers around the list tables to re-file them --
+// only in the Directories layout (`table.data-table[data-view="dirs"]`); the
+// Pods layout has no group rows to drop on and renders no grips.
 //
 //  * a unit row, grabbed by its grip -> POST {unit}/move  (group = drop target)
 //  * a group header, grabbed by its grip -> POST /groups/move (parent = target)
@@ -88,7 +90,7 @@ export function initDragDrop() {
 
   document.addEventListener("dragstart", (e) => {
     const handle = e.target.closest?.(".drag-handle");
-    if (!handle) return;
+    if (!handle || handle.closest("table.data-table")?.dataset.view !== "dirs") return;
     const tr = handle.closest("tr");
     if (handle.classList.contains("group-drag")) {
       drag = tr?.dataset.group ? { kind: "group", path: tr.dataset.group } : null;
