@@ -2,7 +2,7 @@ use maud::{Markup, html};
 
 use super::detail::{self, DetailCtx};
 use super::list::{Column, RowCtx};
-use crate::quadlet::{QuadletUnit, UnitKind};
+use crate::quadlet::{QuadletUnit, UnitKind, refs};
 use crate::systemd::UnitStatus;
 
 fn type_cell(ctx: &RowCtx) -> Markup {
@@ -24,7 +24,11 @@ fn image_source(unit: &QuadletUnit) -> &str {
 }
 
 fn source_cell(ctx: &RowCtx) -> Markup {
-    html! { (image_source(ctx.unit)) }
+    html! { code.cell-code { (super::soft_wrap_path(image_source(ctx.unit))) } }
+}
+
+fn used_by_cell(ctx: &RowCtx) -> Markup {
+    super::unit_links(ctx.all_units, &refs::consumers_of(ctx.unit, ctx.all_units))
 }
 
 pub const COLUMNS: &[Column] = &[
@@ -35,6 +39,10 @@ pub const COLUMNS: &[Column] = &[
     Column {
         header: "Source",
         cell: source_cell,
+    },
+    Column {
+        header: "Used by",
+        cell: used_by_cell,
     },
 ];
 

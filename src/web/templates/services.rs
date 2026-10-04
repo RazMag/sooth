@@ -20,10 +20,24 @@ fn ports_cell(ctx: &RowCtx) -> Markup {
     }
 }
 
+/// A container's `Image=` as written (an `.image`/`.build` quadlet name or a
+/// registry reference); blank for a pod.
+fn image_cell(ctx: &RowCtx) -> Markup {
+    html! {
+        @if let Some(image) = ctx.unit.section("Container").and_then(|s| s.get("Image")) {
+            code.cell-code { (super::soft_wrap_path(image)) }
+        }
+    }
+}
+
 pub const COLUMNS: &[Column] = &[
     Column {
         header: "Kind",
         cell: kind_cell,
+    },
+    Column {
+        header: "Image",
+        cell: image_cell,
     },
     Column {
         header: "Ports",

@@ -372,6 +372,18 @@ pub fn autostart_pill(enabled: bool) -> Markup {
     }
 }
 
+/// `text` with a soft line break offered after each `/` -- for image
+/// references and paths in narrow table columns, which otherwise can't wrap
+/// and squeeze the name column instead.
+pub fn soft_wrap_path(text: &str) -> Markup {
+    html! {
+        @for (i, part) in text.split('/').enumerate() {
+            @if i > 0 { "/" wbr; }
+            (part)
+        }
+    }
+}
+
 /// Reads a container's current `[Container]` `AutoUpdate=` policy from the
 /// parsed model (`None` == off / absent / unrecognised).
 fn autoupdate_mode(unit: &QuadletUnit) -> Option<AutoUpdateMode> {
