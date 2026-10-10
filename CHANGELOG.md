@@ -4,6 +4,23 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Git Sync keeps running units in step with the repo**: when a sync pulls
+  new configuration for a container, pod or kube unit (its quadlet file or a
+  `.d/` drop-in), sooth restarts that unit so the change takes effect. Only
+  running or failed units are restarted; stopped ones stay stopped. A newly
+  added unit is started if it would be running after a reboot anyway: it is
+  enabled in its `[Install]` section, or it joins a running pod. That
+  includes the units a newly added sync clones. A pod's changes, such as a
+  new `PublishPort=`, apply by restarting the pod together with its
+  containers, each restarted only once. When a unit
+  is deleted from the repo, sooth stops it before removing its file, so its
+  container is cleaned up rather than left running. Volumes and networks are
+  never stopped or removed, and their data is kept.
+
 ## [0.4.1] - 2026-10-04
 
 ### Changed
