@@ -4,9 +4,17 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-10-12
 
 ### Added
+
+- **Check a container's image for updates** from its row's ⋯ menu. "Check
+  for update" asks the registry whether the image's tag now points to a newer
+  image, without downloading it. If there is one, an **Update** button pulls
+  it and restarts the container so it runs the new image; a stopped container
+  stays stopped and uses the new image on its next start. Images pinned to a
+  digest and local (`localhost/`) images can't be checked, and containers
+  built from a `.build` file don't get the option.
 
 - **Git Sync keeps running units in step with the repo**: when a sync pulls
   new configuration for a container, pod or kube unit (its quadlet file or a
@@ -20,6 +28,12 @@ All notable changes to sooth are documented here. The format follows
   is deleted from the repo, sooth stops it before removing its file, so its
   container is cleaned up rather than left running. Volumes and networks are
   never stopped or removed, and their data is kept.
+
+### Fixed
+
+- A row's ⋯ menu no longer runs off the page: near the bottom of a long list
+  it opens upward, and it stays inside the window when a wide table is
+  scrolled sideways.
 
 ## [0.4.1] - 2026-10-04
 
@@ -214,6 +228,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.5.0]: https://github.com/RazMag/sooth/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/RazMag/sooth/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/RazMag/sooth/compare/v0.3.6...v0.4.0
 [0.3.6]: https://github.com/RazMag/sooth/compare/v0.3.5...v0.3.6
