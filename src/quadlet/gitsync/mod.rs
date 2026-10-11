@@ -9,13 +9,18 @@
 //!
 //! See [`GitSyncManager`] for the runtime side (one poll task per configured
 //! sync) and `crate::web::handlers::gitsync` for the web surface. Deliberately
-//! does *not* trigger a systemd reload or `UnitsChanged` broadcast itself --
-//! a sync's writes into the quadlet tree are indistinguishable from a human
-//! editing files there, so the existing `quadlet::discovery::watch` +
-//! `main.rs` fs-watch task already reloads and refreshes the UI for free.
+//! does *not* broadcast `UnitsChanged` itself -- a sync's writes into the
+//! quadlet tree are indistinguishable from a human editing files there, so
+//! the existing `quadlet::discovery::watch` + `main.rs` fs-watch task already
+//! reloads and refreshes the UI for free. The systemd calls it does make
+//! keep running workloads in step with an update (`units::UnitSync`):
+//! stopping the ones it deletes before the files change, and restarting the
+//! ones it edits after a reload of its own, so neither races the fs-watch
+//! reload.
 
 pub mod git;
 pub mod manager;
+pub mod units;
 
 use std::time::SystemTime;
 

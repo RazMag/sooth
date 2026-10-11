@@ -129,12 +129,13 @@ async fn run() -> anyhow::Result<()> {
 
     // Git-synced groups: one poll task per configured entry, kept live
     // (add/remove don't need a restart) rather than just a config snapshot.
-    // Deliberately doesn't touch `systemd_client`/`events_tx` for reload --
-    // its writes into the quadlet tree are picked up by the fs-watch task
-    // below exactly like an external edit.
+    // Its writes into the quadlet tree are picked up by the fs-watch task
+    // below exactly like an external edit; `systemd_client` is only for
+    // restarting the running workloads an update changed.
     let git_sync = quadlet::gitsync::GitSyncManager::new(
         Arc::new(config_path.clone()),
         events_tx.clone(),
+        Some(Arc::new(systemd_client.clone())),
         &exe_path,
         &config.github_token,
     );

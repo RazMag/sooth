@@ -171,11 +171,7 @@ pub async fn pull(
         return Err(AppError::Csrf.into());
     }
     let all = discovery::load_all(&state.quadlet_dir)?;
-    let image = all
-        .iter()
-        .find(|u| u.kind == UnitKind::Container && u.file_name == form.file_name)
-        .filter(|_| !core::builds_locally(&form.file_name, &all))
-        .and_then(|u| refs::container_image(u, &all))
+    let image = core::pullable_image(&form.file_name, &all)
         .ok_or_else(|| AppError::NotFound(format!("no pullable image for {}", form.file_name)))?;
     let error = imageinfo::pull(&image).await.err();
     let csrf = csrf(&session).await;

@@ -283,6 +283,109 @@ pub async fn is_ancestor(
     }
 }
 
+/// How a [`FileChange`]'s path differs between the two commits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+}
+
+/// One path [`changed_files`] / [`tracked_files`] reports, relative to the
+/// checkout root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileChange {
+    pub path: String,
+    pub kind: ChangeKind,
+    /// The file's blob id: its content at `to`, or for a deleted file its
+    /// content at `from` -- equal ids on a delete and an add mean the file
+    /// only moved.
+    pub blob: String,
+}
+
+/// Every path that differs between `from` and `to`. `--no-renames` makes a
+/// rename show up as a delete of the old path plus an add of the new one,
+/// regardless of the host's `diff.renames` setting, and `-z` keeps unusual
+/// file names unquoted.
+pub async fn changed_files(
+    dir: &Path,
+    from: &str,
+    to: &str,
+) -> Result<Vec<FileChange>, GitSyncError> {
+    let mut cmd = base_command();
+    cmd.arg("-C")
+        .arg(dir)
+        .arg("diff")
+        .arg("--raw")
+        .arg("--no-abbrev")
+        .arg("-z")
+        .arg("--no-renames")
+        .arg(from)
+        .arg(to)
+        .arg("--");
+    let out = run(cmd).await?;
+    // `-z --raw` output is `:<mode> <mode> <old blob> <new blob> <status>\0<path>\0`
+    // pairs.
+    let mut fields = out.split('\0').filter(|f| !f.is_empty());
+    let mut changes = Vec::new();
+    while let (Some(meta), Some(path)) = (fields.next(), fields.next()) {
+        let meta: Vec<&str> = meta.trim_start_matches(':').split(' ').collect();
+        let [_, _, old_blob, new_blob, status] = meta[..] else {
+            return Err(GitSyncError::Failed(format!(
+                "unexpected `git diff --raw` output for '{path}'"
+            )));
+        };
+        let kind = match status.chars().next() {
+            Some('A') => ChangeKind::Added,
+            Some('D') => ChangeKind::Deleted,
+            _ => ChangeKind::Modified,
+        };
+        changes.push(FileChange {
+            path: path.to_string(),
+            kind,
+            blob: if kind == ChangeKind::Deleted {
+                old_blob
+            } else {
+                new_blob
+            }
+            .to_string(),
+        });
+    }
+    Ok(changes)
+}
+
+/// Every file checked out at `dir`'s `HEAD`, as if each were just added --
+/// what a fresh clone means for the units it brings in.
+pub async fn tracked_files(dir: &Path) -> Result<Vec<FileChange>, GitSyncError> {
+    let mut cmd = base_command();
+    cmd.arg("-C")
+        .arg(dir)
+        .arg("ls-files")
+        .arg("--stage")
+        .arg("-z");
+    let out = run(cmd).await?;
+    // `-z --stage` output is `<mode> <blob> <stage>\t<path>\0` records.
+    let mut changes = Vec::new();
+    for record in out.split('\0').filter(|r| !r.is_empty()) {
+        let Some((meta, path)) = record.split_once('\t') else {
+            return Err(GitSyncError::Failed(format!(
+                "unexpected `git ls-files` output '{record}'"
+            )));
+        };
+        let Some(blob) = meta.split(' ').nth(1) else {
+            return Err(GitSyncError::Failed(format!(
+                "unexpected `git ls-files` output for '{path}'"
+            )));
+        };
+        changes.push(FileChange {
+            path: path.to_string(),
+            kind: ChangeKind::Added,
+            blob: blob.to_string(),
+        });
+    }
+    Ok(changes)
+}
+
 /// `git -C <dir> reset --hard <rev>`.
 pub async fn reset_hard(dir: &Path, rev: &str) -> Result<(), GitSyncError> {
     let mut cmd = base_command();
@@ -399,6 +502,79 @@ mod tests {
             std::fs::read_to_string(dest.path().join("web.container")).unwrap(),
             "[Container]\nImage=y\n"
         );
+    }
+
+    #[tokio::test]
+    async fn changed_files_flags_deletions() {
+        let origin = make_origin();
+        std::fs::write(origin.path().join("gone.volume"), "[Volume]\n").unwrap();
+        assert!(git(origin.path(), &["add", "."]).status.success());
+        assert!(
+            git(origin.path(), &["commit", "--quiet", "-m", "add gone"])
+                .status
+                .success()
+        );
+        let before = rev_parse(origin.path(), "HEAD").await.unwrap();
+
+        std::fs::write(
+            origin.path().join("web.container"),
+            "[Container]\nImage=y\n",
+        )
+        .unwrap();
+        std::fs::create_dir(origin.path().join("sub")).unwrap();
+        std::fs::write(origin.path().join("sub/db.container"), "[Container]\n").unwrap();
+        std::fs::remove_file(origin.path().join("gone.volume")).unwrap();
+        assert!(git(origin.path(), &["add", "-A"]).status.success());
+        assert!(
+            git(origin.path(), &["commit", "--quiet", "-m", "update"])
+                .status
+                .success()
+        );
+
+        let mut changed = changed_files(origin.path(), &before, "HEAD").await.unwrap();
+        changed.sort_by(|a, b| a.path.cmp(&b.path));
+        let summary: Vec<(&str, ChangeKind)> =
+            changed.iter().map(|c| (c.path.as_str(), c.kind)).collect();
+        assert_eq!(
+            summary,
+            [
+                ("gone.volume", ChangeKind::Deleted),
+                ("sub/db.container", ChangeKind::Added),
+                ("web.container", ChangeKind::Modified),
+            ]
+        );
+        // A deleted file carries its old content's blob, a kept one its new.
+        let blob = |rev: &str| {
+            String::from_utf8(git(origin.path(), &["rev-parse", rev]).stdout)
+                .unwrap()
+                .trim()
+                .to_string()
+        };
+        assert_eq!(changed[0].blob, blob(&format!("{before}:gone.volume")));
+        assert_eq!(changed[2].blob, blob("HEAD:web.container"));
+    }
+
+    #[tokio::test]
+    async fn tracked_files_lists_head_as_added() {
+        let origin = make_origin();
+        std::fs::create_dir(origin.path().join("sub")).unwrap();
+        std::fs::write(origin.path().join("sub/db.container"), "[Container]\n").unwrap();
+        assert!(git(origin.path(), &["add", "."]).status.success());
+        assert!(
+            git(origin.path(), &["commit", "--quiet", "-m", "db"])
+                .status
+                .success()
+        );
+
+        let mut files = tracked_files(origin.path()).await.unwrap();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["sub/db.container", "web.container"]);
+        assert!(files.iter().all(|f| f.kind == ChangeKind::Added));
+        let head_blob =
+            String::from_utf8(git(origin.path(), &["rev-parse", "HEAD:web.container"]).stdout)
+                .unwrap();
+        assert_eq!(files[1].blob, head_blob.trim());
     }
 
     #[tokio::test]

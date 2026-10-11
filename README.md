@@ -76,7 +76,17 @@ CSS/JS embedded, so it runs from any directory.
   `~/.ssh/config`, a credential helper — sooth stores no credentials of its
   own. A checkout that has diverged from the remote is reported as an error
   rather than silently overwritten; a "Force resync" action is there to
-  discard the divergence on purpose. Files inside a synced group are managed
+  discard the divergence on purpose. When an update changes a container,
+  pod or kube unit (or one of its `.d/` drop-ins), sooth restarts it so the
+  new configuration takes effect — only if it was running or failed; a
+  stopped unit stays stopped. A newly added one (including everything in a
+  freshly added sync) is started if it would be running after a reboot
+  anyway: its `[Install]` section enables it, or it joins a pod that's
+  running. One deleted from the repo is stopped before its file goes away,
+  so its container is cleaned up too. Changing a pod restarts its member
+  containers as well — podman can only apply pod-level settings such as
+  `PublishPort=` by recreating the pod. Volumes and networks are left as
+  they are, data included. Files inside a synced group are managed
   by the remote and get overwritten on the next sync, so don't hand-edit them.
 - **Secrets** — a page over this user's podman secret store
   (`podman secret`): add, replace, and delete secrets, see which units use

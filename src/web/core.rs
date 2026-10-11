@@ -207,6 +207,19 @@ pub fn builds_locally(file_name: &str, units: &[QuadletUnit]) -> bool {
         .is_some_and(|i| i.trim().ends_with(".build"))
 }
 
+/// The registry image a container's quadlet runs (resolved through an
+/// `.image` quadlet if it names one) -- `None` for a non-container, an
+/// unknown file, or a `.build` image there's nothing to pull for. The one
+/// lookup behind every pull/update action, so the image always comes from
+/// the quadlet on disk, never from a request.
+pub fn pullable_image(file_name: &str, units: &[QuadletUnit]) -> Option<String> {
+    units
+        .iter()
+        .find(|u| u.kind == UnitKind::Container && u.file_name == file_name)
+        .filter(|_| !builds_locally(file_name, units))
+        .and_then(|u| refs::container_image(u, units))
+}
+
 /// The Services list's Ports column for `pods` and their members: each pod's
 /// published ports moved onto the member(s) serving them, the rest left on
 /// the pod (`ports::split_pod_ports`), keyed by file name. Pods without

@@ -16,6 +16,7 @@ use tracing::{info, warn};
 use crate::events::{DashboardEvent, EventSender};
 use crate::quadlet::naming;
 
+use super::units::{UnitControl, UnitSync};
 use super::{GitSyncConfig, GitSyncError, SyncState, SyncStatus, git};
 use git::GitAuth;
 
@@ -41,6 +42,10 @@ pub struct GitSyncManager {
     /// (from `Config.github_token`, which -- like the rest of `Config` --
     /// needs a restart to change), never mutated live.
     github_auth: Arc<Option<GitAuth>>,
+    /// Stops/restarts/starts the workloads a sync's update removed/changed/
+    /// added (see `UnitSync`) -- the systemd client in production. `None` only in tests
+    /// that don't care about units: syncing then just updates files.
+    systemd: Option<Arc<dyn UnitControl>>,
 }
 
 impl GitSyncManager {
@@ -52,6 +57,7 @@ impl GitSyncManager {
     pub fn new(
         config_path: Arc<PathBuf>,
         events: EventSender,
+        systemd: Option<Arc<dyn UnitControl>>,
         exe_path: &Path,
         github_token: &str,
     ) -> Self {
@@ -69,6 +75,7 @@ impl GitSyncManager {
             config_path,
             events,
             github_auth: Arc::new(github_auth),
+            systemd,
         }
     }
 
@@ -92,6 +99,7 @@ impl GitSyncManager {
             wake.clone(),
             self.events.clone(),
             self.github_auth.clone(),
+            self.systemd.clone(),
         ));
         let entry = SyncEntry {
             config,
@@ -109,8 +117,9 @@ impl GitSyncManager {
         }
     }
 
-    /// Validates and clones a new sync, persists it, then starts polling it
-    /// immediately.
+    /// Validates and clones a new sync, persists it, starts the workloads it
+    /// brings in that should be running (see `UnitSync::reload_and_apply`),
+    /// then starts polling it immediately.
     pub async fn add(
         &self,
         group: String,
@@ -157,6 +166,10 @@ impl GitSyncManager {
             .map_err(|e| GitSyncError::Failed(format!("failed to save config: {e}")))?;
 
         info!(group = %config.group, remote = %config.remote, "git-sync added");
+        UnitSync::plan_clone(self.systemd.as_deref(), &config.group, &target)
+            .await
+            .reload_and_apply()
+            .await;
         self.spawn(config, Arc::from(quadlet_dir));
         let _ = self.events.send(DashboardEvent::GitSyncChanged);
         Ok(())
@@ -199,6 +212,7 @@ impl GitSyncManager {
         let branch_changed = Some(&resolved_branch) != existing.branch.as_ref();
 
         if remote_changed || branch_changed {
+            let before = git::rev_parse(&target, "HEAD").await?;
             git::fetch_ref(
                 &target,
                 &resolved_branch,
@@ -206,7 +220,12 @@ impl GitSyncManager {
                 self.github_auth.as_ref().as_ref(),
             )
             .await?;
+            let after = git::rev_parse(&target, &format!("origin/{resolved_branch}")).await?;
+            let units =
+                UnitSync::plan(self.systemd.as_deref(), group, &target, &before, &after).await;
+            units.stop_removed().await;
             git::checkout_branch(&target, &resolved_branch).await?;
+            units.reload_and_apply().await;
         }
 
         let config = GitSyncConfig {
@@ -336,8 +355,19 @@ impl GitSyncManager {
                 self.github_auth.as_ref().as_ref(),
             )
             .await?;
+            let before = git::rev_parse(&target, "HEAD").await?;
             let remote_head = git::rev_parse(&target, &format!("origin/{branch}")).await?;
+            let units = UnitSync::plan(
+                self.systemd.as_deref(),
+                &config.group,
+                &target,
+                &before,
+                &remote_head,
+            )
+            .await;
+            units.stop_removed().await;
             git::reset_hard(&target, &remote_head).await?;
+            units.reload_and_apply().await;
             Ok(remote_head)
         }
         .await;
@@ -460,6 +490,7 @@ async fn run_loop(
     wake: Arc<Notify>,
     events: EventSender,
     github_auth: Arc<Option<GitAuth>>,
+    systemd: Option<Arc<dyn UnitControl>>,
 ) {
     loop {
         attempt(
@@ -468,6 +499,7 @@ async fn run_loop(
             &status,
             &events,
             github_auth.as_ref().as_ref(),
+            systemd.as_deref(),
         )
         .await;
         let interval = Duration::from_secs(config.poll_interval_secs.max(1));
@@ -488,6 +520,7 @@ async fn attempt(
     status: &Arc<RwLock<SyncStatus>>,
     events: &EventSender,
     github_auth: Option<&GitAuth>,
+    systemd: Option<&dyn UnitControl>,
 ) {
     let target = quadlet_dir.join(&config.group);
     let already_cloned = target.join(".git").is_dir();
@@ -510,6 +543,10 @@ async fn attempt(
             report_error(&config.group, status, events, e);
             return;
         }
+        UnitSync::plan_clone(systemd, &config.group, &target)
+            .await
+            .reload_and_apply()
+            .await;
     } else {
         set_state(status, SyncState::Checking);
         let _ = events.send(DashboardEvent::GitSyncChanged);
@@ -555,11 +592,14 @@ async fn attempt(
         Ok(true) => {
             set_state(status, SyncState::Syncing);
             let _ = events.send(DashboardEvent::GitSyncChanged);
+            let units = UnitSync::plan(systemd, &config.group, &target, &local, &remote).await;
+            units.stop_removed().await;
             if let Err(e) = git::reset_hard(&target, &remote).await {
                 report_error(&config.group, status, events, e);
                 return;
             }
             info!(group = %config.group, commit = %remote, "git-sync updated");
+            units.reload_and_apply().await;
             set_state(status, SyncState::UpToDate { commit: remote });
             let _ = events.send(DashboardEvent::GitSyncChanged);
         }
@@ -590,6 +630,7 @@ fn report_error(
 
 #[cfg(test)]
 mod tests {
+    use super::super::units::fake::FakeUnits;
     use super::*;
 
     fn git(dir: &Path, args: &[&str]) -> std::process::Output {
@@ -627,13 +668,105 @@ mod tests {
     }
 
     fn manager() -> (GitSyncManager, tempfile::TempDir) {
+        manager_with(None)
+    }
+
+    fn manager_with(units: Option<Arc<dyn UnitControl>>) -> (GitSyncManager, tempfile::TempDir) {
         let config_dir = tempfile::tempdir().unwrap();
         let config_path = Arc::new(config_dir.path().join("config.toml"));
         let (tx, _rx) = tokio::sync::broadcast::channel(16);
         (
-            GitSyncManager::new(config_path, tx, Path::new("/usr/bin/sooth"), ""),
+            GitSyncManager::new(config_path, tx, units, Path::new("/usr/bin/sooth"), ""),
             config_dir,
         )
+    }
+
+    fn commit_all(dir: &Path, message: &str) {
+        assert!(git(dir, &["add", "-A"]).status.success());
+        assert!(
+            git(dir, &["commit", "--quiet", "-m", message])
+                .status
+                .success()
+        );
+    }
+
+    fn head(dir: &Path) -> String {
+        String::from_utf8(git(dir, &["rev-parse", "HEAD"]).stdout)
+            .unwrap()
+            .trim()
+            .to_string()
+    }
+
+    /// Waits for the sync's poll loop to report `UpToDate` at `commit`.
+    async fn wait_for_commit(mgr: &GitSyncManager, commit: &str) {
+        for _ in 0..250 {
+            match &mgr.snapshot()[0].1.state {
+                SyncState::UpToDate { commit: c } if c == commit => return,
+                SyncState::Error(e) => panic!("git-sync failed: {e}"),
+                _ => tokio::time::sleep(Duration::from_millis(20)).await,
+            }
+        }
+        panic!("git-sync never reached {commit}: {:?}", mgr.snapshot());
+    }
+
+    /// An origin carrying four containers and a volume, a fake systemd where
+    /// `web`/`old` run, `idle` is stopped, `db` failed and a not yet loaded
+    /// `new` would be enabled, and a sync of it
+    /// at `synced/` that has settled on the initial commit. The fake's probe
+    /// is `synced/old.container`, the file the tests delete upstream.
+    async fn synced_with_units() -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        Arc<FakeUnits>,
+        GitSyncManager,
+        tempfile::TempDir,
+    ) {
+        let origin = make_origin();
+        for name in ["old.container", "idle.container", "db.container"] {
+            std::fs::write(origin.path().join(name), "[Container]\nImage=x\n").unwrap();
+        }
+        std::fs::write(origin.path().join("data.volume"), "[Volume]\n").unwrap();
+        commit_all(origin.path(), "more units");
+
+        let quadlet_dir = tempfile::tempdir().unwrap();
+        let units = Arc::new(FakeUnits {
+            probe: Some(quadlet_dir.path().join("synced/old.container")),
+            ..FakeUnits::with_states(&[
+                ("web.service", "active"),
+                ("old.service", "active"),
+                ("idle.service", "inactive"),
+                ("db.service", "failed"),
+                ("data-volume.service", "active"),
+            ])
+            // What the generator's `default.target.wants/` link gives the
+            // `new.container` a test adds upstream.
+            .wanted(&[("new.service", "default.target")])
+        });
+        let (mgr, config_dir) = manager_with(Some(units.clone()));
+        mgr.add(
+            "synced".to_string(),
+            origin.path().display().to_string(),
+            Some("main".to_string()),
+            60,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap();
+        wait_for_commit(&mgr, &head(origin.path())).await;
+        // None of the cloned units is enabled or in a pod: nothing started.
+        assert_eq!(units.log(), ["reload"]);
+        units.log.lock().unwrap().clear();
+        (origin, quadlet_dir, units, mgr, config_dir)
+    }
+
+    /// The upstream change the unit tests below pull in: `old` deleted,
+    /// `web`/`idle`/`db` and the volume edited.
+    fn delete_old_and_edit_the_rest(dir: &Path) {
+        std::fs::remove_file(dir.join("old.container")).unwrap();
+        for name in ["web.container", "idle.container", "db.container"] {
+            std::fs::write(dir.join(name), "[Container]\nImage=y\n").unwrap();
+        }
+        std::fs::write(dir.join("data.volume"), "[Volume]\nLabel=y\n").unwrap();
     }
 
     #[tokio::test]
@@ -883,5 +1016,156 @@ mod tests {
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].0.group, "synced");
         mgr.sync_now("synced").unwrap();
+    }
+
+    #[tokio::test]
+    async fn poll_stops_removed_units_before_their_files_go_then_restarts_changed_ones() {
+        let (origin, quadlet_dir, units, mgr, _config_dir) = synced_with_units().await;
+
+        delete_old_and_edit_the_rest(origin.path());
+        commit_all(origin.path(), "update");
+        mgr.sync_now("synced").unwrap();
+        wait_for_commit(&mgr, &head(origin.path())).await;
+
+        // `old` stopped while its quadlet was still on disk; the reload
+        // before any restart; `db` (failed) and `web` (running) restarted,
+        // `idle` (stopped) and the volume left alone.
+        assert_eq!(
+            units.log(),
+            [
+                "stop old.service (file present: true)",
+                "reload",
+                "restart db.service",
+                "restart web.service",
+            ]
+        );
+        assert!(!quadlet_dir.path().join("synced/old.container").exists());
+    }
+
+    #[tokio::test]
+    async fn force_resync_stops_and_restarts_like_a_poll() {
+        let (origin, quadlet_dir, units, mgr, _config_dir) = synced_with_units().await;
+
+        // Diverge the checkout so only a force resync can move it.
+        let checkout = quadlet_dir.path().join("synced");
+        std::fs::write(checkout.join("NOTES.md"), "local\n").unwrap();
+        commit_all(&checkout, "local divergence");
+        delete_old_and_edit_the_rest(origin.path());
+        commit_all(origin.path(), "update");
+
+        mgr.force_resync("synced", quadlet_dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            units.log(),
+            [
+                "stop old.service (file present: true)",
+                "reload",
+                "restart db.service",
+                "restart web.service",
+            ]
+        );
+        assert_eq!(head(&checkout), head(origin.path()));
+    }
+
+    #[tokio::test]
+    async fn edit_to_another_branch_stops_and_restarts_like_a_poll() {
+        let (origin, quadlet_dir, units, mgr, _config_dir) = synced_with_units().await;
+
+        assert!(
+            git(origin.path(), &["checkout", "--quiet", "-b", "staging"])
+                .status
+                .success()
+        );
+        delete_old_and_edit_the_rest(origin.path());
+        commit_all(origin.path(), "staging");
+
+        mgr.edit(
+            "synced",
+            origin.path().display().to_string(),
+            Some("staging".to_string()),
+            60,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            units.log(),
+            [
+                "stop old.service (file present: true)",
+                "reload",
+                "restart db.service",
+                "restart web.service",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn add_starts_the_enabled_units_it_clones() {
+        let origin = make_origin();
+        std::fs::write(origin.path().join("db.container"), "[Container]\nImage=x\n").unwrap();
+        commit_all(origin.path(), "db");
+        let quadlet_dir = tempfile::tempdir().unwrap();
+        let units = Arc::new(
+            FakeUnits::with_states(&[("web.service", "inactive"), ("db.service", "inactive")])
+                .wanted(&[("web.service", "default.target")]),
+        );
+        let (mgr, _config_dir) = manager_with(Some(units.clone()));
+
+        mgr.add(
+            "synced".to_string(),
+            origin.path().display().to_string(),
+            Some("main".to_string()),
+            60,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(units.log(), ["reload", "start web.service"]);
+    }
+
+    #[tokio::test]
+    async fn poll_starts_an_added_enabled_unit() {
+        let (origin, _quadlet_dir, units, mgr, _config_dir) = synced_with_units().await;
+        // Loaded (and enabled, see `synced_with_units`) once reloaded.
+        units
+            .states
+            .lock()
+            .unwrap()
+            .insert("new.service".into(), "inactive".into());
+
+        std::fs::write(
+            origin.path().join("new.container"),
+            "[Container]\nImage=x\n[Install]\nWantedBy=default.target\n",
+        )
+        .unwrap();
+        commit_all(origin.path(), "add new");
+        mgr.sync_now("synced").unwrap();
+        wait_for_commit(&mgr, &head(origin.path())).await;
+
+        assert_eq!(units.log(), ["reload", "start new.service"]);
+    }
+
+    #[tokio::test]
+    async fn a_pure_move_touches_no_units() {
+        let (origin, _quadlet_dir, units, mgr, _config_dir) = synced_with_units().await;
+
+        std::fs::create_dir(origin.path().join("apps")).unwrap();
+        assert!(
+            git(
+                origin.path(),
+                &["mv", "web.container", "apps/web.container"]
+            )
+            .status
+            .success()
+        );
+        commit_all(origin.path(), "move web");
+        mgr.sync_now("synced").unwrap();
+        wait_for_commit(&mgr, &head(origin.path())).await;
+
+        assert!(units.log().is_empty(), "{:?}", units.log());
     }
 }

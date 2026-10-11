@@ -69,6 +69,10 @@ fn mount_unit_routes(
             post(unit_ops::autoupdate),
         )
         .route(
+            &format!("{prefix}/{{file_name}}/image-update"),
+            get(unit_ops::image_update_check).post(unit_ops::image_update),
+        )
+        .route(
             &format!("{prefix}/{{file_name}}/delete"),
             post(edit_delete::delete),
         )
