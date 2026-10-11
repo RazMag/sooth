@@ -8,23 +8,79 @@
 // position, and that must not slam the menu shut). Close on outside-click,
 // Escape, or once the summary scrolls out of view. With JS off the panel
 // still shows (just clipped) -- an acceptable progressive-enhancement fallback.
+//
+// A panel opens below its summary unless it doesn't fit there and there's
+// more room above (a row near the bottom of a long table), in which case it
+// opens upward; if it fits neither way it's capped to the larger side and
+// scrolls. The row kebab's nested "move to group" picker flips the same way.
+// Content swapped into an open panel (the update check, the live status
+// forms) re-runs the placement, since the panel's height changed.
+const GAP = 4;
+// Keep panels at least this far from the viewport edge.
+const EDGE = 8;
+
 export function initMenus() {
+  const placePicker = (menu) => {
+    const panel = menu.querySelector("details.group-picker[open] > .group-picker-panel");
+    if (!panel) return;
+    panel.style.top = "";
+    panel.style.bottom = "";
+    const r = panel.getBoundingClientRect();
+    const summary = panel.parentElement.querySelector("summary");
+    const s = summary ? summary.getBoundingClientRect() : r;
+    const fitsBelow = r.bottom <= window.innerHeight - EDGE;
+    if (!fitsBelow && s.top - r.height - GAP >= EDGE) {
+      panel.style.top = "auto";
+      panel.style.bottom = `calc(100% + ${GAP}px)`;
+    }
+  };
+
   const positionPanel = (menu) => {
     const panel = menu.querySelector(".menu-panel");
     if (!panel) return;
     const r = menu.getBoundingClientRect();
     panel.style.position = "fixed";
-    panel.style.top = `${Math.round(r.bottom + 4)}px`;
     panel.style.left = "auto";
-    panel.style.right = `${Math.round(window.innerWidth - r.right)}px`;
+    // Right-aligned to the summary, but never past the viewport's right edge
+    // (the summary itself can be scrolled off it in a wide table).
+    panel.style.right = `${Math.round(Math.max(window.innerWidth - r.right, EDGE))}px`;
+    // Measure at natural height before choosing a side.
+    panel.style.maxHeight = "";
+    panel.style.overflowY = "";
+    const height = panel.offsetHeight;
+    const below = window.innerHeight - r.bottom - GAP - EDGE;
+    const above = r.top - GAP - EDGE;
+    const up = height > below && above > below;
+    if (up) {
+      panel.style.top = "auto";
+      panel.style.bottom = `${Math.round(window.innerHeight - r.top + GAP)}px`;
+    } else {
+      panel.style.top = `${Math.round(r.bottom + GAP)}px`;
+      panel.style.bottom = "auto";
+    }
+    const room = Math.max(up ? above : below, 0);
+    if (height > room) {
+      panel.style.maxHeight = `${Math.floor(room)}px`;
+      panel.style.overflowY = "auto";
+    }
+    placePicker(menu);
   };
 
   // `toggle` doesn't bubble -> listen in the capture phase.
   document.addEventListener(
     "toggle",
     (e) => {
-      const menu = e.target;
-      if (!menu.matches || !menu.matches("details.menu") || !menu.open) return;
+      const el = e.target;
+      if (!el.matches) return;
+      // The kebab's nested group picker opening or closing changes what
+      // needs to fit.
+      if (el.matches("details.group-picker")) {
+        const menu = el.closest("details.menu[open]");
+        if (menu) positionPanel(menu);
+        return;
+      }
+      const menu = el;
+      if (!menu.matches("details.menu") || !menu.open) return;
       // Only one open at a time.
       for (const other of document.querySelectorAll("details.menu[open]")) {
         if (other !== menu) other.open = false;
@@ -61,4 +117,5 @@ export function initMenus() {
   };
   window.addEventListener("scroll", reflow, true);
   window.addEventListener("resize", reflow);
+  document.addEventListener("htmx:afterSettle", reflow);
 }
