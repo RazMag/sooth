@@ -15,8 +15,11 @@ use tower_sessions::Session;
 
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
+use crate::events::DashboardEvent;
+use crate::imageinfo;
 use crate::quadlet::autoupdate::AutoUpdateMode;
 use crate::quadlet::{UnitKind, discovery, refs};
+use crate::web::templates::ImageUpdateView;
 use crate::web::{core, templates};
 
 #[derive(Deserialize)]
@@ -178,4 +181,81 @@ pub async fn actions(
     } else {
         templates::action_row(&unit, &status, &csrf)
     })
+}
+
+/// The registry image behind a container's kebab update check, from its
+/// quadlet on disk.
+fn update_target(
+    state: &AppState,
+    file_name: &str,
+) -> Result<(crate::quadlet::QuadletUnit, String), FragmentError> {
+    let all = discovery::load_all(&state.quadlet_dir)?;
+    let image = core::pullable_image(file_name, &all)
+        .ok_or_else(|| AppError::NotFound(format!("no pullable image for {file_name}")))?;
+    let unit = all
+        .into_iter()
+        .find(|u| u.file_name == file_name)
+        .ok_or_else(|| AppError::NotFound(file_name.to_string()))?;
+    Ok((unit, image))
+}
+
+/// `GET {unit}/image-update`: whether the registry has a newer image for the
+/// container's tag (`imageinfo::check_update`), as the kebab's re-rendered
+/// update slot. Reads only -- nothing is pulled -- so no CSRF token.
+pub async fn image_update_check(
+    State(state): State<AppState>,
+    session: Session,
+    Path(file_name): Path<String>,
+) -> Result<maud::Markup, FragmentError> {
+    let (unit, image) = update_target(&state, &file_name)?;
+    let check = imageinfo::check_update(&image).await;
+    tracing::info!(unit = %unit.service_name(), image, ?check, "checked for image update");
+    let csrf = crate::auth::csrf::current(&session)
+        .await
+        .unwrap_or_default();
+    Ok(templates::image_update_slot(
+        &core::unit_url(&unit),
+        ImageUpdateView::Checked(&check),
+        &csrf,
+    ))
+}
+
+/// `POST {unit}/image-update`: pull the container's image, then restart the
+/// unit if it's running or failed so it picks the new image up (a stopped one
+/// gets it on its next start). A failed pull is a 200 carrying podman's
+/// message in the slot, since htmx drops non-2xx bodies.
+pub async fn image_update(
+    State(state): State<AppState>,
+    session: Session,
+    Path(file_name): Path<String>,
+    Form(form): Form<ActionForm>,
+) -> Result<maud::Markup, FragmentError> {
+    if !crate::auth::csrf::verify(&session, &form.csrf_token).await {
+        return Err(AppError::Csrf.into());
+    }
+    let (unit, image) = update_target(&state, &file_name)?;
+    let base = core::unit_url(&unit);
+    if let Err(e) = imageinfo::pull(&image).await {
+        return Ok(templates::image_update_slot(
+            &base,
+            ImageUpdateView::UpdateFailed(&e),
+            &form.csrf_token,
+        ));
+    }
+    let service = unit.service_name();
+    let status = state.systemd.status(&service).await?;
+    let restarted = status.is_active() || status.is_failed();
+    if restarted {
+        tracing::info!(unit = %service, image, "restarting for updated image");
+        state.systemd.restart(&service).await?;
+        let status = state.systemd.status(&service).await?;
+        let _ = state
+            .events
+            .send(DashboardEvent::Status { service, status });
+    }
+    Ok(templates::image_update_slot(
+        &base,
+        ImageUpdateView::Updated { restarted },
+        &form.csrf_token,
+    ))
 }

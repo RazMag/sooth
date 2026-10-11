@@ -705,6 +705,32 @@
   }
   .menu-panel .menu-actions .btn svg { color: inherit; }
 
+  /* The unit kebab's image-update slot (`templates::image_update_slot`): a
+     plain "Check for update" row that swaps itself for the answer -- a note,
+     plus an "Update" pill (same box restore as `.menu-actions`) when the
+     registry has a newer image. `.menu-busy` replaces the label while the
+     request runs (htmx puts `.htmx-request` on the button or its form). */
+  .menu-update { display: flex; flex-direction: column; gap: 0.2rem; }
+  .menu-panel .menu-update .btn { width: 100%; border-width: 1px; border-style: solid; margin-bottom: 0.15rem; }
+  .menu-panel .menu-update .btn svg { color: inherit; }
+  .menu-update .menu-busy { display: none; }
+  .menu-update .htmx-request .menu-idle { display: none; }
+  .menu-update .htmx-request .menu-busy { display: inline; }
+  .menu-update .htmx-request svg { animation: btn-spin 0.8s linear infinite; }
+  .menu-note {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: 14rem;
+    padding: 0.3rem 0.5rem 0.1rem;
+    font-size: 0.78rem;
+    color: var(--color-muted);
+    overflow-wrap: anywhere;
+  }
+  .menu-note.ok { color: var(--color-ok); }
+  .menu-note.ok svg { color: inherit; }
+  .menu-note.error { color: var(--color-danger); }
+
   /* App shell / sidebar ------------------------------- */
   .app-shell { display: flex; min-height: 100vh; }
 

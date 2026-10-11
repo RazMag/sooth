@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 use crate::health::Health;
 use crate::hostenv::EnvVar;
+use crate::imageinfo::UpdateCheck;
 use crate::quadlet::autoupdate::AutoUpdateMode;
 use crate::quadlet::ports::{PortMapping, SplitPorts};
 use crate::quadlet::{QuadletUnit, UnitKind};
@@ -703,12 +704,101 @@ pub fn kebab_menu(
                         (unit_action_forms(&base, &service, status, csrf))
                     }
                 }
+                @if !unit.is_template() && has_registry_image(unit) {
+                    (image_update_slot(&base, ImageUpdateView::Unchecked, csrf))
+                }
                 a href={(base) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
                 a href={(base) "/logs"} { (icon(Icon::Logs)) span { "Logs" } }
                 @if !unit.is_template() {
                     (group_move_menu(&base, &unit.group, csrf, known_groups, true))
                 }
                 (delete_form(&base, csrf, "danger"))
+            }
+        }
+    }
+}
+
+/// Whether a unit is a container whose image comes from a registry -- not a
+/// `.build` quadlet -- i.e. one the kebab offers an update check for.
+fn has_registry_image(unit: &QuadletUnit) -> bool {
+    unit.kind == UnitKind::Container
+        && unit
+            .section("Container")
+            .and_then(|s| s.get("Image"))
+            .is_some_and(|i| !i.trim().ends_with(".build"))
+}
+
+/// What the kebab's image-update slot shows.
+pub enum ImageUpdateView<'a> {
+    /// Just the "Check for update" row.
+    Unchecked,
+    /// The answer to a check.
+    Checked(&'a UpdateCheck),
+    /// The update ran: pulled, and restarted if the unit was up.
+    Updated { restarted: bool },
+    /// The pull failed; podman's message.
+    UpdateFailed(&'a str),
+}
+
+/// The kebab's image-update slot: a "Check for update" row that swaps itself
+/// for the answer (`GET {unit}/image-update`), which offers an "Update"
+/// button when the registry has a newer image (`POST {unit}/image-update`:
+/// pull, then restart the unit if it's running or failed). Every response is
+/// this same `.menu-update` element, swapped in place so the menu stays open.
+pub fn image_update_slot(base: &str, view: ImageUpdateView<'_>, csrf: &str) -> Markup {
+    let check = |label: &str, ic: Icon| {
+        html! {
+            button type="button" hx-get={(base) "/image-update"}
+                hx-target="closest .menu-update" hx-swap="outerHTML" hx-disabled-elt="this"
+                title="Ask the registry whether this image's tag has a newer image" {
+                (icon(ic)) span.menu-idle { (label) } span.menu-busy { "Checking…" }
+            }
+        }
+    };
+    let update = |label: &str| {
+        html! {
+            form hx-post={(base) "/image-update"}
+                hx-target="closest .menu-update" hx-swap="outerHTML" hx-disabled-elt="find button" {
+                (csrf_input(csrf))
+                button.btn.btn-sm.btn-enable type="submit"
+                    title="Pull the new image, then restart the container if it's running" {
+                    (icon(Icon::AutoUpdate)) span.menu-idle { (label) } span.menu-busy { "Updating…" }
+                }
+            }
+        }
+    };
+    html! {
+        div.menu-update {
+            @match view {
+                ImageUpdateView::Unchecked => (check("Check for update", Icon::Refresh)),
+                ImageUpdateView::Checked(UpdateCheck::UpToDate) => {
+                    (check("Image up to date", Icon::Check))
+                }
+                ImageUpdateView::Checked(UpdateCheck::Available) => {
+                    p.menu-note.ok { "A newer image is available." }
+                    (update("Update"))
+                }
+                ImageUpdateView::Checked(UpdateCheck::NotPulled) => {
+                    p.menu-note { "The image isn't pulled yet." }
+                    (update("Pull image"))
+                }
+                ImageUpdateView::Checked(UpdateCheck::Unsupported(why)) => {
+                    p.menu-note { "Can't check for updates: " (why) "." }
+                }
+                ImageUpdateView::Checked(UpdateCheck::Failed(msg)) => {
+                    p.menu-note.error { (msg) }
+                    (check("Check again", Icon::Refresh))
+                }
+                ImageUpdateView::Updated { restarted } => {
+                    p.menu-note.ok {
+                        (icon(Icon::Check))
+                        @if restarted { "Updated and restarted." } @else { "Updated; used on next start." }
+                    }
+                }
+                ImageUpdateView::UpdateFailed(msg) => {
+                    p.menu-note.error { (msg) }
+                    (update("Retry update"))
+                }
             }
         }
     }
