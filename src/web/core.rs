@@ -275,6 +275,41 @@ pub async fn split_pod_ports(
     out
 }
 
+/// A pod member's share of its pod's published ports, for the container
+/// detail page: the ports that reach it (each with why) out of how many the
+/// pod publishes. `None` for a container outside a pod, or in one that
+/// publishes nothing -- it shows its own ports as usual.
+pub struct MemberPodPorts<'a> {
+    pub pod: &'a QuadletUnit,
+    pub mine: SplitPorts,
+    pub published: usize,
+}
+
+pub async fn member_pod_ports<'a>(
+    unit: &QuadletUnit,
+    all: &'a [QuadletUnit],
+) -> Option<MemberPodPorts<'a>> {
+    if unit.kind != UnitKind::Container {
+        return None;
+    }
+    let pod_file = refs::owning_pod(unit, all)?;
+    let pod = all.iter().find(|u| u.file_name == pod_file)?;
+    let published = ports::extract(std::slice::from_ref(pod)).len();
+    if published == 0 {
+        return None;
+    }
+    let mut split = split_pod_ports(&[pod], all).await;
+    let mine = split.remove(&unit.file_name).unwrap_or_else(|| SplitPorts {
+        pod: pod.file_name.clone(),
+        ..SplitPorts::default()
+    });
+    Some(MemberPodPorts {
+        pod,
+        mine,
+        published,
+    })
+}
+
 /// Assigns the container port `port` that `pod_file` publishes to one of
 /// its members (`member`), or clears its assignment (`None`) so the port is
 /// matched by `ExposeHostPort=` / image `EXPOSE` again. Exclusive: every

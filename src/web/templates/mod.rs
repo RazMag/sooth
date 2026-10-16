@@ -1093,6 +1093,65 @@ pub fn split_ports_cell_live(
     }
 }
 
+/// A pod member's Ports fact on its detail page: the pod ports that reach
+/// it, each pill with an info icon saying why ([`port_why`]), then the pod
+/// that publishes them and a link to the Ports screen to change it. A
+/// member that none reach says how many the pod publishes instead.
+pub fn member_ports_summary(
+    unit: &QuadletUnit,
+    active: bool,
+    pod: &QuadletUnit,
+    mine: &SplitPorts,
+    published: usize,
+) -> Markup {
+    html! {
+        @if mine.mappings.is_empty() {
+            span.muted { "—" }
+        } @else {
+            span.port-list {
+                @for (m, why) in &mine.mappings {
+                    span.port-why {
+                        (port_map(m, None, active, false))
+                        (info_tip(&port_why(why.as_ref(), &unit.file_name, &mine.pod, &container_port_label(m))))
+                    }
+                }
+            }
+        }
+        div.cell-secondary.port-route {
+            "via "
+            a.chip.chip-pod href=(core::unit_url(pod)) title={"Published by " (pod.file_name)} {
+                (icon(Icon::Pod)) (crate::quadlet::naming::stem(&pod.file_name))
+            }
+            @if mine.mappings.is_empty() {
+                span.port-route-sep { "·" }
+                "none of its " (published) @if published == 1 { " port" } @else { " ports" } " reach it"
+            }
+            span.port-route-sep { "·" }
+            a href="/ports" { @if mine.mappings.is_empty() { "assign one" } @else { "change" } }
+        }
+    }
+}
+
+/// [`member_ports_summary`] in a slot that re-fetches itself on this unit's
+/// status change, like [`ports_cell_live`] (`?split=1&member=1` asks the
+/// same view back).
+pub fn member_ports_cell_live(
+    unit: &QuadletUnit,
+    status: &UnitStatus,
+    pod: &QuadletUnit,
+    mine: &SplitPorts,
+    published: usize,
+) -> Markup {
+    let base = core::unit_url(unit);
+    let service = unit.service_name();
+    html! {
+        span.ports-live hx-get={(base) "/ports?split=1&member=1"}
+            hx-trigger={"sse:status-" (service) " delay:300ms"} hx-swap="innerHTML" {
+            (member_ports_summary(unit, status.is_active(), pod, mine, published))
+        }
+    }
+}
+
 /// A comma-separated list of links to quadlet units named by `file_names`,
 /// resolved against `all_units` for the correct section URL. A muted dash
 /// when the list is empty. Used by the Volumes/Networks "Used by" column and
@@ -1356,5 +1415,43 @@ mod tests {
         assert!(markup.contains("Host variables"));
         assert!(markup.contains("/environment?name=TAG"));
         assert!(!markup.contains("/environment?name=HOME"));
+    }
+
+    #[test]
+    fn member_ports_summary_explains_each_port() {
+        let unit = |file: &str, kind, raw: &str| QuadletUnit {
+            file_name: file.into(),
+            group: String::new(),
+            path: format!("/tmp/{file}").into(),
+            kind,
+            sections: crate::quadlet::parser::parse(raw).unwrap(),
+            raw: raw.into(),
+        };
+        let pod = unit("web.pod", UnitKind::Pod, "[Pod]\nPublishPort=8080:80\n");
+        let member = unit(
+            "app.container",
+            UnitKind::Container,
+            "[Container]\nImage=x\nPod=web.pod\n",
+        );
+        let mapping = crate::quadlet::ports::extract(std::slice::from_ref(&pod)).remove(0);
+        let mine = SplitPorts {
+            pod: "web.pod".into(),
+            mappings: vec![(mapping, Some(Why::Assigned))],
+            moved: 0,
+        };
+        let html = member_ports_summary(&member, false, &pod, &mine, 1).into_string();
+        assert!(html.contains("data-tip=\"web.pod publishes 80/tcp. Assigned to app.container"));
+        assert!(html.contains("href=\"/pods/web.pod\""));
+        assert!(html.contains(">change<"));
+
+        // None of the pod's ports reach it.
+        let none = SplitPorts {
+            pod: "web.pod".into(),
+            ..SplitPorts::default()
+        };
+        let html = member_ports_summary(&member, false, &pod, &none, 1).into_string();
+        assert!(html.contains("none of its 1 port reach it"));
+        assert!(html.contains(">assign one<"));
+        assert!(!html.contains("data-tip"));
     }
 }

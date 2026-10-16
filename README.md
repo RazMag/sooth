@@ -34,7 +34,8 @@ CSS/JS embedded, so it runs from any directory.
   container behind it (hover a port's container to see why it's matched
   where it is); an assignment is recorded as an
   `X-Sooth-ServesPort=` line in the container's `[Unit]` section, which
-  podman and systemd ignore, so it only changes what sooth displays.
+  podman and systemd ignore, so it only changes what sooth displays. A pod
+  member's detail page lists the pod ports that reach it.
 - **Pods and Directories layouts** — every list table is a branch tree you
   can switch between two layouts (remembered per browser).
   - **Pods** nests a pod's units under its row: its member containers

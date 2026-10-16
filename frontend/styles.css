@@ -881,6 +881,10 @@
   }
   .tip[hidden] { display: none; }
   .port-target + .port-target { margin-top: 0.15rem; }
+  .port-why { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .port-route-sep { color: var(--color-faint); }
+  /* On a detail page's Overview, whose values are monospace. */
+  .kv-table .port-route { font-family: var(--font-sans); overflow-wrap: normal; }
   .port-route { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.35rem; margin-top: 0.3rem; }
   .port-assign { display: inline-flex; align-items: center; }
   .port-assign::before { content: "·"; margin-right: 0.3rem; color: var(--color-faint); }
