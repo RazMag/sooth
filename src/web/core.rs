@@ -16,7 +16,7 @@ use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
 use crate::imageinfo;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
-use crate::quadlet::ports::{self, ExposedPort, SplitPorts};
+use crate::quadlet::ports::{self, ExposedPort, MemberPorts, SplitPorts};
 use crate::quadlet::refs::{self, MissingRefs};
 use crate::quadlet::{QuadletUnit, UnitKind, containerref, discovery, install, naming, writer};
 use crate::systemd::UnitStatus;
@@ -148,9 +148,9 @@ pub async fn missing_refs(
 /// Which ports a set of pod members say they serve, for matching a
 /// pod-published port to the member behind it.
 pub struct MemberExposure {
-    /// Each member's own `ExposeHostPort=` plus its image's `EXPOSE`, by
-    /// file name.
-    pub exposed: HashMap<String, Vec<ExposedPort>>,
+    /// Each member's hand-assigned pod ports, own `ExposeHostPort=`, and its
+    /// image's `EXPOSE`, by file name.
+    pub ports: HashMap<String, MemberPorts>,
     /// Members whose image podman couldn't inspect -- almost always "not
     /// pulled yet" -- and that a pull could fix (not a local `.build`), with
     /// that image.
@@ -176,17 +176,18 @@ pub async fn member_exposure(members: &[&QuadletUnit], all: &[QuadletUnit]) -> M
         .zip(join_all(images.iter().map(|i| imageinfo::exposed_ports(i))).await)
         .filter_map(|(i, p)| Some((i, p?)))
         .collect();
-    let exposed = members
+    let member_ports = members
         .iter()
         .map(|u| {
-            let mut e = ports::declared_exposed(u);
-            if let Some(p) = member_images
+            let image = member_images
                 .get(u.file_name.as_str())
-                .and_then(|i| image_ports.get(i))
-            {
-                e.extend(p);
-            }
-            (u.file_name.clone(), e)
+                .and_then(|i| Some(((*i).clone(), image_ports.get(i)?.clone())));
+            let ports = MemberPorts {
+                assigned: ports::assigned_ports(u),
+                declared: ports::declared_exposed(u),
+                image,
+            };
+            (u.file_name.clone(), ports)
         })
         .collect();
     let unpulled = member_images
@@ -194,7 +195,10 @@ pub async fn member_exposure(members: &[&QuadletUnit], all: &[QuadletUnit]) -> M
         .filter(|(f, i)| !image_ports.contains_key(i) && !builds_locally(f, all))
         .map(|(f, i)| (f.to_string(), i.clone()))
         .collect();
-    MemberExposure { exposed, unpulled }
+    MemberExposure {
+        ports: member_ports,
+        unpulled,
+    }
 }
 
 /// Whether a container's `Image=` names a `.build` quadlet -- a locally
@@ -249,15 +253,15 @@ pub async fn split_pod_ports(
     let exposure = member_exposure(&every_member, all).await;
     let mut out = HashMap::new();
     for (pod, mappings) in &pods {
-        let pod_members: Vec<(String, Vec<ExposedPort>)> = members
+        let pod_members: Vec<(String, MemberPorts)> = members
             .iter()
             .find(|(p, _)| *p == pod.file_name)
             .map(|(_, units)| {
                 units
                     .iter()
                     .map(|u| {
-                        let exposed = exposure.exposed.get(&u.file_name).cloned();
-                        (u.file_name.clone(), exposed.unwrap_or_default())
+                        let ports = exposure.ports.get(&u.file_name).cloned();
+                        (u.file_name.clone(), ports.unwrap_or_default())
                     })
                     .collect()
             })
@@ -269,6 +273,108 @@ pub async fn split_pod_ports(
         ));
     }
     out
+}
+
+/// A pod member's share of its pod's published ports, for the container
+/// detail page: the ports that reach it (each with why) out of how many the
+/// pod publishes. `None` for a container outside a pod, or in one that
+/// publishes nothing -- it shows its own ports as usual.
+pub struct MemberPodPorts<'a> {
+    pub pod: &'a QuadletUnit,
+    pub mine: SplitPorts,
+    pub published: usize,
+}
+
+pub async fn member_pod_ports<'a>(
+    unit: &QuadletUnit,
+    all: &'a [QuadletUnit],
+) -> Option<MemberPodPorts<'a>> {
+    if unit.kind != UnitKind::Container {
+        return None;
+    }
+    let pod_file = refs::owning_pod(unit, all)?;
+    let pod = all.iter().find(|u| u.file_name == pod_file)?;
+    let published = ports::extract(std::slice::from_ref(pod)).len();
+    if published == 0 {
+        return None;
+    }
+    let mut split = split_pod_ports(&[pod], all).await;
+    let mine = split.remove(&unit.file_name).unwrap_or_else(|| SplitPorts {
+        pod: pod.file_name.clone(),
+        ..SplitPorts::default()
+    });
+    Some(MemberPodPorts {
+        pod,
+        mine,
+        published,
+    })
+}
+
+/// Assigns the container port `port` that `pod_file` publishes to one of
+/// its members (`member`), or clears its assignment (`None`) so the port is
+/// matched by `ExposeHostPort=` / image `EXPOSE` again. Exclusive: every
+/// other member's claim on that exact port is dropped. Only sooth's own
+/// `ports::ASSIGN_KEY` lines change, so podman runs the pod exactly as
+/// before -- which is why nothing is restarted, just reloaded so systemd's
+/// copy of the generated units matches the files.
+pub async fn assign_pod_port(
+    state: &AppState,
+    session: &Session,
+    csrf_token: &str,
+    pod_file: &str,
+    port: &str,
+    member: Option<&str>,
+) -> Result<(), AppError> {
+    if !auth::csrf::verify(session, csrf_token).await {
+        return Err(AppError::Csrf);
+    }
+    let invalid = |msg: String| AppError::from(crate::quadlet::QuadletError::Validation(msg));
+    let all = discovery::load_all(&state.quadlet_dir)?;
+    let pod = all
+        .iter()
+        .find(|u| u.kind == UnitKind::Pod && u.file_name == pod_file)
+        .ok_or_else(|| AppError::NotFound(pod_file.to_string()))?;
+    let port =
+        ports::parse_exposed(port).ok_or_else(|| invalid(format!("invalid port '{port}'")))?;
+    let published = ports::extract(std::slice::from_ref(pod))
+        .iter()
+        .any(|m| ExposedPort::of_mapping(m) == Some(port));
+    if !published {
+        return Err(invalid(format!(
+            "{pod_file} doesn't publish container port {}",
+            port.spec()
+        )));
+    }
+    let members: Vec<&QuadletUnit> = {
+        let names = refs::pod_members(pod, &all);
+        all.iter()
+            .filter(|u| u.kind == UnitKind::Container && names.contains(&u.file_name))
+            .collect()
+    };
+    if let Some(m) = member
+        && !members.iter().any(|u| u.file_name == m)
+    {
+        return Err(invalid(format!("{m} isn't a container in {pod_file}")));
+    }
+    // The chosen member first: if a later write fails, the port is briefly
+    // claimed twice rather than not at all.
+    let mut ordered = members;
+    ordered.sort_by_key(|u| Some(u.file_name.as_str()) != member);
+    let mut changed = false;
+    for unit in ordered {
+        let claim = Some(unit.file_name.as_str()) == member;
+        let patched = ports::set_assigned(&unit.raw, port, claim);
+        if patched != unit.raw {
+            writer::write_atomic(&state.quadlet_dir, &unit.rel_path(), &patched)?;
+            changed = true;
+        }
+    }
+    if changed {
+        state.systemd.reload().await?;
+        let _ = state.events.send(DashboardEvent::UnitsChanged);
+        tracing::info!(pod = %pod_file, port = %port.spec(), ?member, "pod port assigned");
+    }
+    Ok(())
 }
 
 pub struct ActionOutcome {

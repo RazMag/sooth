@@ -1,6 +1,11 @@
 //! Parses `PublishPort=` declarations out of Container/Pod quadlet units and
 //! detects host-port collisions between them. Pure and unit-testable: no
 //! D-Bus, no filesystem, just `&[QuadletUnit]` in, structured data out.
+//!
+//! Also owns which pod member a pod-published port is shown against, and
+//! why ([`Why`]): a manual assignment ([`ASSIGN_KEY`], see [`set_assigned`])
+//! overrides the member's declared ports ([`declared_exposed`], then its
+//! image's `EXPOSE`).
 
 use super::model::{QuadletUnit, UnitKind};
 
@@ -194,6 +199,110 @@ pub fn declared_exposed(unit: &QuadletUnit) -> Vec<ExposedPort> {
         .unwrap_or_default()
 }
 
+impl ExposedPort {
+    /// The canonical `80/tcp` / `8000-8010/udp` form -- what
+    /// [`set_assigned`] writes, and what the Ports screen's assign picker
+    /// posts back.
+    pub fn spec(self) -> String {
+        let HostPortRange { start, end } = self.range;
+        let proto = self.protocol.as_str();
+        if start == end {
+            format!("{start}/{proto}")
+        } else {
+            format!("{start}-{end}/{proto}")
+        }
+    }
+
+    /// The container port `mapping` forwards to, as an `ExposedPort` --
+    /// `None` only for a malformed one, which [`extract`] never yields.
+    pub fn of_mapping(mapping: &PortMapping) -> Option<Self> {
+        Some(Self {
+            range: parse_port_range(&mapping.container_port)?,
+            protocol: mapping.protocol,
+        })
+    }
+}
+
+/// The section and key a pod member's quadlet carries to claim one of its
+/// pod's published container ports by hand, e.g.
+/// `X-Sooth-ServesPort=80/tcp` in `[Unit]`. Purely sooth's bookkeeping:
+/// systemd ignores `X-` keys and the quadlet generator copies `[Unit]`
+/// through verbatim, so podman behaves exactly as without it. (It can't go
+/// in `[Container]`, whose unknown keys the generator rejects.) Keeping it
+/// in the member's own file means it follows the unit through moves,
+/// renames of its group, and git sync with nothing else to track.
+pub const ASSIGN_SECTION: &str = "Unit";
+pub const ASSIGN_KEY: &str = "X-Sooth-ServesPort";
+
+/// Every [`ASSIGN_KEY`] in a Container unit's `[Unit]` section. Unparsable
+/// values are skipped. Empty for every other kind.
+pub fn assigned_ports(unit: &QuadletUnit) -> Vec<ExposedPort> {
+    if unit.kind != UnitKind::Container {
+        return Vec::new();
+    }
+    unit.section(ASSIGN_SECTION)
+        .map(|s| {
+            s.entries
+                .iter()
+                .filter(|(k, _)| k == ASSIGN_KEY)
+                .filter_map(|(_, v)| parse_exposed(v))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Adds (`present`) or removes the [`ASSIGN_KEY`] line claiming `port` in
+/// `raw`'s `[Unit]` section, patching the text so every other line survives
+/// byte-for-byte. Lines are matched by parsed value, so a hand-written
+/// `80` counts as `80/tcp`; a new line is written in the canonical
+/// [`ExposedPort::spec`] form. A file with no `[Unit]` section gets one
+/// before its first section. Text already in the desired state is returned
+/// unchanged.
+pub fn set_assigned(raw: &str, port: ExposedPort, present: bool) -> String {
+    use super::iniedit::{
+        insert_pos, is_any_header, join_lines, opens_section, section_body, split_lines,
+    };
+
+    let (mut lines, had_trailing_nl) = split_lines(raw);
+    let line = format!("{ASSIGN_KEY}={}", port.spec());
+    let Some(h) = lines.iter().position(|l| opens_section(l, ASSIGN_SECTION)) else {
+        if present {
+            let at = lines
+                .iter()
+                .position(|l| is_any_header(l))
+                .unwrap_or(lines.len());
+            lines.splice(at..at, [format!("[{ASSIGN_SECTION}]"), line, String::new()]);
+        }
+        return join_lines(lines, had_trailing_nl);
+    };
+    let body = section_body(&lines, h);
+    let hits: Vec<usize> = body
+        .clone()
+        .filter(|&i| {
+            lines[i]
+                .split_once('=')
+                .is_some_and(|(k, v)| k.trim() == ASSIGN_KEY && parse_exposed(v) == Some(port))
+        })
+        .collect();
+    // Keep the first existing claim as it's written; drop any duplicates.
+    let keep = usize::from(present);
+    for &i in hits.iter().skip(keep).rev() {
+        lines.remove(i);
+    }
+    if present && hits.is_empty() {
+        let at = insert_pos(&lines, body);
+        lines.insert(at, line);
+    } else if !present && !hits.is_empty() {
+        // Removing the last claim from a `[Unit]` it leaves empty -- one
+        // added for it -- drops the header and its blank separator too.
+        let body = section_body(&lines, h);
+        if lines[body.clone()].iter().all(|l| l.trim().is_empty()) {
+            lines.drain(h..body.end);
+        }
+    }
+    join_lines(lines, had_trailing_nl)
+}
+
 /// Whether any of `exposed` covers `mapping`'s container port on the same
 /// protocol -- i.e. the container claims to be what that port reaches.
 pub fn serves(exposed: &[ExposedPort], mapping: &PortMapping) -> bool {
@@ -205,48 +314,110 @@ pub fn serves(exposed: &[ExposedPort], mapping: &PortMapping) -> bool {
         .any(|e| e.protocol == mapping.protocol && e.range.overlaps(target))
 }
 
+/// What a pod member says about the ports it serves.
+#[derive(Debug, Clone, Default)]
+pub struct MemberPorts {
+    /// Pod ports assigned to it by hand ([`assigned_ports`]).
+    pub assigned: Vec<ExposedPort>,
+    /// Its own `ExposeHostPort=` lines ([`declared_exposed`]).
+    pub declared: Vec<ExposedPort>,
+    /// Its image and that image's `EXPOSE`, when the image could be
+    /// inspected.
+    pub image: Option<(String, Vec<ExposedPort>)>,
+}
+
+/// Why a pod-published port is shown against a member -- strongest first,
+/// the order [`MemberPorts::why`] checks them in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Why {
+    /// Assigned by hand ([`ASSIGN_KEY`]).
+    Assigned,
+    /// The member's own `ExposeHostPort=`.
+    Declared,
+    /// `EXPOSE` in the member's image (named).
+    Image(String),
+}
+
+impl MemberPorts {
+    /// Whether, and why, this member serves `mapping`'s container port.
+    pub fn why(&self, mapping: &PortMapping) -> Option<Why> {
+        if serves(&self.assigned, mapping) {
+            Some(Why::Assigned)
+        } else if serves(&self.declared, mapping) {
+            Some(Why::Declared)
+        } else {
+            let (image, exposed) = self.image.as_ref()?;
+            serves(exposed, mapping).then(|| Why::Image(image.clone()))
+        }
+    }
+}
+
+/// The members a pod-published `mapping` reaches, each with why: the ones
+/// it's assigned to by hand if any (an assignment overrides every declared
+/// match), else every member declaring its container port. Empty when
+/// neither -- the port stays on the pod.
+pub fn serving<'a>(
+    mapping: &PortMapping,
+    members: &'a [(String, MemberPorts)],
+) -> Vec<(&'a String, Why)> {
+    let all: Vec<(&String, Why)> = members
+        .iter()
+        .filter_map(|(file, p)| Some((file, p.why(mapping)?)))
+        .collect();
+    if all.iter().any(|(_, why)| *why == Why::Assigned) {
+        all.into_iter()
+            .filter(|(_, why)| *why == Why::Assigned)
+            .collect()
+    } else {
+        all
+    }
+}
+
 /// The ports a list row shows once a pod's `PublishPort=` mappings have been
 /// split between the pod and its members (see [`split_pod_ports`]).
 #[derive(Debug, Clone, Default)]
 pub struct SplitPorts {
-    /// For a member: the pod mappings it serves. For the pod: the ones no
-    /// member serves.
-    pub mappings: Vec<PortMapping>,
+    /// The pod publishing these ports (for a member's tooltip).
+    pub pod: String,
+    /// For a member: the pod mappings it serves, each with why. For the pod:
+    /// the ones no member serves (`None`).
+    pub mappings: Vec<(PortMapping, Option<Why>)>,
     /// For the pod: how many of its mappings moved to its members. Always 0
     /// for a member.
     pub moved: usize,
 }
 
-/// Splits a pod's published ports between the pod and the `members` (file
-/// name + exposed ports) that serve them, as the Ports screen matches them:
-/// a mapping goes to every member whose exposed ports cover its container
-/// port ([`serves`]); one no member serves stays on the pod. Returns the
-/// pod's entry (keyed `pod_file`) plus one per member that serves anything.
+/// Splits a pod's published ports between the pod and the `members` that
+/// serve them, as the Ports screen matches them: a mapping goes to every
+/// member [`serving`] picks; one it picks none for stays on the pod. Returns
+/// the pod's entry (keyed `pod_file`) plus one per member that serves
+/// anything.
 pub fn split_pod_ports(
     pod_file: &str,
     pod_mappings: &[PortMapping],
-    members: &[(String, Vec<ExposedPort>)],
+    members: &[(String, MemberPorts)],
 ) -> Vec<(String, SplitPorts)> {
-    let mut pod = SplitPorts::default();
+    let mut pod = SplitPorts {
+        pod: pod_file.to_string(),
+        ..SplitPorts::default()
+    };
     let mut by_member: Vec<(String, SplitPorts)> = Vec::new();
     for m in pod_mappings {
-        let serving: Vec<&String> = members
-            .iter()
-            .filter(|(_, exposed)| serves(exposed, m))
-            .map(|(file, _)| file)
-            .collect();
+        let serving = serving(m, members);
         if serving.is_empty() {
-            pod.mappings.push(m.clone());
+            pod.mappings.push((m.clone(), None));
             continue;
         }
         pod.moved += 1;
-        for file in serving {
+        for (file, why) in serving {
+            let entry = (m.clone(), Some(why));
             match by_member.iter_mut().find(|(f, _)| f == file) {
-                Some((_, split)) => split.mappings.push(m.clone()),
+                Some((_, split)) => split.mappings.push(entry),
                 None => by_member.push((
                     file.clone(),
                     SplitPorts {
-                        mappings: vec![m.clone()],
+                        pod: pod_file.to_string(),
+                        mappings: vec![entry],
                         moved: 0,
                     },
                 )),
@@ -446,8 +617,9 @@ mod tests {
             .iter()
             .map(|raw| mapping("web.pod", raw).unwrap())
             .collect();
-        let exposed = |list: &[&str]| -> Vec<ExposedPort> {
-            list.iter().map(|s| parse_exposed(s).unwrap()).collect()
+        let exposed = |list: &[&str]| MemberPorts {
+            declared: list.iter().map(|s| parse_exposed(s).unwrap()).collect(),
+            ..MemberPorts::default()
         };
         let members = vec![
             ("web.container".to_string(), exposed(&["80", "443"])),
@@ -460,7 +632,7 @@ mod tests {
             split
                 .iter()
                 .find(|(f, _)| f == file)
-                .map(|(_, s)| s.mappings.iter().map(|m| m.raw.as_str()).collect())
+                .map(|(_, s)| s.mappings.iter().map(|(m, _)| m.raw.as_str()).collect())
                 .unwrap_or_default()
         };
         assert_eq!(raws("web.container"), ["8080:80", "8443:443"]);
@@ -505,5 +677,175 @@ mod tests {
                 parse_exposed("5000-5002/udp").unwrap()
             ]
         );
+    }
+
+    fn container(raw: &str) -> QuadletUnit {
+        QuadletUnit {
+            file_name: "a.container".into(),
+            group: String::new(),
+            path: "/tmp/a.container".into(),
+            kind: UnitKind::Container,
+            sections: crate::quadlet::parser::parse(raw).unwrap(),
+            raw: raw.into(),
+        }
+    }
+
+    #[test]
+    fn assigned_ports_reads_unit_section_key() {
+        let unit = container(
+            "[Unit]\nX-Sooth-ServesPort=80\nX-Sooth-ServesPort=53/udp\nX-Sooth-ServesPort=bad\n\n[Container]\nImage=x\n",
+        );
+        assert_eq!(
+            assigned_ports(&unit),
+            [
+                parse_exposed("80/tcp").unwrap(),
+                parse_exposed("53/udp").unwrap()
+            ]
+        );
+        // Only `[Unit]` counts.
+        let unit = container("[Container]\nImage=x\n\n[Service]\nX-Sooth-ServesPort=80\n");
+        assert!(assigned_ports(&unit).is_empty());
+    }
+
+    #[test]
+    fn set_assigned_adds_into_existing_unit_section() {
+        let raw = "# web\n[Unit]\nDescription=w\n\n[Container]\nImage=x\n";
+        let out = set_assigned(raw, parse_exposed("80").unwrap(), true);
+        assert_eq!(
+            out,
+            "# web\n[Unit]\nDescription=w\nX-Sooth-ServesPort=80/tcp\n\n[Container]\nImage=x\n"
+        );
+        // Idempotent.
+        assert_eq!(
+            set_assigned(&out, parse_exposed("80/tcp").unwrap(), true),
+            out
+        );
+        // And reversible.
+        assert_eq!(set_assigned(&out, parse_exposed("80").unwrap(), false), raw);
+    }
+
+    #[test]
+    fn set_assigned_creates_unit_section_before_the_first_one() {
+        let raw = "# web\n[Container]\nImage=x\n";
+        let out = set_assigned(raw, parse_exposed("8000-8010/udp").unwrap(), true);
+        assert_eq!(
+            out,
+            "# web\n[Unit]\nX-Sooth-ServesPort=8000-8010/udp\n\n[Container]\nImage=x\n"
+        );
+        assert_eq!(set_assigned(raw, parse_exposed("80").unwrap(), false), raw);
+        // Clearing it again drops the section it was given.
+        assert_eq!(
+            set_assigned(&out, parse_exposed("8000-8010/udp").unwrap(), false),
+            raw
+        );
+    }
+
+    #[test]
+    fn set_assigned_matches_by_value_and_leaves_other_claims() {
+        let raw = "[Unit]\nX-Sooth-ServesPort=80\nX-Sooth-ServesPort=443/tcp\nX-Sooth-ServesPort=80/tcp\n[Container]\nImage=x\n";
+        // A hand-written `80` is kept as written; its duplicate goes.
+        assert_eq!(
+            set_assigned(raw, parse_exposed("80/tcp").unwrap(), true),
+            "[Unit]\nX-Sooth-ServesPort=80\nX-Sooth-ServesPort=443/tcp\n[Container]\nImage=x\n"
+        );
+        assert_eq!(
+            set_assigned(raw, parse_exposed("80").unwrap(), false),
+            "[Unit]\nX-Sooth-ServesPort=443/tcp\n[Container]\nImage=x\n"
+        );
+        // 80/udp is a different port.
+        assert_eq!(
+            set_assigned(raw, parse_exposed("80/udp").unwrap(), false),
+            raw
+        );
+    }
+
+    #[test]
+    fn exposed_port_spec_is_canonical() {
+        assert_eq!(parse_exposed("80").unwrap().spec(), "80/tcp");
+        assert_eq!(
+            parse_exposed("8000-8010/udp").unwrap().spec(),
+            "8000-8010/udp"
+        );
+        let m = mapping("web.pod", "8443:443").unwrap();
+        assert_eq!(ExposedPort::of_mapping(&m).unwrap().spec(), "443/tcp");
+    }
+
+    #[test]
+    fn assignment_overrides_declared_ports() {
+        let port = |s: &str| parse_exposed(s).unwrap();
+        let members = vec![
+            (
+                "app.container".to_string(),
+                MemberPorts {
+                    image: Some(("nginx".into(), vec![port("80")])),
+                    ..MemberPorts::default()
+                },
+            ),
+            (
+                "proxy.container".to_string(),
+                MemberPorts {
+                    declared: vec![port("80")],
+                    assigned: vec![port("80")],
+                    ..MemberPorts::default()
+                },
+            ),
+            (
+                "side.container".to_string(),
+                MemberPorts {
+                    assigned: vec![port("9000")],
+                    ..MemberPorts::default()
+                },
+            ),
+        ];
+        let names = |m: &str| -> Vec<(String, Why)> {
+            serving(&mapping("p.pod", m).unwrap(), &members)
+                .into_iter()
+                .map(|(f, why)| (f.clone(), why))
+                .collect()
+        };
+        assert_eq!(
+            names("8080:80"),
+            [("proxy.container".into(), Why::Assigned)]
+        );
+        // Assigned to a member that doesn't EXPOSE it at all.
+        assert_eq!(
+            names("9000:9000"),
+            [("side.container".into(), Why::Assigned)]
+        );
+        assert!(names("5432:5432").is_empty());
+
+        let split = split_pod_ports(
+            "p.pod",
+            &[
+                mapping("p.pod", "8080:80").unwrap(),
+                mapping("p.pod", "5432:5432").unwrap(),
+            ],
+            &members,
+        );
+        assert!(split.iter().all(|(f, _)| f != "app.container"));
+        let pod = &split.iter().find(|(f, _)| f == "p.pod").unwrap().1;
+        assert_eq!(pod.moved, 1);
+        assert_eq!(pod.mappings[0].0.raw, "5432:5432");
+        assert_eq!(pod.mappings[0].1, None);
+    }
+
+    #[test]
+    fn why_prefers_declared_over_image() {
+        let port = |s: &str| parse_exposed(s).unwrap();
+        let both = MemberPorts {
+            declared: vec![port("80")],
+            image: Some(("nginx".into(), vec![port("80"), port("443")])),
+            ..MemberPorts::default()
+        };
+        let m = |raw: &str| mapping("p.pod", raw).unwrap();
+        assert_eq!(both.why(&m("8080:80")), Some(Why::Declared));
+        assert_eq!(both.why(&m("8443:443")), Some(Why::Image("nginx".into())));
+        assert_eq!(both.why(&m("9000:9000")), None);
+        // Several members declaring a port all serve it.
+        let members = vec![
+            ("a.container".to_string(), both.clone()),
+            ("b.container".to_string(), both),
+        ];
+        assert_eq!(serving(&m("8080:80"), &members).len(), 2);
     }
 }

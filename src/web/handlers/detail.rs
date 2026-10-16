@@ -51,7 +51,15 @@ pub async fn show(
                     (n, present)
                 })
                 .collect();
-            templates::containers::detail_page(&unit, &status, &csrf, &secrets, &ctx)
+            let pod_ports = core::member_pod_ports(&unit, &all).await;
+            templates::containers::detail_page(
+                &unit,
+                &status,
+                &csrf,
+                &secrets,
+                pod_ports.as_ref(),
+                &ctx,
+            )
         }
         UnitKind::Pod => {
             let members = refs::pod_members(&unit, &all);

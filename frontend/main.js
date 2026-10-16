@@ -21,10 +21,11 @@ import { initNewResourceRows } from "./podresourcerows.js";
 import { initPortLinks } from "./ports.js";
 import { initSecrets } from "./secrets.js";
 import { initSettingsForm } from "./settings.js";
+import { initTooltips } from "./tooltip.js";
 
 window.htmx = htmx;
 
-// Delegated listeners (theme, filter, nav, menus) attach once; the
+// Delegated listeners (theme, filter, nav, menus, tooltips) attach once; the
 // DOM-scanning ones (logs, editors) are idempotent and re-run after htmx
 // swaps in new content.
 function boot() {
@@ -46,6 +47,7 @@ function boot() {
   initPortLinks();
   initSettingsForm();
   initSecrets();
+  initTooltips();
 }
 
 if (document.readyState === "loading") {

@@ -102,7 +102,8 @@ pub async fn config(
 /// `?split=1` is the Services list's view, where a pod's ports are split
 /// onto the members serving them (`core::split_pod_ports`): it re-derives
 /// this unit's share -- for a pod or one of its members -- falling back to
-/// the unit's own ports when it has none.
+/// the unit's own ports when it has none. `&member=1` is the container
+/// detail page's version of a member's share.
 pub async fn ports_cell(
     State(state): State<AppState>,
     Path(file_name): Path<String>,
@@ -114,6 +115,17 @@ pub async fn ports_cell(
         .find(|u| u.file_name == file_name)
         .ok_or_else(|| AppError::NotFound(file_name.clone()))?;
     let status = state.systemd.status(&unit.service_name()).await?;
+    if query.member.is_some()
+        && let Some(p) = core::member_pod_ports(unit, &all).await
+    {
+        return Ok(templates::member_ports_summary(
+            unit,
+            status.is_active(),
+            p.pod,
+            &p.mine,
+            p.published,
+        ));
+    }
     if query.split.is_some() {
         let pod = match unit.kind {
             UnitKind::Pod => Some(unit),
@@ -139,6 +151,9 @@ pub async fn ports_cell(
 pub struct PortsQuery {
     /// Present (any value) for the Services list's split view.
     split: Option<String>,
+    /// Present (any value) for a pod member's detail page: the pod ports
+    /// that reach it (`templates::member_ports_summary`).
+    member: Option<String>,
 }
 
 #[derive(Deserialize)]

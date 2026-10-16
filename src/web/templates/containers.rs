@@ -3,14 +3,18 @@ use maud::{Markup, html};
 use super::detail::{self, DetailCtx};
 use crate::quadlet::QuadletUnit;
 use crate::systemd::UnitStatus;
+use crate::web::core::MemberPodPorts;
 
 /// `secrets`: each `Secret=` name the unit references, with whether podman
-/// has it (`None` when the store couldn't be listed).
+/// has it (`None` when the store couldn't be listed). `pod_ports`: for a
+/// member of a pod that publishes ports, the ones that reach this container
+/// -- shown as its Ports instead of its own (a pod member can't publish any).
 pub fn detail_page(
     unit: &QuadletUnit,
     status: &UnitStatus,
     csrf: &str,
     secrets: &[(String, Option<bool>)],
+    pod_ports: Option<&MemberPodPorts>,
     ctx: &DetailCtx,
 ) -> Markup {
     let image = unit
@@ -23,7 +27,15 @@ pub fn detail_page(
         csrf,
         &[
             ("Image", html! { code { (image) } }),
-            ("Ports", super::ports_cell_live(unit, status)),
+            (
+                "Ports",
+                match pod_ports {
+                    Some(p) => {
+                        super::member_ports_cell_live(unit, status, p.pod, &p.mine, p.published)
+                    }
+                    None => super::ports_cell_live(unit, status),
+                },
+            ),
             ("Secrets", secrets_cell(secrets)),
         ],
         None,
