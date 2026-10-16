@@ -4,6 +4,32 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-16
+
+### Added
+
+- **Assign a pod's published ports to its containers.** On the Ports screen,
+  each port a pod publishes now shows which of its containers it reaches,
+  with a small control to change that. "auto" matches the container that
+  declares the port (`ExposeHostPort=` or its image's `EXPOSE`). Picking a
+  container marks the port "assigned" to it, and the choice wins over any
+  automatic match. A port no container declares stays on the pod and reads
+  "assign…". The Services list puts each port on the row of the container it
+  is assigned to. Assigning only changes what sooth shows: it is saved as an
+  `X-Sooth-ServesPort=` line in the container's `[Unit]` section, which
+  podman and systemd ignore, so nothing is restarted.
+
+- **See why a port is shown where it is.** An ⓘ icon next to each pod
+  port's container shows a tooltip on hover or keyboard focus, saying
+  whether the port was assigned by hand, matched by `ExposeHostPort=`, or
+  matched by the image's `EXPOSE` (naming the image). The Services list's
+  port pills give the same explanation on hover.
+
+- **A pod member's page lists its ports.** A container in a pod can't
+  publish ports of its own, so its Overview "Ports" used to stay empty. It
+  now lists the pod's ports that reach this container, each with its ⓘ
+  reason, names the pod, and links to the Ports screen to change them.
+
 ## [0.5.0] - 2026-10-12
 
 ### Added
@@ -228,6 +254,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.6.0]: https://github.com/RazMag/sooth/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/RazMag/sooth/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/RazMag/sooth/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/RazMag/sooth/compare/v0.3.6...v0.4.0

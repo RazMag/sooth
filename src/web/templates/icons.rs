@@ -47,6 +47,7 @@ pub enum Icon {
     Standalone,
     ChevronDown,
     Grip,
+    Info,
 }
 
 pub fn icon(which: Icon) -> Markup {
@@ -147,6 +148,9 @@ pub fn icon(which: Icon) -> Markup {
         Icon::ChevronDown => r#"<path d="m6 9 6 6 6-6"/>"#,
         Icon::Grip => {
             r#"<circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none"/>"#
+        }
+        Icon::Info => {
+            r#"<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>"#
         }
     };
     PreEscaped(format!(

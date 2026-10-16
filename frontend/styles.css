@@ -849,6 +849,73 @@
   .action-row { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.9rem 0; }
   .detail-links { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.75rem 0 0.5rem; }
   .inline-form { display: inline; }
+  /* Ports screen, a pod port's Container cell: its target(s), then a second
+     line naming the pod with a quiet assign control -- a transparent native
+     <select> over a chip-sized label reading "auto" (muted text), "assigned"
+     (accent chip) or "assign…" (dashed, the port still sits on the pod). */
+  /* An (i) that explains something in a styled tooltip on hover / focus
+     (`templates::info_tip`, positioned by `frontend/tooltip.js`). */
+  .info-tip {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: -0.12em;
+    color: var(--color-faint);
+    border-radius: 50%;
+    cursor: help;
+  }
+  .info-tip svg { width: 0.85rem; height: 0.85rem; }
+  .info-tip:hover, .info-tip:focus-visible { color: var(--color-ink); }
+  .tip {
+    position: fixed;
+    z-index: 40;
+    max-width: 20rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    box-shadow: var(--shadow-pop);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    pointer-events: none;
+  }
+  .tip[hidden] { display: none; }
+  .port-target + .port-target { margin-top: 0.15rem; }
+  .port-why { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .port-route-sep { color: var(--color-faint); }
+  /* On a detail page's Overview, whose values are monospace. */
+  .kv-table .port-route { font-family: var(--font-sans); overflow-wrap: normal; }
+  .port-route { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.35rem; margin-top: 0.3rem; }
+  .port-assign { display: inline-flex; align-items: center; }
+  .port-assign::before { content: "·"; margin-right: 0.3rem; color: var(--color-faint); }
+  .port-assign-control {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: var(--color-muted);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+  }
+  .port-assign-control svg { width: 0.7rem; height: 0.7rem; opacity: 0.7; }
+  .port-assign-control select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    opacity: 0;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .port-assign-control:hover { color: var(--color-ink); border-color: var(--color-line-strong); background: var(--color-surface); }
+  .port-assign-control:focus-within { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+  .port-assign-control.is-assigned { background: var(--color-accent-soft); color: var(--color-accent); font-weight: 600; }
+  .port-assign-control.is-assigned:hover { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+  .port-assign-control.is-unassigned { border-style: dashed; border-color: var(--color-line-strong); }
 
   /* A git-sync card's routine actions (Sync now / Force resync / the "Edit"
      disclosure). Like `.action-row`, but `align-items: flex-start` so an
