@@ -166,7 +166,7 @@ opens `Connection::session()` on startup and exits if it fails).
   htmx, its SSE extension, and CodeMirror 6. `frontend/styles.css` →
   `static/style.css` (Tailwind v4; classes are scanned from
   `src/web/templates`).
-- Progressive enhancement only: `initTheme/Filter/Groups/PodTree/Nav/Menus/Logs/Editors/EnvVars/Secrets`.
+- Progressive enhancement only: `initTheme/Filter/Groups/PodTree/Nav/Menus/Tooltips/Logs/Editors/EnvVars/Secrets`.
   The DOM-scanning ones are idempotent and re-run on `htmx:afterSwap`.
 - The code editor (`frontend/editor.js`) keeps the underlying `<textarea>` in
   sync so a normal form submit still carries `contents`, and debounce-posts

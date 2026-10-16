@@ -2,8 +2,8 @@ use maud::{Markup, html};
 
 use super::icons::{Icon, icon};
 use super::{
-    NavItem, container_port_label, csrf_input, page_header, plain_status_badge, port_why, shell,
-    status_badge,
+    NavItem, container_port_label, csrf_input, info_tip, page_header, plain_status_badge, port_why,
+    shell, status_badge,
 };
 use crate::health::Health;
 use crate::quadlet::naming;
@@ -105,7 +105,7 @@ pub fn ports_rows(rows: &[PortRow], csrf: &str, pull_error: Option<(&str, &str)>
 /// The Container cell of a pod-published port, in one of three shapes:
 /// the member(s) it was matched to automatically, the member it's assigned
 /// to by hand, or -- when no member declares it -- the pod itself. Each
-/// target's tooltip says why it's there ([`port_why`]); the second line
+/// target's info icon says why it's there ([`port_why`]); the second line
 /// names the pod and carries the [`assign_picker`].
 fn pod_targets(
     row: &PortRow,
@@ -130,8 +130,10 @@ fn pod_targets(
     }
     html! {
         @if targets.serving.is_empty() {
-            div.port-target title=(port_why(None, "", &pod.file_name, &port)) {
+            div.port-target {
                 (pod_chip)
+                " "
+                (info_tip(&port_why(None, "", &pod.file_name, &port)))
             }
             @for m in &targets.unpulled {
                 @if let Some(image) = &m.unpulled {
@@ -159,10 +161,12 @@ fn pod_targets(
             }
         } @else {
             @for (m, why) in &targets.serving {
-                div.port-target title=(port_why(Some(why), &m.file_name, &pod.file_name, &port)) {
+                div.port-target {
                     a href=(m.href) { (m.file_name) }
                     " "
                     (plain_status_badge(m.status))
+                    " "
+                    (info_tip(&port_why(Some(why), &m.file_name, &pod.file_name, &port)))
                 }
             }
             div.cell-secondary.port-route {
@@ -221,7 +225,7 @@ pub fn ports_page(rows: &[PortRow], csrf: &str, health: Health) -> Markup {
         p.page-meta {
             "Declared " code { "PublishPort=" } " entries across Containers and Pods. "
             "A pod's ports are shown against the member you assign them to, else the one that declares the container port ("
-            code { "ExposeHostPort=" } " or its image's " code { "EXPOSE" } "), else the pod itself. Hover a container to see why."
+            code { "ExposeHostPort=" } " or its image's " code { "EXPOSE" } "), else the pod itself. Hover " span.info-tip { (icon(Icon::Info)) } " to see why."
         }
         @if rows.is_empty() {
             p.empty { "No published ports declared yet." }

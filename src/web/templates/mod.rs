@@ -931,6 +931,17 @@ pub fn ports_summary(unit: &QuadletUnit, active: bool) -> Markup {
     port_list(&pills, active, &unit.service_name())
 }
 
+/// A small (i) icon that explains `text` in a styled tooltip on hover or
+/// keyboard focus (`frontend/tooltip.js`). Focusable so it works without a
+/// mouse; `aria-label` carries the same text for screen readers.
+pub fn info_tip(text: &str) -> Markup {
+    html! {
+        span.info-tip tabindex="0" role="img" aria-label=(text) data-tip=(text) {
+            (icon(Icon::Info))
+        }
+    }
+}
+
 /// `80/tcp` -- how a pod port is named in [`port_why`] and the Ports
 /// screen.
 pub fn container_port_label(m: &PortMapping) -> String {

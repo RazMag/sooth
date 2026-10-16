@@ -853,6 +853,33 @@
      line naming the pod with a quiet assign control -- a transparent native
      <select> over a chip-sized label reading "auto" (muted text), "assigned"
      (accent chip) or "assign…" (dashed, the port still sits on the pod). */
+  /* An (i) that explains something in a styled tooltip on hover / focus
+     (`templates::info_tip`, positioned by `frontend/tooltip.js`). */
+  .info-tip {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: -0.12em;
+    color: var(--color-faint);
+    border-radius: 50%;
+    cursor: help;
+  }
+  .info-tip svg { width: 0.85rem; height: 0.85rem; }
+  .info-tip:hover, .info-tip:focus-visible { color: var(--color-ink); }
+  .tip {
+    position: fixed;
+    z-index: 40;
+    max-width: 20rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    border: 1px solid var(--color-line);
+    border-radius: 0.5rem;
+    box-shadow: var(--shadow-pop);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    pointer-events: none;
+  }
+  .tip[hidden] { display: none; }
   .port-target + .port-target { margin-top: 0.15rem; }
   .port-route { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.35rem; margin-top: 0.3rem; }
   .port-assign { display: inline-flex; align-items: center; }
