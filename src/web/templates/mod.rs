@@ -28,7 +28,7 @@ use crate::health::Health;
 use crate::hostenv::EnvVar;
 use crate::imageinfo::UpdateCheck;
 use crate::quadlet::autoupdate::AutoUpdateMode;
-use crate::quadlet::ports::{PortMapping, SplitPorts};
+use crate::quadlet::ports::{PortMapping, SplitPorts, Why};
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -927,18 +927,61 @@ const PORTS_SHOWN: usize = 4;
 /// "show less" at its end. Pure CSS (`.port-more-toggle:checked ~ …`).
 pub fn ports_summary(unit: &QuadletUnit, active: bool) -> Markup {
     let mappings = crate::quadlet::ports::extract(std::slice::from_ref(unit));
-    port_list(&mappings, active, &unit.service_name())
+    let pills: Vec<_> = mappings.iter().map(|m| (m, None)).collect();
+    port_list(&pills, active, &unit.service_name())
+}
+
+/// `80/tcp` -- how a pod port is named in [`port_why`] and the Ports
+/// screen.
+pub fn container_port_label(m: &PortMapping) -> String {
+    format!("{}/{}", m.container_port, m.protocol.as_str())
+}
+
+/// Why a port `pod` publishes is shown against `member` (or, for `None`,
+/// left on the pod) -- the tooltip on the Ports screen's Container cell and
+/// on the Services list's split pills, so both explain it the same way.
+pub fn port_why(why: Option<&Why>, member: &str, pod: &str, port: &str) -> String {
+    match why {
+        Some(Why::Assigned) => format!(
+            "{pod} publishes {port}. Assigned to {member} by hand on the Ports screen \
+             (X-Sooth-ServesPort= in its [Unit] section, which podman ignores)."
+        ),
+        Some(Why::Declared) => format!(
+            "{pod} publishes {port}. Matched automatically: {member} declares it with ExposeHostPort=."
+        ),
+        Some(Why::Image(image)) => format!(
+            "{pod} publishes {port}. Matched automatically: {member}'s image {image} EXPOSEs it."
+        ),
+        None => format!(
+            "No container in {pod} declares {port} (ExposeHostPort= or its image's EXPOSE), \
+             so it stays on the pod. Assign it to one on the Ports screen."
+        ),
+    }
 }
 
 /// The Services list's Ports cell once a pod's published ports have been
 /// split between it and its members (`core::split_pod_ports`): a member
 /// shows the pod ports it serves, the pod the ones none of them do, plus a
 /// note of how many moved -- so a collapsed pod still says where they went.
+/// Each split pill's tooltip says why it landed where it did ([`port_why`]).
 pub fn split_ports_summary(unit: &QuadletUnit, active: bool, split: &SplitPorts) -> Markup {
     let moved = split.moved;
+    let pills: Vec<_> = split
+        .mappings
+        .iter()
+        .map(|(m, why)| {
+            let title = port_why(
+                why.as_ref(),
+                &unit.file_name,
+                &split.pod,
+                &container_port_label(m),
+            );
+            (m, Some(title))
+        })
+        .collect();
     html! {
-        @if !split.mappings.is_empty() || moved == 0 {
-            (port_list(&split.mappings, active, &unit.service_name()))
+        @if !pills.is_empty() || moved == 0 {
+            (port_list(&pills, active, &unit.service_name()))
         }
         @if moved > 0 {
             // The Ports column header already says what the number counts.
@@ -949,29 +992,30 @@ pub fn split_ports_summary(unit: &QuadletUnit, active: bool, split: &SplitPorts)
     }
 }
 
-/// `mappings` as a wrapping list of pills, or a muted dash when empty --
-/// the body of [`ports_summary`] and [`split_ports_summary`]. `key` (the
-/// unit's service name) keeps the "+N more" toggle's id unique per page.
-fn port_list(mappings: &[PortMapping], active: bool, key: &str) -> Markup {
-    if mappings.is_empty() {
+/// `pills` (each mapping with an optional tooltip) as a wrapping list, or a
+/// muted dash when empty -- the body of [`ports_summary`] and
+/// [`split_ports_summary`]. `key` (the unit's service name) keeps the "+N
+/// more" toggle's id unique per page.
+fn port_list(pills: &[(&PortMapping, Option<String>)], active: bool, key: &str) -> Markup {
+    if pills.is_empty() {
         return html! { span.muted { "—" } };
     }
-    let shown = if mappings.len() > PORTS_SHOWN + 1 {
+    let shown = if pills.len() > PORTS_SHOWN + 1 {
         PORTS_SHOWN
     } else {
-        mappings.len()
+        pills.len()
     };
-    let (head, rest) = mappings.split_at(shown);
+    let (head, rest) = pills.split_at(shown);
     let toggle_id = format!("ports-more-{}", dom_id(key));
     html! {
         span class={"port-list" @if !rest.is_empty() { " port-list-long" }} {
             @if !rest.is_empty() {
                 input.port-more-toggle type="checkbox" id=(toggle_id);
             }
-            @for m in head { (port_map(m, active, false)) }
-            @for m in rest { (port_map(m, active, true)) }
+            @for (m, title) in head { (port_map(m, title.as_deref(), active, false)) }
+            @for (m, title) in rest { (port_map(m, title.as_deref(), active, true)) }
             @if !rest.is_empty() {
-                label.port-more-label for=(toggle_id) title={(mappings.len()) " published ports"} {
+                label.port-more-label for=(toggle_id) title={(pills.len()) " published ports"} {
                     span.port-more-count { "+" (rest.len()) " more" }
                     span.port-more-less { "show less" }
                 }
@@ -982,9 +1026,9 @@ fn port_list(mappings: &[PortMapping], active: bool, key: &str) -> Markup {
 
 /// One `HOST:CONTAINER` pill of [`ports_summary`]; `extra` ones are hidden
 /// until its "+N more" toggle is checked.
-fn port_map(m: &PortMapping, active: bool, extra: bool) -> Markup {
+fn port_map(m: &PortMapping, title: Option<&str>, active: bool, extra: bool) -> Markup {
     html! {
-        span class={"port-map" @if extra { " port-extra" }} {
+        span class={"port-map" @if extra { " port-extra" }} title=[title] {
             @match m.host_port {
                 Some(range) if range.start == range.end => {
                     @if active {

@@ -45,8 +45,10 @@ async fn with_rows<T>(
         .iter()
         .filter(|u| member_files.contains(&u.file_name))
         .collect();
-    let core::MemberExposure { exposed, unpulled } =
-        core::member_exposure(&member_units, &all).await;
+    let core::MemberExposure {
+        ports: member_ports,
+        unpulled,
+    } = core::member_exposure(&member_units, &all).await;
 
     let unit_ref = |file_name: &str| {
         units
@@ -71,31 +73,32 @@ async fn with_rows<T>(
                 unpulled: None,
             };
             // A pod's ports land on whichever of its containers (`Pod=` on
-            // the container side) listens on the container port. Narrow to
-            // the members that declare that port; if none does, any of them
-            // might, so keep them all.
+            // the container side) listens on the container port: the
+            // member(s) it's assigned to, else the ones declaring that port.
+            // If none does, it stays on the pod.
             let members = if unit.kind == UnitKind::Pod {
-                let all_members = refs::pod_members(unit, &unit_refs);
-                let serving: Vec<&String> = all_members
-                    .iter()
-                    .filter(|f| exposed.get(f.as_str()).is_some_and(|e| ports::serves(e, m)))
-                    .collect();
-                let matched = !serving.is_empty();
-                let shown: Vec<&String> = if matched {
-                    serving
-                } else {
-                    all_members.iter().collect()
-                };
-                Some(PodTargets {
-                    containers: shown
+                let all_members: Vec<(String, ports::MemberPorts)> =
+                    refs::pod_members(unit, &unit_refs)
                         .into_iter()
-                        .filter_map(|f| {
+                        .map(|f| {
+                            let p = member_ports.get(&f).cloned().unwrap_or_default();
+                            (f, p)
+                        })
+                        .collect();
+                Some(PodTargets {
+                    serving: ports::serving(m, &all_members)
+                        .into_iter()
+                        .filter_map(|(f, why)| Some((unit_ref(f)?, why)))
+                        .collect(),
+                    unpulled: all_members
+                        .iter()
+                        .filter_map(|(f, _)| {
                             let mut r = unit_ref(f)?;
-                            r.unpulled = unpulled.get(f.as_str()).map(|i| i.to_string());
+                            r.unpulled = Some(unpulled.get(f)?.clone());
                             Some(r)
                         })
                         .collect(),
-                    matched,
+                    members: all_members.into_iter().map(|(f, _)| f).collect(),
                 })
             } else {
                 None
@@ -178,6 +181,43 @@ pub async fn pull(
     let pull_error = error.as_deref().map(|e| (form.file_name.as_str(), e));
     Ok(with_rows(&state, |rows| {
         templates::ports::ports_rows(rows, &csrf, pull_error)
+    })
+    .await?)
+}
+
+#[derive(Deserialize)]
+pub struct AssignForm {
+    csrf_token: String,
+    /// The pod publishing the port.
+    pod: String,
+    /// Its container port, as `ExposedPort::spec` (`80/tcp`).
+    port: String,
+    /// The member to assign it to; empty = back to automatic matching.
+    #[serde(default)]
+    member: String,
+}
+
+/// Assigns a pod-published port to one of the pod's containers (or clears
+/// the assignment) -- sooth bookkeeping only, see `core::assign_pod_port` --
+/// then answers with the re-rendered `<tbody>`.
+pub async fn assign(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<AssignForm>,
+) -> Result<maud::Markup, FragmentError> {
+    let member = Some(form.member.trim()).filter(|m| !m.is_empty());
+    core::assign_pod_port(
+        &state,
+        &session,
+        &form.csrf_token,
+        &form.pod,
+        &form.port,
+        member,
+    )
+    .await?;
+    let csrf = csrf(&session).await;
+    Ok(with_rows(&state, |rows| {
+        templates::ports::ports_rows(rows, &csrf, None)
     })
     .await?)
 }

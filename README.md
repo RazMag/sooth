@@ -23,14 +23,18 @@ CSS/JS embedded, so it runs from any directory.
 
 - **Services** landing page — Containers and Pods combined, with a
   total/running/failed stat bar. A pod's published ports show on the member
-  container that serves them (by its `ExposeHostPort=` or its image's
-  `EXPOSE`, as on the Ports screen); only ports none of them serve stay on
-  the pod row.
+  container that serves them (the one you assigned it to on the Ports
+  screen, else by its `ExposeHostPort=` or its image's `EXPOSE`); only ports
+  none of them serve stay on the pod row.
 - Dedicated **Volumes**, **Networks**, and **Images** (Image + Build units)
   sections, plus a generic `/units` listing that covers every kind and is the
   only home for `.kube` units.
 - **Ports** — every declared `PublishPort=` across Containers and Pods, with
-  conflicting host ports flagged.
+  conflicting host ports flagged. A pod's port can be assigned to the member
+  container behind it (hover a port's container to see why it's matched
+  where it is); an assignment is recorded as an
+  `X-Sooth-ServesPort=` line in the container's `[Unit]` section, which
+  podman and systemd ignore, so it only changes what sooth displays.
 - **Pods and Directories layouts** — every list table is a branch tree you
   can switch between two layouts (remembered per browser).
   - **Pods** nests a pod's units under its row: its member containers
