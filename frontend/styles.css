@@ -917,6 +917,34 @@
   .port-assign-control.is-assigned:hover { border-color: color-mix(in srgb, var(--color-accent) 40%, transparent); }
   .port-assign-control.is-unassigned { border-style: dashed; border-color: var(--color-line-strong); }
 
+  /* Ports screen "Host network" table: each recorded port is a small pill
+     with its own remove button, and a compact add field beside them. */
+  .host-port {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.05rem 0.15rem 0.05rem 0.45rem;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 999px;
+    background: var(--color-raised);
+    white-space: nowrap;
+  }
+  .host-port .inline-form { display: inline-flex; }
+  .host-port-remove {
+    display: inline-flex;
+    padding: 0.15rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--color-muted);
+    cursor: pointer;
+  }
+  .host-port-remove svg { width: 0.75rem; height: 0.75rem; }
+  .host-port-remove:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+  .host-port-add { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .host-port-add .input { width: 9rem; }
+  .host-port-add .btn svg { width: 0.85rem; height: 0.85rem; }
+
   /* A git-sync card's routine actions (Sync now / Force resync / the "Edit"
      disclosure). Like `.action-row`, but `align-items: flex-start` so an
      expanded Edit form (tall) doesn't stretch the plain buttons beside it

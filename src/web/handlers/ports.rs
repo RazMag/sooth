@@ -8,20 +8,22 @@ use crate::config::AppState;
 use crate::error::{AppError, FragmentError, PageError};
 use crate::imageinfo;
 use crate::quadlet::ports;
-use crate::quadlet::{QuadletUnit, UnitKind, discovery, refs};
+use crate::quadlet::{QuadletError, QuadletUnit, UnitKind, discovery, refs};
 use crate::web::core;
-use crate::web::templates::ports::{PodTargets, PortRow, UnitRef};
+use crate::web::templates::ports::{HostNet, PodTargets, PortRow, UnitRef};
 use crate::web::templates::{self};
 
 /// Builds every declared `PublishPort=` mapping across Containers and Pods
-/// into `PortRow`s (owner, the container(s) actually behind the port, live
-/// statuses, conflicting units) and hands the slice to `render`. `PortRow`
-/// borrows from the loaded units and the sorted mappings, so both have to
-/// stay on this stack frame -- the closure keeps the borrow scoped without
-/// leaking those types into a return signature.
+/// (and each `Network=host` container's recorded ports) into `PortRow`s
+/// (owner, the container(s) actually behind the port, live statuses,
+/// conflicting units), plus the host-network containers themselves as
+/// `HostNet`s, and hands both slices to `render`. They borrow from the
+/// loaded units and the sorted mappings, so both have to stay on this stack
+/// frame -- the closure keeps the borrow scoped without leaking those types
+/// into a return signature.
 async fn with_rows<T>(
     state: &AppState,
-    render: impl FnOnce(&[PortRow]) -> T,
+    render: impl FnOnce(&[PortRow], &[HostNet]) -> T,
 ) -> Result<T, AppError> {
     // `all` (every kind) so a member's `Image=foo.image` / `foo.build`
     // resolves to the image it names.
@@ -119,7 +121,18 @@ async fn with_rows<T>(
         })
         .collect();
 
-    Ok(render(&rows))
+    let hosts: Vec<HostNet> = units
+        .iter()
+        .filter(|(u, _)| ports::is_host_network(u))
+        .filter_map(|(u, _)| {
+            Some(HostNet {
+                unit: unit_ref(&u.file_name)?,
+                ports: ports::host_ports(u),
+            })
+        })
+        .collect();
+
+    Ok(render(&rows, &hosts))
 }
 
 async fn csrf(session: &Session) -> String {
@@ -134,8 +147,8 @@ pub async fn index(
 ) -> Result<impl IntoResponse, PageError> {
     let health = state.health.get();
     let csrf = csrf(&session).await;
-    Ok(with_rows(&state, |rows| {
-        templates::ports::ports_page(rows, &csrf, health)
+    Ok(with_rows(&state, |rows, hosts| {
+        templates::ports::ports_page(rows, hosts, &csrf, health)
     })
     .await?)
 }
@@ -148,7 +161,7 @@ pub async fn rows(
     session: Session,
 ) -> Result<maud::Markup, FragmentError> {
     let csrf = csrf(&session).await;
-    Ok(with_rows(&state, |rows| {
+    Ok(with_rows(&state, |rows, _| {
         templates::ports::ports_rows(rows, &csrf, None)
     })
     .await?)
@@ -179,7 +192,7 @@ pub async fn pull(
     let error = imageinfo::pull(&image).await.err();
     let csrf = csrf(&session).await;
     let pull_error = error.as_deref().map(|e| (form.file_name.as_str(), e));
-    Ok(with_rows(&state, |rows| {
+    Ok(with_rows(&state, |rows, _| {
         templates::ports::ports_rows(rows, &csrf, pull_error)
     })
     .await?)
@@ -216,8 +229,52 @@ pub async fn assign(
     )
     .await?;
     let csrf = csrf(&session).await;
-    Ok(with_rows(&state, |rows| {
+    Ok(with_rows(&state, |rows, _| {
         templates::ports::ports_rows(rows, &csrf, None)
+    })
+    .await?)
+}
+
+#[derive(Deserialize)]
+pub struct HostPortForm {
+    csrf_token: String,
+    /// The `Network=host` container.
+    file_name: String,
+    /// `8080`, `8080/udp` or `8000-8010` -- anything `ports::parse_exposed`
+    /// takes.
+    port: String,
+    /// Present = forget the port instead of recording it.
+    #[serde(default)]
+    remove: Option<String>,
+}
+
+/// Records (or removes) a port a `Network=host` container listens on --
+/// sooth bookkeeping only, see `core::set_host_port` -- then answers with
+/// the re-rendered page content, so a first port brings the ports table in
+/// with it. A rejected port (malformed, not a host-network container) is
+/// shown above the form instead, as a 200 since htmx drops non-2xx bodies.
+pub async fn host_port(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<HostPortForm>,
+) -> Result<maud::Markup, FragmentError> {
+    let result = core::set_host_port(
+        &state,
+        &session,
+        &form.csrf_token,
+        &form.file_name,
+        &form.port,
+        form.remove.is_none(),
+    )
+    .await;
+    let error = match result {
+        Ok(()) => None,
+        Err(AppError::Quadlet(QuadletError::Validation(msg))) => Some(msg),
+        Err(e) => return Err(e.into()),
+    };
+    let csrf = csrf(&session).await;
+    Ok(with_rows(&state, |rows, hosts| {
+        templates::ports::ports_content(rows, hosts, &csrf, error.as_deref())
     })
     .await?)
 }

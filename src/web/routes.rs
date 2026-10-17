@@ -135,6 +135,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ports/rows", get(ports::rows))
         .route("/ports/pull", post(ports::pull))
         .route("/ports/assign", post(ports::assign))
+        .route("/ports/host", post(ports::host_port))
         .route(
             "/environment",
             get(environment::index).post(environment::add),
