@@ -4,6 +4,23 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-10-17
+
+### Added
+
+- **List the ports of host-network containers.** A container with
+  `Network=host` uses the host's ports directly, so it has no
+  `PublishPort=` lines and sooth used to show no ports for it. The Ports
+  screen now has a "Host network" table listing these containers, where
+  you can add the ports each one listens on (`8080`, `53/udp` or a range
+  like `8000-8010`) and remove them again. They then appear in the ports
+  table, flagged like any other port if they clash with another unit's
+  published port, and as `8080 host` pills on the Services list and the
+  container's page. That page also links to the Ports screen to add or
+  change them. This only changes what sooth shows: the ports are saved as
+  `X-Sooth-HostPort=` lines in the container's `[Unit]` section, which
+  podman and systemd ignore, so nothing is restarted.
+
 ## [0.6.0] - 2026-10-16
 
 ### Added
@@ -254,6 +271,7 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[0.6.1]: https://github.com/RazMag/sooth/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/RazMag/sooth/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/RazMag/sooth/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/RazMag/sooth/compare/v0.4.0...v0.4.1

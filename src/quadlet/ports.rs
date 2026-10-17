@@ -5,7 +5,10 @@
 //! Also owns which pod member a pod-published port is shown against, and
 //! why ([`Why`]): a manual assignment ([`ASSIGN_KEY`], see [`set_assigned`])
 //! overrides the member's declared ports ([`declared_exposed`], then its
-//! image's `EXPOSE`).
+//! image's `EXPOSE`). And the ports a `Network=host` container listens on,
+//! which have no `PublishPort=` to read: recorded by hand
+//! ([`HOST_PORT_KEY`], see [`set_host_port`]) and listed by [`extract`]
+//! like any published port.
 
 use super::model::{QuadletUnit, UnitKind};
 
@@ -37,6 +40,10 @@ pub struct PortMapping {
     pub container_port: String,
     /// The original `PublishPort=` value, kept for display.
     pub raw: String,
+    /// A port a `Network=host` container listens on straight on the host
+    /// ([`HOST_PORT_KEY`]), not a `PublishPort=`: `host_port` and
+    /// `container_port` are the same port.
+    pub host_network: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,8 +59,10 @@ impl HostPortRange {
 }
 
 /// Parses every `PublishPort=` in the primary section of every Container or
-/// Pod unit in `units`. Unparsable entries are skipped, never fatal -- a
-/// typo'd port line shouldn't take down the whole ports screen.
+/// Pod unit in `units`, plus each host-network container's recorded
+/// [`host_ports`] (`host_network: true`). Unparsable entries are skipped,
+/// never fatal -- a typo'd port line shouldn't take down the whole ports
+/// screen.
 pub fn extract(units: &[QuadletUnit]) -> Vec<PortMapping> {
     let mut out = Vec::new();
     for unit in units {
@@ -71,6 +80,14 @@ pub fn extract(units: &[QuadletUnit]) -> Vec<PortMapping> {
                 out.push(mapping);
             }
         }
+        out.extend(host_ports(unit).into_iter().map(|p| PortMapping {
+            file_name: unit.file_name.clone(),
+            host_port: Some(p.range),
+            protocol: p.protocol,
+            container_port: p.range_str(),
+            raw: format!("{HOST_PORT_KEY}={}", p.spec()),
+            host_network: true,
+        }));
     }
     out
 }
@@ -115,6 +132,7 @@ fn parse_publish_port(file_name: &str, raw: &str) -> Option<PortMapping> {
         protocol,
         container_port: container_part.to_string(),
         raw: raw.to_string(),
+        host_network: false,
     })
 }
 
@@ -204,12 +222,16 @@ impl ExposedPort {
     /// [`set_assigned`] writes, and what the Ports screen's assign picker
     /// posts back.
     pub fn spec(self) -> String {
+        format!("{}/{}", self.range_str(), self.protocol.as_str())
+    }
+
+    /// `80` / `8000-8010`, without the protocol.
+    pub fn range_str(self) -> String {
         let HostPortRange { start, end } = self.range;
-        let proto = self.protocol.as_str();
         if start == end {
-            format!("{start}/{proto}")
+            start.to_string()
         } else {
-            format!("{start}-{end}/{proto}")
+            format!("{start}-{end}")
         }
     }
 
@@ -234,9 +256,42 @@ impl ExposedPort {
 pub const ASSIGN_SECTION: &str = "Unit";
 pub const ASSIGN_KEY: &str = "X-Sooth-ServesPort";
 
+/// The `[Unit]` key a `Network=host` container's quadlet records a port it
+/// listens on with, e.g. `X-Sooth-HostPort=8080/tcp`. Such a container
+/// shares the host's network, so there's no `PublishPort=` saying which host
+/// ports it takes; this is how sooth lists them anyway (and checks them for
+/// collisions). Sooth-only bookkeeping exactly like [`ASSIGN_KEY`]: podman
+/// and systemd ignore it.
+pub const HOST_PORT_KEY: &str = "X-Sooth-HostPort";
+
 /// Every [`ASSIGN_KEY`] in a Container unit's `[Unit]` section. Unparsable
 /// values are skipped. Empty for every other kind.
 pub fn assigned_ports(unit: &QuadletUnit) -> Vec<ExposedPort> {
+    unit_ports(unit, ASSIGN_KEY)
+}
+
+/// Whether a Container unit runs on the host's network (`Network=host`).
+pub fn is_host_network(unit: &QuadletUnit) -> bool {
+    unit.kind == UnitKind::Container
+        && unit.section("Container").is_some_and(|s| {
+            s.entries
+                .iter()
+                .any(|(k, v)| k == "Network" && v.trim() == "host")
+        })
+}
+
+/// Every [`HOST_PORT_KEY`] in a host-network Container unit's `[Unit]`
+/// section. Unparsable values are skipped. Empty for any other unit, even
+/// one carrying the key -- without `Network=host` its `PublishPort=` lines
+/// are what reach the host.
+pub fn host_ports(unit: &QuadletUnit) -> Vec<ExposedPort> {
+    if !is_host_network(unit) {
+        return Vec::new();
+    }
+    unit_ports(unit, HOST_PORT_KEY)
+}
+
+fn unit_ports(unit: &QuadletUnit, key: &str) -> Vec<ExposedPort> {
     if unit.kind != UnitKind::Container {
         return Vec::new();
     }
@@ -244,7 +299,7 @@ pub fn assigned_ports(unit: &QuadletUnit) -> Vec<ExposedPort> {
         .map(|s| {
             s.entries
                 .iter()
-                .filter(|(k, _)| k == ASSIGN_KEY)
+                .filter(|(k, _)| k == key)
                 .filter_map(|(_, v)| parse_exposed(v))
                 .collect()
         })
@@ -259,12 +314,21 @@ pub fn assigned_ports(unit: &QuadletUnit) -> Vec<ExposedPort> {
 /// before its first section. Text already in the desired state is returned
 /// unchanged.
 pub fn set_assigned(raw: &str, port: ExposedPort, present: bool) -> String {
+    set_unit_port(raw, ASSIGN_KEY, port, present)
+}
+
+/// [`set_assigned`] for a host-network container's [`HOST_PORT_KEY`] lines.
+pub fn set_host_port(raw: &str, port: ExposedPort, present: bool) -> String {
+    set_unit_port(raw, HOST_PORT_KEY, port, present)
+}
+
+fn set_unit_port(raw: &str, key: &str, port: ExposedPort, present: bool) -> String {
     use super::iniedit::{
         insert_pos, is_any_header, join_lines, opens_section, section_body, split_lines,
     };
 
     let (mut lines, had_trailing_nl) = split_lines(raw);
-    let line = format!("{ASSIGN_KEY}={}", port.spec());
+    let line = format!("{key}={}", port.spec());
     let Some(h) = lines.iter().position(|l| opens_section(l, ASSIGN_SECTION)) else {
         if present {
             let at = lines
@@ -281,7 +345,7 @@ pub fn set_assigned(raw: &str, port: ExposedPort, present: bool) -> String {
         .filter(|&i| {
             lines[i]
                 .split_once('=')
-                .is_some_and(|(k, v)| k.trim() == ASSIGN_KEY && parse_exposed(v) == Some(port))
+                .is_some_and(|(k, v)| k.trim() == key && parse_exposed(v) == Some(port))
         })
         .collect();
     // Keep the first existing claim as it's written; drop any duplicates.
@@ -755,6 +819,66 @@ mod tests {
         // 80/udp is a different port.
         assert_eq!(
             set_assigned(raw, parse_exposed("80/udp").unwrap(), false),
+            raw
+        );
+    }
+
+    #[test]
+    fn host_network_ports_are_extracted_as_mappings() {
+        let unit = container(
+            "[Unit]\nX-Sooth-HostPort=8080\nX-Sooth-HostPort=5000-5002/udp\nX-Sooth-ServesPort=80\n\n[Container]\nImage=x\nNetwork=host\n",
+        );
+        assert!(is_host_network(&unit));
+        let mappings = extract(std::slice::from_ref(&unit));
+        let got: Vec<_> = mappings
+            .iter()
+            .map(|m| {
+                (
+                    m.host_port.map(|r| (r.start, r.end)),
+                    m.protocol,
+                    m.container_port.as_str(),
+                    m.host_network,
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (Some((8080, 8080)), Protocol::Tcp, "8080", true),
+                (Some((5000, 5002)), Protocol::Udp, "5000-5002", true),
+            ]
+        );
+        // They collide with other units' published ports like any other.
+        let other = mapping("b.container", "8080:80").unwrap();
+        let all = [mappings[0].clone(), other];
+        assert_eq!(conflicts_with(&all[0], &all), ["b.container"]);
+    }
+
+    #[test]
+    fn host_ports_need_network_host() {
+        let unit =
+            container("[Unit]\nX-Sooth-HostPort=8080\n\n[Container]\nImage=x\nNetwork=bridge\n");
+        assert!(!is_host_network(&unit));
+        assert!(host_ports(&unit).is_empty());
+        assert!(extract(std::slice::from_ref(&unit)).is_empty());
+    }
+
+    #[test]
+    fn set_host_port_round_trips() {
+        let raw = "[Container]\nImage=x\nNetwork=host\n";
+        let out = set_host_port(raw, parse_exposed("8080").unwrap(), true);
+        assert_eq!(
+            out,
+            "[Unit]\nX-Sooth-HostPort=8080/tcp\n\n[Container]\nImage=x\nNetwork=host\n"
+        );
+        // Leaves a pod port assignment on the same port alone.
+        let both = set_assigned(&out, parse_exposed("8080").unwrap(), true);
+        assert_eq!(
+            set_host_port(&both, parse_exposed("8080").unwrap(), false),
+            "[Unit]\nX-Sooth-ServesPort=8080/tcp\n\n[Container]\nImage=x\nNetwork=host\n"
+        );
+        assert_eq!(
+            set_host_port(&out, parse_exposed("8080/tcp").unwrap(), false),
             raw
         );
     }

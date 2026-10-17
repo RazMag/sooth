@@ -1,7 +1,7 @@
 use maud::{Markup, html};
 
 use super::detail::{self, DetailCtx};
-use crate::quadlet::QuadletUnit;
+use crate::quadlet::{QuadletUnit, ports};
 use crate::systemd::UnitStatus;
 use crate::web::core::MemberPodPorts;
 
@@ -33,6 +33,18 @@ pub fn detail_page(
                     Some(p) => {
                         super::member_ports_cell_live(unit, status, p.pod, &p.mine, p.published)
                     }
+                    None if ports::is_host_network(unit) => html! {
+                        (super::ports_cell_live(unit, status))
+                        div.cell-secondary.port-route {
+                            span title="Network=host: the container binds the host's ports itself, so its ports are recorded by hand" {
+                                "host network"
+                            }
+                            span.port-route-sep { "·" }
+                            a href="/ports#host-network" {
+                                @if ports::host_ports(unit).is_empty() { "add its ports" } @else { "edit on Ports" }
+                            }
+                        }
+                    },
                     None => super::ports_cell_live(unit, status),
                 },
             ),

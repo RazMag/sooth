@@ -377,6 +377,49 @@ pub async fn assign_pod_port(
     Ok(())
 }
 
+/// Records (`present`) or forgets a port the `Network=host` container
+/// `file_name` listens on, as a `ports::HOST_PORT_KEY` line in its quadlet.
+/// Sooth-only bookkeeping like [`assign_pod_port`]: podman runs the
+/// container unchanged, so it's reloaded, never restarted. A port another
+/// unit also takes is still recorded -- the Ports screen flags the
+/// collision, as it does for `PublishPort=`.
+pub async fn set_host_port(
+    state: &AppState,
+    session: &Session,
+    csrf_token: &str,
+    file_name: &str,
+    port: &str,
+    present: bool,
+) -> Result<(), AppError> {
+    if !auth::csrf::verify(session, csrf_token).await {
+        return Err(AppError::Csrf);
+    }
+    let invalid = |msg: String| AppError::from(crate::quadlet::QuadletError::Validation(msg));
+    let unit = discovery::load_by_name(&state.quadlet_dir, file_name)?;
+    if !ports::is_host_network(&unit) {
+        return Err(invalid(format!(
+            "{file_name} isn't a Network=host container"
+        )));
+    }
+    let port = ports::parse_exposed(port).ok_or_else(|| {
+        invalid(format!(
+            "invalid port '{}' -- expected e.g. 8080, 8080/udp or 8000-8010",
+            port.trim()
+        ))
+    })?;
+    if port.range.start == 0 {
+        return Err(invalid("port 0 isn't a real port".to_string()));
+    }
+    let patched = ports::set_host_port(&unit.raw, port, present);
+    if patched != unit.raw {
+        writer::write_atomic(&state.quadlet_dir, &unit.rel_path(), &patched)?;
+        state.systemd.reload().await?;
+        let _ = state.events.send(DashboardEvent::UnitsChanged);
+        tracing::info!(unit = %file_name, port = %port.spec(), present, "host port recorded");
+    }
+    Ok(())
+}
+
 pub struct ActionOutcome {
     pub unit: QuadletUnit,
     pub status: UnitStatus,
