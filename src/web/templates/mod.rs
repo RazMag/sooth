@@ -28,7 +28,7 @@ use crate::health::Health;
 use crate::hostenv::EnvVar;
 use crate::imageinfo::UpdateCheck;
 use crate::quadlet::autoupdate::AutoUpdateMode;
-use crate::quadlet::ports::{PortMapping, SplitPorts, Why};
+use crate::quadlet::ports::{PortMapping, Protocol, SplitPorts, Why};
 use crate::quadlet::{QuadletUnit, UnitKind};
 use crate::systemd::UnitStatus;
 use crate::web::core;
@@ -1037,7 +1037,35 @@ fn port_list(pills: &[(&PortMapping, Option<String>)], active: bool, key: &str) 
 
 /// One `HOST:CONTAINER` pill of [`ports_summary`]; `extra` ones are hidden
 /// until its "+N more" toggle is checked.
+///
+/// A host-network port (`PortMapping::host_network`) has no container half:
+/// it reads `8080 host`, its tooltip saying where it came from.
 fn port_map(m: &PortMapping, title: Option<&str>, active: bool, extra: bool) -> Markup {
+    if m.host_network {
+        let tip = title.map(str::to_string).unwrap_or_else(|| {
+            ports::host_port_why(
+                &m.file_name,
+                &format!("{}/{}", m.container_port, m.protocol.as_str()),
+            )
+        });
+        return html! {
+            span class={"port-map" @if extra { " port-extra" }} title=(tip) {
+                @match m.host_port {
+                    Some(range) if range.start == range.end && active => {
+                        span data-host-port=(range.start.to_string()) { (range.start) }
+                    }
+                    Some(range) if range.start == range.end => {
+                        span.port-static title="Service not running" { (range.start) }
+                    }
+                    _ => { span.mono { (m.container_port) } }
+                }
+                span.port-dest {
+                    @if m.protocol == Protocol::Udp { "/udp" }
+                    " host"
+                }
+            }
+        };
+    }
     html! {
         span class={"port-map" @if extra { " port-extra" }} title=[title] {
             @match m.host_port {
@@ -1415,6 +1443,27 @@ mod tests {
         assert!(markup.contains("Host variables"));
         assert!(markup.contains("/environment?name=TAG"));
         assert!(!markup.contains("/environment?name=HOME"));
+    }
+
+    #[test]
+    fn host_network_ports_render_without_a_container_half() {
+        let raw = "[Unit]\nX-Sooth-HostPort=8080\nX-Sooth-HostPort=53/udp\n\n[Container]\nImage=x\nNetwork=host\n";
+        let unit = QuadletUnit {
+            file_name: "edge.container".into(),
+            group: String::new(),
+            path: "/tmp/edge.container".into(),
+            kind: UnitKind::Container,
+            sections: crate::quadlet::parser::parse(raw).unwrap(),
+            raw: raw.into(),
+        };
+        let live = ports_summary(&unit, true).into_string();
+        assert!(live.contains(r#"data-host-port="8080""#));
+        assert!(live.contains("/udp host"));
+        assert!(!live.contains(":8080"));
+        assert!(live.contains("runs with Network=host"));
+        let stopped = ports_summary(&unit, false).into_string();
+        assert!(!stopped.contains("data-host-port"));
+        assert!(stopped.contains("port-static"));
     }
 
     #[test]

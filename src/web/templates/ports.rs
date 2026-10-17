@@ -2,8 +2,8 @@ use maud::{Markup, html};
 
 use super::icons::{Icon, icon};
 use super::{
-    NavItem, container_port_label, csrf_input, info_tip, page_header, plain_status_badge, port_why,
-    shell, status_badge,
+    BannerKind, NavItem, banner, container_port_label, csrf_input, info_tip, page_header,
+    plain_status_badge, port_why, shell, status_badge,
 };
 use crate::health::Health;
 use crate::quadlet::naming;
@@ -49,6 +49,14 @@ pub struct PortRow<'a> {
     pub conflicts: Vec<(String, Option<String>)>,
 }
 
+/// A `Network=host` container and the ports recorded for it
+/// (`ports::host_ports`) -- one row of the Ports screen's "Host network"
+/// table, where they're added and removed.
+pub struct HostNet<'a> {
+    pub unit: UnitRef<'a>,
+    pub ports: Vec<ExposedPort>,
+}
+
 /// Just the `<tbody>` rows -- the payload of `GET /ports/rows`. A unit
 /// starting or stopping flips its Host Port cell between a greyed pill and a
 /// live link, but that's driven by `is_active()` at render time and the
@@ -89,10 +97,22 @@ pub fn ports_rows(rows: &[PortRow], csrf: &str, pull_error: Option<(&str, &str)>
                     }
                 }
                 td { (row.mapping.protocol.as_str()) }
-                td { (row.mapping.container_port) }
+                td {
+                    @if row.mapping.host_network {
+                        span.muted title="Network=host: the container listens on the host port itself" { "host network" }
+                    } @else {
+                        (row.mapping.container_port)
+                    }
+                }
                 td {
                     @match &row.members {
-                        None => { a href=(row.owner.href) { (row.owner.file_name) } }
+                        None => {
+                            a href=(row.owner.href) { (row.owner.file_name) }
+                            @if row.mapping.host_network {
+                                " "
+                                (info_tip(&host_port_why(&row.owner.file_name, &row.mapping.container_port)))
+                            }
+                        }
                         Some(targets) => { (pod_targets(row, targets, csrf, pull_error)) }
                     }
                 }
@@ -219,36 +239,149 @@ fn assign_picker(row: &PortRow, targets: &PodTargets, csrf: &str) -> Markup {
     }
 }
 
-pub fn ports_page(rows: &[PortRow], csrf: &str, health: Health) -> Markup {
+/// Why a host-network port is listed -- the tooltip on its Ports screen
+/// row and its Services list pill.
+pub fn host_port_why(file_name: &str, port: &str) -> String {
+    format!(
+        "{file_name} runs with Network=host, so it listens on host port {port} directly. \
+         Recorded by hand on the Ports screen (X-Sooth-HostPort= in its [Unit] section, \
+         which podman ignores)."
+    )
+}
+
+pub fn ports_page(rows: &[PortRow], hosts: &[HostNet], csrf: &str, health: Health) -> Markup {
     let body = html! {
         (page_header("Ports", html! {}))
-        p.page-meta {
-            "Declared " code { "PublishPort=" } " entries across Containers and Pods. "
-            "A pod's ports are shown against the member you assign them to, else the one that declares the container port ("
-            code { "ExposeHostPort=" } " or its image's " code { "EXPOSE" } "), else the pod itself. Hover " span.info-tip { (icon(Icon::Info)) } " to see why."
-        }
-        @if rows.is_empty() {
-            p.empty { "No published ports declared yet." }
-        } @else {
-            div.table-wrap {
-                table.data-table {
-                    thead {
-                        tr {
-                            th { "Host Port" }
-                            th { "Protocol" }
-                            th { "Container Port" }
-                            th { "Container" }
-                            th { "Status" }
+        (ports_content(rows, hosts, csrf, None))
+    };
+    shell("Ports", Some(NavItem::Ports), Some(health), body)
+}
+
+/// Everything below the Ports screen's header -- also the response to
+/// `POST /ports/host`, which swaps it whole so a first host port brings the
+/// table in with it, and a rejected one shows `error` above the form.
+pub fn ports_content(
+    rows: &[PortRow],
+    hosts: &[HostNet],
+    csrf: &str,
+    error: Option<&str>,
+) -> Markup {
+    html! {
+        div #ports-content {
+            p.page-meta {
+                "Declared " code { "PublishPort=" } " entries across Containers and Pods, plus the ports recorded for "
+                code { "Network=host" } " containers. "
+                "A pod's ports are shown against the member you assign them to, else the one that declares the container port ("
+                code { "ExposeHostPort=" } " or its image's " code { "EXPOSE" } "), else the pod itself. Hover " span.info-tip { (icon(Icon::Info)) } " to see why."
+            }
+            @if rows.is_empty() {
+                p.empty { "No published ports declared yet." }
+            } @else {
+                div.table-wrap {
+                    table.data-table {
+                        thead {
+                            tr {
+                                th { "Host Port" }
+                                th { "Protocol" }
+                                th { "Container Port" }
+                                th { "Container" }
+                                th { "Status" }
+                            }
+                        }
+                        tbody id="ports-rows" hx-get="/ports/rows"
+                            hx-trigger="sse:any-status delay:300ms, sse:units-changed delay:300ms"
+                            hx-swap="innerHTML" {
+                            (ports_rows(rows, csrf, None))
                         }
                     }
-                    tbody id="ports-rows" hx-get="/ports/rows"
-                        hx-trigger="sse:any-status delay:300ms, sse:units-changed delay:300ms"
-                        hx-swap="innerHTML" {
-                        (ports_rows(rows, csrf, None))
+                }
+            }
+            @if !hosts.is_empty() {
+                (host_network(hosts, csrf, error))
+            }
+        }
+    }
+}
+
+/// The "Host network" section: each `Network=host` container with the ports
+/// recorded for it, each removable, and a field to add one. A host-network
+/// container has no `PublishPort=` saying which host ports it takes, so
+/// these are the only way its ports reach the table above, the Services
+/// list and its detail page.
+fn host_network(hosts: &[HostNet], csrf: &str, error: Option<&str>) -> Markup {
+    let form_attrs = |m: Markup| {
+        html! {
+            form.inline-form hx-post="/ports/host" hx-target="#ports-content"
+                hx-swap="outerHTML" hx-disabled-elt="find button" {
+                (csrf_input(csrf))
+                (m)
+            }
+        }
+    };
+    html! {
+        h2 #host-network { "Host network" }
+        p.page-meta {
+            "These containers run with " code { "Network=host" } " and bind the host's ports directly, so there is no "
+            code { "PublishPort=" } " to read. Add the ports each one listens on to list them above, on the Services list "
+            "and on its page, and to check them for conflicts. Saved as " code { "X-Sooth-HostPort=" }
+            " in the container's " code { "[Unit]" } " section; podman ignores it, so nothing is restarted."
+        }
+        @if let Some(msg) = error { (banner(BannerKind::Error, msg)) }
+        div.table-wrap {
+            table.data-table {
+                thead {
+                    tr {
+                        th { "Container" }
+                        th { "Status" }
+                        th { "Host Ports" }
+                        th { "Add port" }
+                    }
+                }
+                tbody {
+                    @for h in hosts {
+                        tr {
+                            td { a href=(h.unit.href) { (h.unit.file_name) } }
+                            td { (plain_status_badge(h.unit.status)) }
+                            td {
+                                @if h.ports.is_empty() {
+                                    span.muted { "none recorded" }
+                                } @else {
+                                    span.port-list {
+                                        @for p in &h.ports {
+                                            span.host-port {
+                                                span.mono { (p.spec()) }
+                                                (form_attrs(html! {
+                                                    input type="hidden" name="file_name" value=(h.unit.file_name);
+                                                    input type="hidden" name="port" value=(p.spec());
+                                                    input type="hidden" name="remove" value="1";
+                                                    button.host-port-remove type="submit"
+                                                        title={"Remove " (p.spec())}
+                                                        aria-label={"Remove port " (p.spec()) " from " (h.unit.file_name)} {
+                                                        (icon(Icon::X))
+                                                    }
+                                                }))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            td {
+                                (form_attrs(html! {
+                                    input type="hidden" name="file_name" value=(h.unit.file_name);
+                                    span.host-port-add {
+                                        input.input.input-sm type="text" name="port" required
+                                            placeholder="8080 or 53/udp" autocomplete="off" spellcheck="false"
+                                            pattern="\\s*[0-9]{1,5}(-[0-9]{1,5})?(/(tcp|udp))?\\s*"
+                                            title="A port (8080), a range (8000-8010), optionally /tcp or /udp"
+                                            aria-label={"Port " (h.unit.file_name) " listens on"};
+                                        button.btn.btn-sm type="submit" { (icon(Icon::Plus)) "Add" }
+                                    }
+                                }))
+                            }
+                        }
                     }
                 }
             }
         }
-    };
-    shell("Ports", Some(NavItem::Ports), Some(health), body)
+    }
 }
