@@ -13,7 +13,7 @@ use futures_util::future::BoxFuture;
 use tracing::{info, warn};
 
 use crate::quadlet::UnitKind;
-use crate::quadlet::naming;
+use crate::quadlet::{naming, portnotes};
 use crate::systemd::{self, SystemdError, UnitStatus};
 
 use super::git;
@@ -252,6 +252,24 @@ impl<'a> UnitSync<'a> {
                 warn!(group, unit = %service, "unit removed by git-sync is still stopping; \
                       continuing anyway");
             }
+        }
+    }
+
+    /// Drops sooth's port notes (`portnotes`) for every workload the move
+    /// deleted, so they don't linger for a later unit of the same name. Must
+    /// run *after* the files change: if the move fails, the units are still
+    /// there. A unit that only moved between directories keeps its notes.
+    pub(super) fn forget_removed(&self, quadlet_dir: &Path) {
+        if self.changes.removed.is_empty() {
+            return;
+        }
+        let result = portnotes::update(quadlet_dir, |notes| {
+            for file_name in &self.changes.removed {
+                notes.remove(file_name);
+            }
+        });
+        if let Err(e) = result {
+            warn!(group = self.group, error = %e, "couldn't drop port notes of units removed by git-sync");
         }
     }
 

@@ -14,7 +14,7 @@ use tokio::task::AbortHandle;
 use tracing::{info, warn};
 
 use crate::events::{DashboardEvent, EventSender};
-use crate::quadlet::naming;
+use crate::quadlet::{discovery, naming, portnotes};
 
 use super::units::{UnitControl, UnitSync};
 use super::{GitSyncConfig, GitSyncError, SyncState, SyncStatus, git};
@@ -225,6 +225,7 @@ impl GitSyncManager {
                 UnitSync::plan(self.systemd.as_deref(), group, &target, &before, &after).await;
             units.stop_removed().await;
             git::checkout_branch(&target, &resolved_branch).await?;
+            units.forget_removed(quadlet_dir);
             units.reload_and_apply().await;
         }
 
@@ -367,6 +368,7 @@ impl GitSyncManager {
             .await;
             units.stop_removed().await;
             git::reset_hard(&target, &remote_head).await?;
+            units.forget_removed(quadlet_dir);
             units.reload_and_apply().await;
             Ok(remote_head)
         }
@@ -390,7 +392,7 @@ impl GitSyncManager {
     /// Stops tracking a sync: aborts its poll task, drops the config entry,
     /// and -- when `delete_files` is set -- removes the group directory too,
     /// reusing `quadlet::writer::delete_dir` (the same primitive an ordinary
-    /// group delete uses).
+    /// group delete uses), along with the port notes of every unit in it.
     pub fn remove(
         &self,
         group: &str,
@@ -409,8 +411,23 @@ impl GitSyncManager {
             .map_err(|e| GitSyncError::Failed(format!("failed to save config: {e}")))?;
 
         if delete_files {
+            let inside = format!("{group}/");
+            let doomed: Vec<String> = discovery::load_all(quadlet_dir)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|u| u.group == group || u.group.starts_with(&inside))
+                .map(|u| u.file_name)
+                .collect();
             crate::quadlet::writer::delete_dir(quadlet_dir, group)
                 .map_err(|e| GitSyncError::Failed(e.to_string()))?;
+            let forgotten = portnotes::update(quadlet_dir, |notes| {
+                for file_name in &doomed {
+                    notes.remove(file_name);
+                }
+            });
+            if let Err(e) = forgotten {
+                warn!(group, error = %e, "couldn't drop port notes of the removed sync's units");
+            }
         }
         info!(group, delete_files, "git-sync removed");
         let _ = self.events.send(DashboardEvent::GitSyncChanged);
@@ -599,6 +616,7 @@ async fn attempt(
                 return;
             }
             info!(group = %config.group, commit = %remote, "git-sync updated");
+            units.forget_removed(quadlet_dir);
             units.reload_and_apply().await;
             set_state(status, SyncState::UpToDate { commit: remote });
             let _ = events.send(DashboardEvent::GitSyncChanged);
@@ -835,10 +853,20 @@ mod tests {
         .await
         .unwrap();
 
+        // Port notes for a unit in the sync and one outside it.
+        std::fs::write(
+            quadlet_dir.path().join("edge.container"),
+            "[Container]\nImage=x\n",
+        )
+        .unwrap();
+        note_ports(quadlet_dir.path(), &["web.container", "edge.container"]);
+
         mgr.remove("synced", quadlet_dir.path(), true).unwrap();
 
         assert!(mgr.snapshot().is_empty());
         assert!(!quadlet_dir.path().join("synced").exists());
+        let notes = portnotes::load(quadlet_dir.path());
+        assert_eq!(notes.keys().collect::<Vec<_>>(), ["edge.container"]);
         assert!(matches!(
             mgr.sync_now("synced"),
             Err(GitSyncError::NotFound(_))
@@ -1040,6 +1068,43 @@ mod tests {
             ]
         );
         assert!(!quadlet_dir.path().join("synced/old.container").exists());
+    }
+
+    /// Records a pod port assignment for each of `files` in sooth's port
+    /// notes, as the Ports screen would.
+    fn note_ports(quadlet_dir: &Path, files: &[&str]) {
+        portnotes::update(quadlet_dir, |notes| {
+            for file in files {
+                let port = crate::quadlet::ports::parse_exposed("80").unwrap();
+                notes.entry(file.to_string()).or_default().serves.push(port);
+            }
+        })
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn poll_drops_the_port_notes_of_removed_units_only() {
+        let (origin, quadlet_dir, _units, mgr, _config_dir) = synced_with_units().await;
+        note_ports(quadlet_dir.path(), &["old.container", "web.container"]);
+
+        delete_old_and_edit_the_rest(origin.path());
+        // A unit moved between directories keeps its notes too.
+        std::fs::create_dir(origin.path().join("sub")).unwrap();
+        std::fs::rename(
+            origin.path().join("idle.container"),
+            origin.path().join("sub/idle.container"),
+        )
+        .unwrap();
+        note_ports(quadlet_dir.path(), &["idle.container"]);
+        commit_all(origin.path(), "update");
+        mgr.sync_now("synced").unwrap();
+        wait_for_commit(&mgr, &head(origin.path())).await;
+
+        let notes = portnotes::load(quadlet_dir.path());
+        assert_eq!(
+            notes.keys().collect::<Vec<_>>(),
+            ["idle.container", "web.container"]
+        );
     }
 
     #[tokio::test]
