@@ -32,14 +32,14 @@ CSS/JS embedded, so it runs from any directory.
 - **Ports** — every declared `PublishPort=` across Containers and Pods, with
   conflicting host ports flagged. A pod's port can be assigned to the member
   container behind it (hover a port's container to see why it's matched
-  where it is); an assignment is recorded as an
-  `X-Sooth-ServesPort=` line in the container's `[Unit]` section, which
-  podman and systemd ignore, so it only changes what sooth displays. A pod
-  member's detail page lists the pod ports that reach it. A `Network=host`
-  container has no `PublishPort=` to read, so the screen's "Host network"
-  table lets you record the ports it listens on (`X-Sooth-HostPort=`, also
-  ignored by podman); they then show here, on the Services list and on its
-  detail page, and are checked for conflicts like any published port.
+  where it is). A pod member's detail page lists the pod ports that reach
+  it. A `Network=host` container has no `PublishPort=` to read, so the
+  screen's "Host network" table lets you record the ports it listens on;
+  they then show here, on the Services list and on its detail page, and are
+  checked for conflicts like any published port. Both are saved by sooth in
+  `.sooth/port-notes.toml` in the quadlet directory, not in the quadlet
+  files, so they only change what sooth displays, and a git sync never
+  overwrites them.
 - **Pods and Directories layouts** — every list table is a branch tree you
   can switch between two layouts (remembered per browser).
   - **Pods** nests a pod's units under its row: its member containers
