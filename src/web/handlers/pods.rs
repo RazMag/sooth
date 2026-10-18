@@ -1261,6 +1261,7 @@ mod tests {
                     .collect(),
             }],
             raw: String::new(),
+            port_notes: Default::default(),
         }
     }
 

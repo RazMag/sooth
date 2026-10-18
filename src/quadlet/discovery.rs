@@ -4,7 +4,7 @@ use tokio::sync::broadcast;
 use tracing::{info, warn};
 
 use super::model::{QuadletUnit, UnitKind};
-use super::{QuadletError, naming, parser};
+use super::{QuadletError, naming, parser, portnotes};
 
 const EXTENSIONS: &[&str] = &[
     "container",
@@ -131,9 +131,10 @@ pub fn ensure_dir(dir: &Path) -> Result<(), QuadletError> {
 pub fn load_all(dir: &Path) -> Result<Vec<QuadletUnit>, QuadletError> {
     let mut paths = Vec::new();
     walk_quadlet_files(dir, &mut paths)?;
+    let notes = portnotes::load(dir);
     let mut units = Vec::new();
     for path in paths {
-        match load_one(dir, &path) {
+        match load_one(dir, &path, &notes) {
             Ok(unit) => units.push(unit),
             Err(e) => {
                 warn!(file = %path.display(), error = %e, "skipping unparsable quadlet file")
@@ -146,7 +147,11 @@ pub fn load_all(dir: &Path) -> Result<Vec<QuadletUnit>, QuadletError> {
     Ok(units)
 }
 
-fn load_one(root: &Path, path: &Path) -> Result<QuadletUnit, QuadletError> {
+fn load_one(
+    root: &Path,
+    path: &Path,
+    notes: &portnotes::Notes,
+) -> Result<QuadletUnit, QuadletError> {
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -161,6 +166,7 @@ fn load_one(root: &Path, path: &Path) -> Result<QuadletUnit, QuadletError> {
     let sections = parser::parse(&raw)?;
     Ok(QuadletUnit {
         group: group_of(root, path),
+        port_notes: notes.get(&file_name).cloned().unwrap_or_default(),
         file_name,
         path: path.to_path_buf(),
         kind,
@@ -193,7 +199,7 @@ pub fn find_in_tree(dir: &Path, file_name: &str) -> Option<PathBuf> {
 pub fn load_by_name(dir: &Path, file_name: &str) -> Result<QuadletUnit, QuadletError> {
     let path = find_in_tree(dir, file_name)
         .ok_or_else(|| QuadletError::NotFound(file_name.to_string()))?;
-    load_one(dir, &path)
+    load_one(dir, &path, &portnotes::load(dir))
 }
 
 /// Whether the group directory `<dir>/<group>` contains at least one quadlet
