@@ -113,6 +113,9 @@ pub struct QuadletUnit {
     /// text rather than fully re-serializing `sections`, so comments and
     /// formatting the app didn't touch survive untouched.
     pub raw: String,
+    /// Sooth's own port bookkeeping for this unit, from the sidecar store
+    /// (`portnotes`), not from the file. Attached by `discovery` on load.
+    pub port_notes: super::portnotes::PortNotes,
 }
 
 impl QuadletUnit {

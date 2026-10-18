@@ -122,6 +122,7 @@ mod tests {
             kind: crate::quadlet::UnitKind::Container,
             sections: Vec::new(),
             raw: String::new(),
+            port_notes: Default::default(),
         }
     }
 

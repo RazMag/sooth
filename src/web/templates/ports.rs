@@ -198,9 +198,8 @@ fn pod_targets(
 }
 
 /// Which container a pod port reaches, as a quiet inline control posted on
-/// change to `/ports/assign`, which records the choice in that member's
-/// quadlet as sooth-only bookkeeping (`ports::ASSIGN_KEY` -- podman ignores
-/// it). A native `<select>` laid transparently over a label that reads
+/// change to `/ports/assign`, which records the choice in sooth's own
+/// `portnotes` store, not the quadlet (podman never sees it). A native `<select>` laid transparently over a label that reads
 /// differently per state: "assigned" (accent) once a member is picked by
 /// hand, "auto" while matched automatically, and a dashed "assign…" while
 /// the port sits on the pod with no member declaring it.
@@ -225,7 +224,7 @@ fn assign_picker(row: &PortRow, targets: &PodTargets, csrf: &str) -> Markup {
             input type="hidden" name="pod" value=(row.owner.file_name);
             input type="hidden" name="port" value=(port.spec());
             span class={"port-assign-control " (state)}
-                title="Pick the container this pod port reaches. Saved as X-Sooth-ServesPort= in that container's quadlet; only sooth reads it, podman runs the pod unchanged." {
+                title="Pick the container this pod port reaches. Saved by sooth, not in the quadlet; podman runs the pod unchanged." {
                 span.port-assign-label { (label) }
                 (icon(Icon::ChevronDown))
                 select name="member" aria-label={"Container serving " (container_port_label(row.mapping))} {
@@ -244,8 +243,7 @@ fn assign_picker(row: &PortRow, targets: &PodTargets, csrf: &str) -> Markup {
 pub fn host_port_why(file_name: &str, port: &str) -> String {
     format!(
         "{file_name} runs with Network=host, so it listens on host port {port} directly. \
-         Recorded by hand on the Ports screen (X-Sooth-HostPort= in its [Unit] section, \
-         which podman ignores)."
+         Recorded by hand on the Ports screen (saved by sooth, not in the quadlet)."
     )
 }
 
@@ -323,8 +321,8 @@ fn host_network(hosts: &[HostNet], csrf: &str, error: Option<&str>) -> Markup {
         p.page-meta {
             "These containers run with " code { "Network=host" } " and bind the host's ports directly, so there is no "
             code { "PublishPort=" } " to read. Add the ports each one listens on to list them above, on the Services list "
-            "and on its page, and to check them for conflicts. Saved as " code { "X-Sooth-HostPort=" }
-            " in the container's " code { "[Unit]" } " section; podman ignores it, so nothing is restarted."
+            "and on its page, and to check them for conflicts. Sooth saves them itself, not in the "
+            "quadlet, so podman never sees them and nothing is restarted."
         }
         @if let Some(msg) = error { (banner(BannerKind::Error, msg)) }
         div.table-wrap {

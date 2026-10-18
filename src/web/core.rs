@@ -18,7 +18,9 @@ use crate::imageinfo;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
 use crate::quadlet::ports::{self, ExposedPort, MemberPorts, SplitPorts};
 use crate::quadlet::refs::{self, MissingRefs};
-use crate::quadlet::{QuadletUnit, UnitKind, containerref, discovery, install, naming, writer};
+use crate::quadlet::{
+    QuadletUnit, UnitKind, containerref, discovery, install, naming, portnotes, writer,
+};
 use crate::systemd::UnitStatus;
 
 /// The section a unit belongs to, and therefore the URL prefix all of its
@@ -313,10 +315,10 @@ pub async fn member_pod_ports<'a>(
 /// Assigns the container port `port` that `pod_file` publishes to one of
 /// its members (`member`), or clears its assignment (`None`) so the port is
 /// matched by `ExposeHostPort=` / image `EXPOSE` again. Exclusive: every
-/// other member's claim on that exact port is dropped. Only sooth's own
-/// `ports::ASSIGN_KEY` lines change, so podman runs the pod exactly as
-/// before -- which is why nothing is restarted, just reloaded so systemd's
-/// copy of the generated units matches the files.
+/// other member's claim on that exact port is dropped. Saved in sooth's own
+/// `portnotes` store, not the quadlets, so podman runs the pod exactly as
+/// before and nothing is reloaded or restarted -- and a git sync of the
+/// members' group can't undo it.
 pub async fn assign_pod_port(
     state: &AppState,
     session: &Session,
@@ -356,21 +358,14 @@ pub async fn assign_pod_port(
     {
         return Err(invalid(format!("{m} isn't a container in {pod_file}")));
     }
-    // The chosen member first: if a later write fails, the port is briefly
-    // claimed twice rather than not at all.
-    let mut ordered = members;
-    ordered.sort_by_key(|u| Some(u.file_name.as_str()) != member);
-    let mut changed = false;
-    for unit in ordered {
-        let claim = Some(unit.file_name.as_str()) == member;
-        let patched = ports::set_assigned(&unit.raw, port, claim);
-        if patched != unit.raw {
-            writer::write_atomic(&state.quadlet_dir, &unit.rel_path(), &patched)?;
-            changed = true;
+    let changed = portnotes::update(&state.quadlet_dir, |notes| {
+        for unit in &members {
+            let claim = Some(unit.file_name.as_str()) == member;
+            let entry = notes.entry(unit.file_name.clone()).or_default();
+            portnotes::set_port(&mut entry.serves, port, claim);
         }
-    }
+    })?;
     if changed {
-        state.systemd.reload().await?;
         let _ = state.events.send(DashboardEvent::UnitsChanged);
         tracing::info!(pod = %pod_file, port = %port.spec(), ?member, "pod port assigned");
     }
@@ -378,9 +373,9 @@ pub async fn assign_pod_port(
 }
 
 /// Records (`present`) or forgets a port the `Network=host` container
-/// `file_name` listens on, as a `ports::HOST_PORT_KEY` line in its quadlet.
-/// Sooth-only bookkeeping like [`assign_pod_port`]: podman runs the
-/// container unchanged, so it's reloaded, never restarted. A port another
+/// `file_name` listens on, in sooth's own `portnotes` store. Sooth-only
+/// bookkeeping like [`assign_pod_port`]: podman runs the container
+/// unchanged, so nothing is reloaded or restarted. A port another
 /// unit also takes is still recorded -- the Ports screen flags the
 /// collision, as it does for `PublishPort=`.
 pub async fn set_host_port(
@@ -410,10 +405,11 @@ pub async fn set_host_port(
     if port.range.start == 0 {
         return Err(invalid("port 0 isn't a real port".to_string()));
     }
-    let patched = ports::set_host_port(&unit.raw, port, present);
-    if patched != unit.raw {
-        writer::write_atomic(&state.quadlet_dir, &unit.rel_path(), &patched)?;
-        state.systemd.reload().await?;
+    let changed = portnotes::update(&state.quadlet_dir, |notes| {
+        let entry = notes.entry(unit.file_name.clone()).or_default();
+        portnotes::set_port(&mut entry.host, port, present);
+    })?;
+    if changed {
         let _ = state.events.send(DashboardEvent::UnitsChanged);
         tracing::info!(unit = %file_name, port = %port.spec(), present, "host port recorded");
     }
@@ -661,6 +657,13 @@ pub async fn delete_unit(
     }
     let rel_path = discovery::load_by_name(state.quadlet_dir.as_path(), file_name)?.rel_path();
     writer::delete(&state.quadlet_dir, &rel_path)?;
+    // Best-effort: a leftover entry is harmless, just inherited by a later
+    // unit of the same name.
+    if let Err(e) = portnotes::update(&state.quadlet_dir, |notes| {
+        notes.remove(file_name);
+    }) {
+        tracing::warn!(file = %rel_path, error = %e, "couldn't drop the unit's port notes");
+    }
     state.systemd.reload().await?;
     let _ = state.events.send(DashboardEvent::UnitsChanged);
     tracing::info!(file = %rel_path, "quadlet deleted");

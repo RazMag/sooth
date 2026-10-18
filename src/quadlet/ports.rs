@@ -3,12 +3,12 @@
 //! D-Bus, no filesystem, just `&[QuadletUnit]` in, structured data out.
 //!
 //! Also owns which pod member a pod-published port is shown against, and
-//! why ([`Why`]): a manual assignment ([`ASSIGN_KEY`], see [`set_assigned`])
-//! overrides the member's declared ports ([`declared_exposed`], then its
-//! image's `EXPOSE`). And the ports a `Network=host` container listens on,
-//! which have no `PublishPort=` to read: recorded by hand
-//! ([`HOST_PORT_KEY`], see [`set_host_port`]) and listed by [`extract`]
-//! like any published port.
+//! why ([`Why`]): a manual assignment ([`assigned_ports`]) overrides the
+//! member's declared ports ([`declared_exposed`], then its image's
+//! `EXPOSE`). And the ports a `Network=host` container listens on, which
+//! have no `PublishPort=` to read: recorded by hand ([`host_ports`]) and
+//! listed by [`extract`] like any published port. Both hand-kept lists come
+//! from the unit's `port_notes` (see `super::portnotes`), never its file.
 
 use super::model::{QuadletUnit, UnitKind};
 
@@ -38,10 +38,11 @@ pub struct PortMapping {
     pub host_port: Option<HostPortRange>,
     pub protocol: Protocol,
     pub container_port: String,
-    /// The original `PublishPort=` value, kept for display.
+    /// The original `PublishPort=` value, kept for display (for a
+    /// host-network port, a description of it).
     pub raw: String,
     /// A port a `Network=host` container listens on straight on the host
-    /// ([`HOST_PORT_KEY`]), not a `PublishPort=`: `host_port` and
+    /// ([`host_ports`]), not a `PublishPort=`: `host_port` and
     /// `container_port` are the same port.
     pub host_network: bool,
 }
@@ -85,7 +86,7 @@ pub fn extract(units: &[QuadletUnit]) -> Vec<PortMapping> {
             host_port: Some(p.range),
             protocol: p.protocol,
             container_port: p.range_str(),
-            raw: format!("{HOST_PORT_KEY}={}", p.spec()),
+            raw: format!("host network: {}", p.spec()),
             host_network: true,
         }));
     }
@@ -219,8 +220,8 @@ pub fn declared_exposed(unit: &QuadletUnit) -> Vec<ExposedPort> {
 
 impl ExposedPort {
     /// The canonical `80/tcp` / `8000-8010/udp` form -- what
-    /// [`set_assigned`] writes, and what the Ports screen's assign picker
-    /// posts back.
+    /// `portnotes` stores, and what the Ports screen's assign picker posts
+    /// back.
     pub fn spec(self) -> String {
         format!("{}/{}", self.range_str(), self.protocol.as_str())
     }
@@ -245,29 +246,13 @@ impl ExposedPort {
     }
 }
 
-/// The section and key a pod member's quadlet carries to claim one of its
-/// pod's published container ports by hand, e.g.
-/// `X-Sooth-ServesPort=80/tcp` in `[Unit]`. Purely sooth's bookkeeping:
-/// systemd ignores `X-` keys and the quadlet generator copies `[Unit]`
-/// through verbatim, so podman behaves exactly as without it. (It can't go
-/// in `[Container]`, whose unknown keys the generator rejects.) Keeping it
-/// in the member's own file means it follows the unit through moves,
-/// renames of its group, and git sync with nothing else to track.
-pub const ASSIGN_SECTION: &str = "Unit";
-pub const ASSIGN_KEY: &str = "X-Sooth-ServesPort";
-
-/// The `[Unit]` key a `Network=host` container's quadlet records a port it
-/// listens on with, e.g. `X-Sooth-HostPort=8080/tcp`. Such a container
-/// shares the host's network, so there's no `PublishPort=` saying which host
-/// ports it takes; this is how sooth lists them anyway (and checks them for
-/// collisions). Sooth-only bookkeeping exactly like [`ASSIGN_KEY`]: podman
-/// and systemd ignore it.
-pub const HOST_PORT_KEY: &str = "X-Sooth-HostPort";
-
-/// Every [`ASSIGN_KEY`] in a Container unit's `[Unit]` section. Unparsable
-/// values are skipped. Empty for every other kind.
+/// The pod ports assigned to a Container unit by hand (its `port_notes`).
+/// Empty for every other kind.
 pub fn assigned_ports(unit: &QuadletUnit) -> Vec<ExposedPort> {
-    unit_ports(unit, ASSIGN_KEY)
+    if unit.kind != UnitKind::Container {
+        return Vec::new();
+    }
+    unit.port_notes.serves.clone()
 }
 
 /// Whether a Container unit runs on the host's network (`Network=host`).
@@ -280,91 +265,15 @@ pub fn is_host_network(unit: &QuadletUnit) -> bool {
         })
 }
 
-/// Every [`HOST_PORT_KEY`] in a host-network Container unit's `[Unit]`
-/// section. Unparsable values are skipped. Empty for any other unit, even
-/// one carrying the key -- without `Network=host` its `PublishPort=` lines
-/// are what reach the host.
+/// The ports recorded by hand (its `port_notes`) for a host-network
+/// Container unit. Empty for any other unit, even one with ports recorded
+/// -- without `Network=host` its `PublishPort=` lines are what reach the
+/// host.
 pub fn host_ports(unit: &QuadletUnit) -> Vec<ExposedPort> {
     if !is_host_network(unit) {
         return Vec::new();
     }
-    unit_ports(unit, HOST_PORT_KEY)
-}
-
-fn unit_ports(unit: &QuadletUnit, key: &str) -> Vec<ExposedPort> {
-    if unit.kind != UnitKind::Container {
-        return Vec::new();
-    }
-    unit.section(ASSIGN_SECTION)
-        .map(|s| {
-            s.entries
-                .iter()
-                .filter(|(k, _)| k == key)
-                .filter_map(|(_, v)| parse_exposed(v))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Adds (`present`) or removes the [`ASSIGN_KEY`] line claiming `port` in
-/// `raw`'s `[Unit]` section, patching the text so every other line survives
-/// byte-for-byte. Lines are matched by parsed value, so a hand-written
-/// `80` counts as `80/tcp`; a new line is written in the canonical
-/// [`ExposedPort::spec`] form. A file with no `[Unit]` section gets one
-/// before its first section. Text already in the desired state is returned
-/// unchanged.
-pub fn set_assigned(raw: &str, port: ExposedPort, present: bool) -> String {
-    set_unit_port(raw, ASSIGN_KEY, port, present)
-}
-
-/// [`set_assigned`] for a host-network container's [`HOST_PORT_KEY`] lines.
-pub fn set_host_port(raw: &str, port: ExposedPort, present: bool) -> String {
-    set_unit_port(raw, HOST_PORT_KEY, port, present)
-}
-
-fn set_unit_port(raw: &str, key: &str, port: ExposedPort, present: bool) -> String {
-    use super::iniedit::{
-        insert_pos, is_any_header, join_lines, opens_section, section_body, split_lines,
-    };
-
-    let (mut lines, had_trailing_nl) = split_lines(raw);
-    let line = format!("{key}={}", port.spec());
-    let Some(h) = lines.iter().position(|l| opens_section(l, ASSIGN_SECTION)) else {
-        if present {
-            let at = lines
-                .iter()
-                .position(|l| is_any_header(l))
-                .unwrap_or(lines.len());
-            lines.splice(at..at, [format!("[{ASSIGN_SECTION}]"), line, String::new()]);
-        }
-        return join_lines(lines, had_trailing_nl);
-    };
-    let body = section_body(&lines, h);
-    let hits: Vec<usize> = body
-        .clone()
-        .filter(|&i| {
-            lines[i]
-                .split_once('=')
-                .is_some_and(|(k, v)| k.trim() == key && parse_exposed(v) == Some(port))
-        })
-        .collect();
-    // Keep the first existing claim as it's written; drop any duplicates.
-    let keep = usize::from(present);
-    for &i in hits.iter().skip(keep).rev() {
-        lines.remove(i);
-    }
-    if present && hits.is_empty() {
-        let at = insert_pos(&lines, body);
-        lines.insert(at, line);
-    } else if !present && !hits.is_empty() {
-        // Removing the last claim from a `[Unit]` it leaves empty -- one
-        // added for it -- drops the header and its blank separator too.
-        let body = section_body(&lines, h);
-        if lines[body.clone()].iter().all(|l| l.trim().is_empty()) {
-            lines.drain(h..body.end);
-        }
-    }
-    join_lines(lines, had_trailing_nl)
+    unit.port_notes.host.clone()
 }
 
 /// Whether any of `exposed` covers `mapping`'s container port on the same
@@ -394,7 +303,7 @@ pub struct MemberPorts {
 /// the order [`MemberPorts::why`] checks them in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Why {
-    /// Assigned by hand ([`ASSIGN_KEY`]).
+    /// Assigned by hand ([`assigned_ports`]).
     Assigned,
     /// The member's own `ExposeHostPort=`.
     Declared,
@@ -518,6 +427,7 @@ pub fn conflicts_with(mapping: &PortMapping, all: &[PortMapping]) -> Vec<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::quadlet::portnotes::PortNotes;
 
     fn mapping(file: &str, raw: &str) -> Option<PortMapping> {
         parse_publish_port(file, raw)
@@ -733,6 +643,7 @@ mod tests {
                 .collect(),
             }],
             raw: String::new(),
+            port_notes: PortNotes::default(),
         };
         assert_eq!(
             declared_exposed(&unit),
@@ -743,7 +654,7 @@ mod tests {
         );
     }
 
-    fn container(raw: &str) -> QuadletUnit {
+    fn container(raw: &str, port_notes: PortNotes) -> QuadletUnit {
         QuadletUnit {
             file_name: "a.container".into(),
             group: String::new(),
@@ -751,83 +662,37 @@ mod tests {
             kind: UnitKind::Container,
             sections: crate::quadlet::parser::parse(raw).unwrap(),
             raw: raw.into(),
+            port_notes,
         }
     }
 
+    fn ports(list: &[&str]) -> Vec<ExposedPort> {
+        list.iter().map(|s| parse_exposed(s).unwrap()).collect()
+    }
+
     #[test]
-    fn assigned_ports_reads_unit_section_key() {
+    fn assigned_ports_come_from_port_notes_not_the_file() {
+        let notes = PortNotes {
+            serves: ports(&["80", "53/udp"]),
+            ..PortNotes::default()
+        };
+        let unit = container("[Container]\nImage=x\n", notes);
+        assert_eq!(assigned_ports(&unit), ports(&["80/tcp", "53/udp"]));
+        // The `[Unit]` key 0.6.0 wrote is no longer read.
         let unit = container(
-            "[Unit]\nX-Sooth-ServesPort=80\nX-Sooth-ServesPort=53/udp\nX-Sooth-ServesPort=bad\n\n[Container]\nImage=x\n",
+            "[Unit]\nX-Sooth-ServesPort=80\n\n[Container]\nImage=x\n",
+            PortNotes::default(),
         );
-        assert_eq!(
-            assigned_ports(&unit),
-            [
-                parse_exposed("80/tcp").unwrap(),
-                parse_exposed("53/udp").unwrap()
-            ]
-        );
-        // Only `[Unit]` counts.
-        let unit = container("[Container]\nImage=x\n\n[Service]\nX-Sooth-ServesPort=80\n");
         assert!(assigned_ports(&unit).is_empty());
     }
 
     #[test]
-    fn set_assigned_adds_into_existing_unit_section() {
-        let raw = "# web\n[Unit]\nDescription=w\n\n[Container]\nImage=x\n";
-        let out = set_assigned(raw, parse_exposed("80").unwrap(), true);
-        assert_eq!(
-            out,
-            "# web\n[Unit]\nDescription=w\nX-Sooth-ServesPort=80/tcp\n\n[Container]\nImage=x\n"
-        );
-        // Idempotent.
-        assert_eq!(
-            set_assigned(&out, parse_exposed("80/tcp").unwrap(), true),
-            out
-        );
-        // And reversible.
-        assert_eq!(set_assigned(&out, parse_exposed("80").unwrap(), false), raw);
-    }
-
-    #[test]
-    fn set_assigned_creates_unit_section_before_the_first_one() {
-        let raw = "# web\n[Container]\nImage=x\n";
-        let out = set_assigned(raw, parse_exposed("8000-8010/udp").unwrap(), true);
-        assert_eq!(
-            out,
-            "# web\n[Unit]\nX-Sooth-ServesPort=8000-8010/udp\n\n[Container]\nImage=x\n"
-        );
-        assert_eq!(set_assigned(raw, parse_exposed("80").unwrap(), false), raw);
-        // Clearing it again drops the section it was given.
-        assert_eq!(
-            set_assigned(&out, parse_exposed("8000-8010/udp").unwrap(), false),
-            raw
-        );
-    }
-
-    #[test]
-    fn set_assigned_matches_by_value_and_leaves_other_claims() {
-        let raw = "[Unit]\nX-Sooth-ServesPort=80\nX-Sooth-ServesPort=443/tcp\nX-Sooth-ServesPort=80/tcp\n[Container]\nImage=x\n";
-        // A hand-written `80` is kept as written; its duplicate goes.
-        assert_eq!(
-            set_assigned(raw, parse_exposed("80/tcp").unwrap(), true),
-            "[Unit]\nX-Sooth-ServesPort=80\nX-Sooth-ServesPort=443/tcp\n[Container]\nImage=x\n"
-        );
-        assert_eq!(
-            set_assigned(raw, parse_exposed("80").unwrap(), false),
-            "[Unit]\nX-Sooth-ServesPort=443/tcp\n[Container]\nImage=x\n"
-        );
-        // 80/udp is a different port.
-        assert_eq!(
-            set_assigned(raw, parse_exposed("80/udp").unwrap(), false),
-            raw
-        );
-    }
-
-    #[test]
     fn host_network_ports_are_extracted_as_mappings() {
-        let unit = container(
-            "[Unit]\nX-Sooth-HostPort=8080\nX-Sooth-HostPort=5000-5002/udp\nX-Sooth-ServesPort=80\n\n[Container]\nImage=x\nNetwork=host\n",
-        );
+        let notes = PortNotes {
+            serves: ports(&["80"]),
+            host: ports(&["8080", "5000-5002/udp"]),
+        };
+        let unit = container("[Container]\nImage=x\nNetwork=host\n", notes);
         assert!(is_host_network(&unit));
         let mappings = extract(std::slice::from_ref(&unit));
         let got: Vec<_> = mappings
@@ -856,31 +721,14 @@ mod tests {
 
     #[test]
     fn host_ports_need_network_host() {
-        let unit =
-            container("[Unit]\nX-Sooth-HostPort=8080\n\n[Container]\nImage=x\nNetwork=bridge\n");
+        let notes = PortNotes {
+            host: ports(&["8080"]),
+            ..PortNotes::default()
+        };
+        let unit = container("[Container]\nImage=x\nNetwork=bridge\n", notes);
         assert!(!is_host_network(&unit));
         assert!(host_ports(&unit).is_empty());
         assert!(extract(std::slice::from_ref(&unit)).is_empty());
-    }
-
-    #[test]
-    fn set_host_port_round_trips() {
-        let raw = "[Container]\nImage=x\nNetwork=host\n";
-        let out = set_host_port(raw, parse_exposed("8080").unwrap(), true);
-        assert_eq!(
-            out,
-            "[Unit]\nX-Sooth-HostPort=8080/tcp\n\n[Container]\nImage=x\nNetwork=host\n"
-        );
-        // Leaves a pod port assignment on the same port alone.
-        let both = set_assigned(&out, parse_exposed("8080").unwrap(), true);
-        assert_eq!(
-            set_host_port(&both, parse_exposed("8080").unwrap(), false),
-            "[Unit]\nX-Sooth-ServesPort=8080/tcp\n\n[Container]\nImage=x\nNetwork=host\n"
-        );
-        assert_eq!(
-            set_host_port(&out, parse_exposed("8080/tcp").unwrap(), false),
-            raw
-        );
     }
 
     #[test]

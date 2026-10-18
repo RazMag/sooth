@@ -8,6 +8,7 @@ pub mod install;
 pub mod model;
 pub mod naming;
 pub mod parser;
+pub mod portnotes;
 pub mod ports;
 pub mod refs;
 pub mod writer;
