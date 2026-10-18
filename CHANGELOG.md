@@ -19,6 +19,13 @@ All notable changes to sooth are documented here. The format follows
   and removed by a git sync, or removed along with its git sync. Lines
   written by 0.6.0 or 0.6.1 are no longer read: assign those ports again on
   the Ports screen, and delete the old lines if you like.
+- **A container you stop no longer shows as failed.** A container that
+  takes longer than podman's stop timeout to shut down (or ignores SIGTERM)
+  is killed, exits with status 137, and systemd marks it failed. When sooth
+  stops a unit and the stop leaves it failed, sooth now resets it to
+  inactive. The exit status is still in the unit's log. A unit that crashes
+  on its own still shows as failed. Containers already showing as failed
+  stay that way until you start them again.
 
 ## [0.6.1] - 2026-10-17
 
