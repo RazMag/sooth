@@ -9,7 +9,8 @@
 // Escape, or once the summary scrolls out of view. With JS off the panel
 // still shows (just clipped) -- an acceptable progressive-enhancement fallback.
 //
-// A panel opens below its summary unless it doesn't fit there and there's
+// A panel is right-aligned to its summary (left-aligned for `.menu-start`)
+// and opens below it unless it doesn't fit there and there's
 // more room above (a row near the bottom of a long table), in which case it
 // opens upward; if it fits neither way it's capped to the larger side and
 // scrolls. The row kebab's nested "move to group" picker flips the same way.
@@ -40,10 +41,17 @@ export function initMenus() {
     if (!panel) return;
     const r = menu.getBoundingClientRect();
     panel.style.position = "fixed";
-    panel.style.left = "auto";
-    // Right-aligned to the summary, but never past the viewport's right edge
-    // (the summary itself can be scrolled off it in a wide table).
-    panel.style.right = `${Math.round(Math.max(window.innerWidth - r.right, EDGE))}px`;
+    if (menu.classList.contains("menu-start")) {
+      // Left-aligned instead (a badge in the name column), likewise kept
+      // off the viewport's left edge.
+      panel.style.right = "auto";
+      panel.style.left = `${Math.round(Math.max(r.left, EDGE))}px`;
+    } else {
+      panel.style.left = "auto";
+      // Right-aligned to the summary, but never past the viewport's right
+      // edge (the summary itself can be scrolled off it in a wide table).
+      panel.style.right = `${Math.round(Math.max(window.innerWidth - r.right, EDGE))}px`;
+    }
     // Measure at natural height before choosing a side.
     panel.style.maxHeight = "";
     panel.style.overflowY = "";

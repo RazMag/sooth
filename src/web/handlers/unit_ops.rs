@@ -20,6 +20,7 @@ use crate::imageinfo;
 use crate::quadlet::autoupdate::AutoUpdateMode;
 use crate::quadlet::{UnitKind, discovery, refs};
 use crate::web::templates::ImageUpdateView;
+use crate::web::templates::imagetags::BadgeNote;
 use crate::web::{core, templates};
 
 #[derive(Deserialize)]
@@ -223,15 +224,70 @@ pub async fn image_update_check(
     Path(file_name): Path<String>,
 ) -> Result<maud::Markup, FragmentError> {
     let (unit, image) = update_target(&state, &file_name)?;
-    let check = imageinfo::check_update(&image).await;
+    // A pinned container's newer tags are re-listed alongside: the row's
+    // badge comes back out-of-band, so the open menu stays open.
+    let (check, tags) = tokio::join!(
+        imageinfo::check_update(&image),
+        state.image_tags.check_image(&image)
+    );
     tracing::info!(unit = %unit.service_name(), image, ?check, "checked for image update");
+    if let Err(e) = &tags {
+        tracing::warn!(image, error = %e, "listing image tags failed");
+    }
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    Ok(templates::image_update_slot(
-        &core::unit_url(&unit),
-        ImageUpdateView::Checked(&check),
-        &csrf,
+    let base = core::unit_url(&unit);
+    let badge = match core::newer_tags_of(&state, &file_name)? {
+        Some(t) => templates::imagetags::tag_badge(&base, &file_name, &t, BadgeNote::None, &csrf),
+        None => maud::html! {},
+    };
+    Ok(maud::html! {
+        (templates::image_update_slot(&base, ImageUpdateView::Checked(&check), &csrf))
+        (templates::imagetags::tag_slot(&file_name, badge, true))
+    })
+}
+
+#[derive(Deserialize)]
+pub struct ImageTagForm {
+    csrf_token: String,
+    tag: String,
+}
+
+/// `POST {unit}/image-tag`: move a pinned container onto one of the newer
+/// tags sooth found for it (`core::switch_image_tag`: pull, rewrite
+/// `Image=`, reload, restart if running or failed), answered with its row
+/// badge as it was, plus the outcome. A refused or failed switch is a 200
+/// with the message in the badge, since htmx drops non-2xx bodies.
+pub async fn image_tag(
+    State(state): State<AppState>,
+    session: Session,
+    Path(file_name): Path<String>,
+    Form(form): Form<ImageTagForm>,
+) -> Result<maud::Markup, FragmentError> {
+    if !crate::auth::csrf::verify(&session, &form.csrf_token).await {
+        return Err(AppError::Csrf.into());
+    }
+    let Some(tags) = core::newer_tags_of(&state, &file_name)? else {
+        return Err(AppError::NotFound(format!("no newer tags known for {file_name}")).into());
+    };
+    let unit = discovery::load_by_name(state.quadlet_dir.as_path(), &file_name)?;
+    let base = core::unit_url(&unit);
+    let outcome = core::switch_image_tag(&state, &file_name, form.tag.trim()).await;
+    let failure = outcome.as_ref().err().map(|e| {
+        tracing::warn!(file = %file_name, tag = %form.tag, error = %e, "image tag switch failed");
+        e.to_string()
+    });
+    let note = match (&outcome, &failure) {
+        (Ok(done), _) => BadgeNote::Switched(done),
+        (Err(_), msg) => BadgeNote::Failed(msg.as_deref().unwrap_or_default()),
+    };
+    Ok(templates::imagetags::tag_badge(
+        &base,
+        &file_name,
+        &tags,
+        note,
+        &form.csrf_token,
     ))
 }
 

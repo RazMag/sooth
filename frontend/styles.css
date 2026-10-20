@@ -731,6 +731,21 @@
   .menu-note.ok svg { color: inherit; }
   .menu-note.error { color: var(--color-danger); }
 
+  /* A pinned container's "newer tag" badge (`templates::imagetags::tag_badge`):
+     a `.badge` pill as the summary of a `details.menu` whose panel lists the
+     newer tags as "Switch" pills (the `.menu-update` box restore). The panel
+     opens left-aligned under it (`.menu-start`, see `menu.js`). */
+  .tag-slot:empty { display: none; }
+  .tag-menu { vertical-align: middle; }
+  .tag-menu > summary.badge { padding: 0.2rem 0.55rem; border-radius: 999px; color: var(--color-ink); }
+  .tag-menu > summary.badge::before { background: var(--color-accent); }
+  .tag-menu > summary.badge:hover,
+  .tag-menu[open] > summary.badge { background: var(--color-accent-soft); }
+  .tag-menu .menu-panel { min-width: 15rem; }
+  .menu-panel .tag-menu-switch { justify-content: space-between; }
+  .tag-scope { font-size: 0.72rem; opacity: 0.75; }
+  .image-tags-errors { margin: 0.25rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; color: var(--color-muted); }
+
   /* App shell / sidebar ------------------------------- */
   .app-shell { display: flex; min-height: 100vh; }
 
