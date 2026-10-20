@@ -23,7 +23,7 @@ pub fn status_fragment(status: &TagsStatus, csrf: &str) -> Markup {
                     p.field-hint {
                         (count(status.repos, "pinned repository", "pinned repositories"))
                         " checked " (ago(at)) "; "
-                        (count(status.outdated, "image has", "images have")) " a newer tag."
+                        (count(status.outdated, "container has", "containers have")) " a newer tag."
                     }
                 } @else {
                     p.field-hint { "Not checked yet." }
@@ -116,16 +116,18 @@ pub fn tag_badge(
             summary.badge.badge-update title=(title) aria-label=(title) { (newest.tag) }
             div.menu-panel {
                 div.menu-update {
-                    p.menu-note { "Pinned to " code { (tags.current) } }
+                    // One span per note: `.menu-note` is a flex row, which
+                    // would lay each text run and `<code>` out as its own item.
+                    p.menu-note { span { "Pinned to " code { (tags.current) } } }
                     @if let Some((image, users)) = &tags.shared {
-                        p.menu-note {
+                        p.menu-note { span {
                             @if *users > 1 {
                                 "Set in " code { (image) } ", which " (users)
                                 " containers use -- switching moves all of them."
                             } @else {
                                 "Set in " code { (image) } "."
                             }
-                        }
+                        } }
                     }
                     @for c in &tags.candidates {
                         form hx-post={(base) "/image-tag"} hx-target={"#" (slot)} hx-swap="innerHTML"
@@ -151,10 +153,10 @@ pub fn tag_badge(
                     @match note {
                         BadgeNote::None => {}
                         BadgeNote::Failed(msg) => p.menu-note.error { (msg) },
-                        BadgeNote::Switched(done) => p.menu-note.ok {
+                        BadgeNote::Switched(done) => p.menu-note.ok { span {
                             "Switched to " code { (done.image) }
                             @if done.restarted.is_empty() { "; used on next start." } @else { " and restarted." }
-                        },
+                        } },
                     }
                 }
             }

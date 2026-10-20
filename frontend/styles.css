@@ -1203,9 +1203,11 @@
      resolves `height: 100%` inside a table cell against the cell's
      *specified* height, not the row's. So the rails stay name-tall,
      centred like the rest of the cell, and their lines reach past them;
-     `clip-path` trims that overshoot to the cell (inset box-shadows, the
-     drag-over marker, are inside the clip and unaffected). */
-  .tree-table tbody td:first-child { padding-top: 0; padding-bottom: 0; clip-path: inset(0); }
+     `overflow: clip` trims that overshoot to the cell (inset box-shadows,
+     the drag-over marker, are inside the clip and unaffected). Not
+     `clip-path`: that would also clip a `position: fixed` menu panel opened
+     from this cell (the newer-tag badge's) and trap it under later rows. */
+  .tree-table tbody td:first-child { padding-top: 0; padding-bottom: 0; overflow: clip; }
   .tree-table .group-head-cell { padding: 0 var(--gpad); }
   .tree-table .group-kebab-cell { padding: 0.3rem 0.65rem; }
 
