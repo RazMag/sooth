@@ -10,6 +10,10 @@
 //! digests against the registry's current manifest, read with
 //! `podman manifest inspect` -- no layers are downloaded until the user
 //! actually asks for the update (an ordinary [`pull`]).
+//!
+//! And lists a repository's tags ([`list_tags`], `podman search
+//! --list-tags`) for `crate::imagetags`, which offers a container pinned to
+//! a version tag the newer ones.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -23,6 +27,9 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 const PULL_TIMEOUT: Duration = Duration::from_secs(600);
 /// A registry round trip (auth + manifest), not a download.
 const REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
+/// A tag listing follows the registry's pagination: a few thousand tags
+/// (Home Assistant's ~4600) is several round trips.
+const TAGS_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The image's `Config.ExposedPorts`, parsed. `None` when it can't be read
 /// (not in local storage, podman missing or failing, timeout); `Some(empty)`
@@ -138,6 +145,61 @@ pub async fn check_update(image: &str) -> UpdateCheck {
     }
 }
 
+/// Every tag the registry has for the repository of `image` (a reference
+/// *with* a tag, as a container's quadlet names it), in registry order --
+/// for working out which newer version tags a pinned container could move
+/// to (`quadlet::versiontag`). A short name is asked about as the local tag
+/// it resolved to when pulled, like [`check_update`]; one that isn't pulled
+/// yet is refused rather than guessing which registry it means. The error
+/// is user-facing text.
+pub async fn list_tags(image: &str) -> Result<Vec<String>, String> {
+    if image.is_empty() || image.starts_with('-') || image.contains('@') {
+        return Err(format!("not a taggable image reference: {image}"));
+    }
+    let unsupported = |why| format!("{image} is {why}");
+    let reference = if has_registry(image) {
+        qualify(image, &[]).map_err(unsupported)?
+    } else {
+        // A short name: only local storage knows which registry it came from.
+        let local = inspect_local(image)
+            .await?
+            .ok_or_else(|| format!("{image} isn't pulled yet"))?;
+        let qualified = qualify(image, &local.repo_tags).map_err(unsupported)?;
+        if !has_registry(&qualified) {
+            return Err(format!("can't tell which registry {image} came from"));
+        }
+        qualified
+    };
+    let json = podman_json(
+        &[
+            "search",
+            "--list-tags",
+            "--limit",
+            "1000000",
+            "--format",
+            "json",
+            &reference,
+        ],
+        TAGS_TIMEOUT,
+    )
+    .await?;
+    Ok(parse_tag_list(&json))
+}
+
+/// `podman search --list-tags --format json` output: one `{Name, Tags}`
+/// entry per repository (older podmans: one `{Name, Tag}` per tag).
+fn parse_tag_list(json: &serde_json::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for entry in json.as_array().into_iter().flatten() {
+        if let Some(tags) = entry.get("Tags").and_then(|t| t.as_array()) {
+            out.extend(tags.iter().filter_map(|t| t.as_str().map(str::to_string)));
+        } else if let Some(tag) = entry.get("Tag").and_then(|t| t.as_str()) {
+            out.push(tag.to_string());
+        }
+    }
+    out
+}
+
 /// What [`check_update`] needs from `podman image inspect`.
 #[derive(Debug, Default)]
 struct LocalImage {
@@ -207,13 +269,10 @@ fn parse_local(json: &serde_json::Value) -> LocalImage {
 /// asks the same registry -- falling back to the short name, which podman
 /// resolves itself. Images with no remote registry are rejected.
 fn qualify(image: &str, repo_tags: &[String]) -> Result<String, &'static str> {
-    let first = image.split('/').next().unwrap_or_default();
-    let has_registry =
-        image.contains('/') && (first.contains('.') || first.contains(':') || first == "localhost");
-    if first == "localhost" && has_registry {
-        return Err("a local image");
-    }
-    if has_registry {
+    if has_registry(image) {
+        if image.starts_with("localhost/") {
+            return Err("a local image");
+        }
         return Ok(image.to_string());
     }
     let tagged = if image.rsplit('/').next().is_some_and(|n| n.contains(':')) {
@@ -227,6 +286,13 @@ fn qualify(image: &str, repo_tags: &[String]) -> Result<String, &'static str> {
         Some(t) => Ok(t.clone()),
         None => Ok(image.to_string()),
     }
+}
+
+/// Whether `image` names its registry (`ghcr.io/…`, `registry:5000/…`,
+/// `localhost/…`) rather than being a short name podman resolves.
+fn has_registry(image: &str) -> bool {
+    let first = image.split('/').next().unwrap_or_default();
+    image.contains('/') && (first.contains('.') || first.contains(':') || first == "localhost")
 }
 
 /// `Some(true)` when the registry's manifest is one the local image was
@@ -332,6 +398,15 @@ mod tests {
         );
         assert!(qualify("localhost/app:latest", &[]).is_err());
         assert!(qualify("app", &tags(&["localhost/app:latest"])).is_err());
+    }
+
+    #[test]
+    fn parses_tag_lists() {
+        let current = serde_json::json!([{"Name": "ghcr.io/a/b", "Tags": ["1.0", "1.1"]}]);
+        assert_eq!(parse_tag_list(&current), ["1.0", "1.1"]);
+        let per_tag = serde_json::json!([{"Name": "a", "Tag": "1.0"}, {"Name": "a", "Tag": "2.0"}]);
+        assert_eq!(parse_tag_list(&per_tag), ["1.0", "2.0"]);
+        assert!(parse_tag_list(&serde_json::json!(null)).is_empty());
     }
 
     #[test]
