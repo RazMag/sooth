@@ -11,6 +11,7 @@ pub mod parser;
 pub mod portnotes;
 pub mod ports;
 pub mod refs;
+pub mod versiontag;
 pub mod writer;
 
 pub use model::{QuadletUnit, UnitKind};
