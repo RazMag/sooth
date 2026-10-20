@@ -6,6 +6,34 @@ All notable changes to sooth are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-21
+
+### Added
+
+- **See when a pinned container has a newer version, and switch to it.** A
+  container whose image names a version tag (`nginx:1.25.3`,
+  `postgres:16.4-alpine3.20`, `ghcr.io/home-assistant/home-assistant:2026.9.3`)
+  rather than `latest` now gets a badge on its row in the Services list once
+  the registry has a newer tag of the same kind. Click it to see the newest
+  patch, the newest in the same major version and the newest overall, each
+  with a **Switch** button. Switching pulls the new image first, so a failed
+  pull changes nothing. Then it rewrites the tag in `Image=`, reloads, and
+  restarts the container if it was running or failed. If the tag lives in an
+  `.image` quadlet that several containers share, the menu says so, and
+  switching moves all of them. Only tags with the same shape are compared
+  (the same `v` prefix, the same number of parts, the same suffix such as
+  `-alpine`), and prereleases like `-rc1`, `2026.11.0b3` or `.dev` builds
+  are never offered. Switching is refused for a container in a git-synced
+  directory, since the next sync would put the old tag back.
+- **A background check for pinned images, on by default.** Sooth looks up
+  the tags of each pinned image's registry once a day, and straight away for
+  a container you've just added. The Settings page's Updates section has a
+  new "Pinned image tags" card with an on/off switch, the interval and a
+  "Check now" button. Changes apply immediately. A row's "Check for update"
+  also re-checks its tags. This means sooth now contacts your image
+  registries on its own. Turn the check off in Settings if you don't want
+  that.
+
 ## [0.6.2] - 2026-10-20
 
 ### Fixed
@@ -296,7 +324,8 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
-[Unreleased]: https://github.com/RazMag/sooth/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/RazMag/sooth/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/RazMag/sooth/compare/v0.6.2...v1.0.0
 [0.6.2]: https://github.com/RazMag/sooth/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/RazMag/sooth/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/RazMag/sooth/compare/v0.5.0...v0.6.0
