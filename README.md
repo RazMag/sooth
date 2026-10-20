@@ -117,6 +117,23 @@ CSS/JS embedded, so it runs from any directory.
   button: in-memory sessions are cleared and the dashboard is briefly
   unavailable). Point it at a fork's own repo via the Updates card's "GitHub
   repository" field if it publishes its own releases.
+- **Newer tags for pinned containers** — a container whose image names a
+  version tag (`nginx:1.25.3`, `postgres:16.4-alpine3.20`,
+  `ghcr.io/home-assistant/home-assistant:2026.9.3`) rather than `latest`
+  gets a badge on its list row naming the newest tag of the same kind once
+  the registry has one. The badge opens a menu with the newest patch, the
+  newest in the same major version, and the newest overall, and each one has
+  a **Switch** button. Switching pulls the new image first, then rewrites the
+  tag in `Image=` (in the container's own file, or in its `.image` quadlet,
+  which moves every container using it), reloads, and restarts the
+  container if it was running or failed. Only tags with the same shape are
+  compared (the same `v` prefix, the same number of parts, the same suffix
+  such as `-alpine`), and prereleases (`-rc1`, `2026.11.0b3`, `.dev…`) are
+  never offered. Registries are checked in the background once a day by
+  default; the interval, an on/off switch and a "Check now" button are on
+  the Settings page's Updates section, and a row's "Check for update" also
+  re-checks. Switching is refused for a container in a git-synced group,
+  since the next sync would put the old tag back.
 - Writes are atomic (temp file + `rename`) and validated up front — including
   a best-effort dry-run against the real podman quadlet generator — so a
   reader never sees a partial file and an invalid submission never lands.
@@ -201,6 +218,9 @@ prebuilt release, or `just`-driven workflows — see
   (clone/fetch/reset), running as this same user, so whatever `git` setup
   already works for that user (SSH agent, credential helper, …) is what
   Git Sync gets too.
+- **Outbound HTTPS to your image registries** for the pinned-tag check,
+  which is on by default: `podman search --list-tags` for each repository a
+  container is pinned to. It can be turned off on the Settings page.
 - **Outbound HTTPS to GitHub** only if you enable self-update — it checks
   `api.github.com` and downloads from GitHub's release CDN, matching only an
   asset built for the exact host architecture (`x86_64`/`aarch64`
