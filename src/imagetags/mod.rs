@@ -59,7 +59,7 @@ pub struct TagsStatus {
     pub checked_at: Option<SystemTime>,
     /// Distinct pinned repositories it listed.
     pub repos: usize,
-    /// Pinned images with a newer tag available.
+    /// Pinned containers with a newer tag available.
     pub outdated: usize,
     /// `(image, message)` for each listing that failed.
     pub errors: Vec<(String, String)>,

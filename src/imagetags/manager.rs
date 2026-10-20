@@ -204,9 +204,10 @@ impl ImageTagsManager {
     /// A full pass: lists every pinned repository and replaces the stored
     /// listings (dropping repositories no quadlet pins any more).
     async fn check_all(&self) {
-        let Some(pinned) = self.pinned() else {
+        let Some(images) = self.pinned() else {
             return;
         };
+        let pinned = by_repo(&images);
         self.status
             .write()
             .unwrap_or_else(|e| e.into_inner())
@@ -222,13 +223,13 @@ impl ImageTagsManager {
             warn!(image, error, "listing image tags failed");
         }
         *self.repos.write().unwrap_or_else(|e| e.into_inner()) = results.into_iter().collect();
-        let outdated = pinned
-            .values()
+        let outdated = images
+            .iter()
             .filter(|image| !self.newer(image).is_empty())
             .count();
         info!(
             repos = pinned.len(),
-            outdated, "checked pinned images for newer tags"
+            outdated, "checked pinned containers for newer tags"
         );
         *self.status.write().unwrap_or_else(|e| e.into_inner()) = TagsStatus {
             checking: false,
@@ -242,12 +243,12 @@ impl ImageTagsManager {
 
     /// Lists only the pinned repositories with no stored listing yet.
     async fn check_unlisted(&self) {
-        let Some(pinned) = self.pinned() else {
+        let Some(images) = self.pinned() else {
             return;
         };
         let unlisted: Vec<(String, String)> = {
             let repos = self.repos.read().unwrap_or_else(|e| e.into_inner());
-            pinned
+            by_repo(&images)
                 .into_iter()
                 .filter(|(r, _)| !repos.contains_key(r))
                 .collect()
@@ -281,9 +282,9 @@ impl ImageTagsManager {
             .await
     }
 
-    /// Every pinned repository on disk, with one image naming it; `None`
-    /// (logged) when the quadlet directory can't be read.
-    fn pinned(&self) -> Option<BTreeMap<String, String>> {
+    /// Every pinned container's image on disk; `None` (logged) when the
+    /// quadlet directory can't be read.
+    fn pinned(&self) -> Option<Vec<String>> {
         match discovery::load_all(&self.quadlet_dir) {
             Ok(all) => Some(pinned_images(&all)),
             Err(e) => {
@@ -294,13 +295,12 @@ impl ImageTagsManager {
     }
 }
 
-/// The registry repositories `all`'s containers are pinned to
-/// (`versiontag::is_pinned`, through `.image` quadlets like everywhere
-/// else; never a local `.build` or `localhost/` image), each with the first
-/// image naming it -- a tagged reference is what `imageinfo::list_tags`
-/// takes, since a short name is resolved through the local tag.
-pub fn pinned_images(all: &[QuadletUnit]) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
+/// The image of each of `all`'s containers that's pinned to a registry
+/// version tag (`versiontag::is_pinned`, through `.image` quadlets like
+/// everywhere else; never a local `.build` or `localhost/` image), one per
+/// container.
+pub fn pinned_images(all: &[QuadletUnit]) -> Vec<String> {
+    let mut out = Vec::new();
     for unit in all.iter().filter(|u| u.kind == UnitKind::Container) {
         let builds = unit
             .section("Container")
@@ -312,8 +312,19 @@ pub fn pinned_images(all: &[QuadletUnit]) -> BTreeMap<String, String> {
         if !versiontag::is_pinned(&image) || image.starts_with("localhost/") {
             continue;
         }
-        if let Some((repo, _)) = versiontag::split_tag(&image) {
-            out.entry(repo.to_string()).or_insert(image);
+        out.push(image);
+    }
+    out
+}
+
+/// Each repository among `images`, with the first image naming it -- a
+/// tagged reference is what `imageinfo::list_tags` takes, since a short
+/// name is resolved through the local tag.
+fn by_repo(images: &[String]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for image in images {
+        if let Some((repo, _)) = versiontag::split_tag(image) {
+            out.entry(repo.to_string()).or_insert_with(|| image.clone());
         }
     }
     out
@@ -340,7 +351,7 @@ mod tests {
         let lister: Lister = Arc::new(|image: String| {
             Box::pin(async move {
                 match image.as_str() {
-                    "ghcr.io/home-assistant/home-assistant:2026.9.3" => Ok(vec![
+                    i if i.starts_with("ghcr.io/home-assistant/home-assistant:") => Ok(vec![
                         "2026.9.3".into(),
                         "2026.9.4".into(),
                         "2026.10.2".into(),
@@ -382,7 +393,7 @@ mod tests {
         write(d, "app.container", "[Container]\nImage=app.build\n");
         write(d, "app.build", "[Build]\nImageTag=localhost/app:1.0\n");
         let all = discovery::load_all(d).unwrap();
-        let pinned = pinned_images(&all);
+        let pinned = by_repo(&pinned_images(&all));
         assert_eq!(
             pinned.keys().collect::<Vec<_>>(),
             [
@@ -400,6 +411,13 @@ mod tests {
             d,
             "ha.container",
             "[Container]\nImage=ghcr.io/home-assistant/home-assistant:2026.9.3\n",
+        );
+        // Up to date, same repository, and found first: the outdated
+        // container behind it must still count.
+        write(
+            d,
+            "a-current.container",
+            "[Container]\nImage=ghcr.io/home-assistant/home-assistant:2026.10.2\n",
         );
         write(d, "x.container", "[Container]\nImage=example.com/x:1.0\n");
         let mgr = manager(d);
