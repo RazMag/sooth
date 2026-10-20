@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::EventSender;
 use crate::health::HealthCell;
+use crate::imagetags::{ImageTagsConfig, ImageTagsManager};
 use crate::quadlet::QuadletError;
 use crate::quadlet::gitsync::{GitSyncConfig, GitSyncManager};
 use crate::selfupdate::{SelfUpdateConfig, SelfUpdateManager};
@@ -46,6 +47,11 @@ pub struct Config {
     /// `git_syncs` above.
     #[serde(default)]
     pub self_update: SelfUpdateConfig,
+    /// Whether/how often sooth lists the registry tags of containers pinned
+    /// to a version tag -- see `crate::imagetags`. An `[image_tags]` table,
+    /// applied live by its Settings card, same as `self_update`.
+    #[serde(default)]
+    pub image_tags: ImageTagsConfig,
     /// A GitHub personal access token, used to authenticate `git_syncs`
     /// clones/fetches against `https://github.com/...` remotes that need it
     /// (private repos). Empty means "no token configured" -- those remotes
@@ -72,6 +78,7 @@ impl Default for Config {
             session_idle_timeout_secs: default_idle_timeout(),
             git_syncs: Vec::new(),
             self_update: SelfUpdateConfig::default(),
+            image_tags: ImageTagsConfig::default(),
             github_token: String::new(),
         }
     }
@@ -196,17 +203,33 @@ pub(crate) fn patch_self_update(
     path: &Path,
     mutate: impl FnOnce(&mut SelfUpdateConfig),
 ) -> std::io::Result<()> {
+    patch_table(path, "self_update", mutate)
+}
+
+/// [`patch_self_update`], for the `image_tags` table.
+pub(crate) fn patch_image_tags(
+    path: &Path,
+    mutate: impl FnOnce(&mut ImageTagsConfig),
+) -> std::io::Result<()> {
+    patch_table(path, "image_tags", mutate)
+}
+
+/// Read-modify-write one table holding a whole settings struct.
+fn patch_table<T>(path: &Path, key: &str, mutate: impl FnOnce(&mut T)) -> std::io::Result<()>
+where
+    T: Default + Serialize + serde::de::DeserializeOwned,
+{
     let mut table = read_config_toml(path)?;
-    let mut config: SelfUpdateConfig = match table.remove("self_update") {
+    let mut config: T = match table.remove(key) {
         Some(value) => value.try_into().map_err(|e: toml::de::Error| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
         })?,
-        None => SelfUpdateConfig::default(),
+        None => T::default(),
     };
     mutate(&mut config);
     let value = toml::Value::try_from(&config)
-        .map_err(|e| std::io::Error::other(format!("failed to serialize self_update: {e}")))?;
-    table.insert("self_update".to_string(), value);
+        .map_err(|e| std::io::Error::other(format!("failed to serialize {key}: {e}")))?;
+    table.insert(key.to_string(), value);
     write_config_toml(path, &table)
 }
 
@@ -250,6 +273,10 @@ pub struct AppState {
     /// running background poll task, not just a config snapshot, since its
     /// settings apply live.
     pub self_update: SelfUpdateManager,
+    /// Live supervisor for the pinned-image tag check -- see
+    /// `crate::imagetags`. Also holds the last tag listing per repository,
+    /// which the list rows' "newer tag" badge reads.
+    pub image_tags: ImageTagsManager,
 }
 
 #[cfg(test)]
