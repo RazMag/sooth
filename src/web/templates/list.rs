@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use maud::{Markup, html};
 
+use super::imagetags::{BadgeNote, tag_badge, tag_slot};
 use super::{
     Icon, NavItem, autostart_icon, autoupdate_icon, csrf_input, group_kebab, icon, kebab_menu,
     kind_dot, known_groups_datalist, page_header, shell, status_badge,
@@ -16,7 +17,7 @@ use crate::quadlet::ports::SplitPorts;
 use crate::quadlet::refs::{self, MissingRefs};
 use crate::quadlet::{QuadletUnit, UnitKind, naming};
 use crate::systemd::UnitStatus;
-use crate::web::core;
+use crate::web::core::{self, NewerTags};
 
 /// The DOM id of every list's `<tbody>` -- also the SSE-refresh target and
 /// the `data-filter-target` of the filter box. One value everywhere.
@@ -71,6 +72,9 @@ pub struct ListContext<'a> {
     pub known: &'a [String],
     pub synced: &'a [String],
     pub missing: &'a HashMap<String, MissingRefs>,
+    /// Each pinned container's newer version tags, by file name
+    /// (`core::newer_tags`), drawn as a badge with a "Switch" menu.
+    pub tags: &'a HashMap<String, NewerTags>,
     /// Pods' published ports split onto the members serving them, by file
     /// name (`core::split_pod_ports`) -- only for a table with a Ports
     /// column (Services); `None` elsewhere.
@@ -243,6 +247,12 @@ fn row(
                             (location_chips(unit, place, lists, all_units))
                             @if let Some(m) = lists.missing.get(&unit.file_name) {
                                 (missing_badge(unit, m))
+                            }
+                            @if unit.kind == UnitKind::Container {
+                                (tag_slot(&unit.file_name, match lists.tags.get(&unit.file_name) {
+                                    Some(t) => tag_badge(&core::unit_url(unit), &unit.file_name, t, BadgeNote::None, csrf),
+                                    None => html! {},
+                                }, false))
                             }
                         }
                         (secondary_line(unit, place, all_units))
@@ -944,7 +954,7 @@ pub fn list_table(
                 // and the kebab's action forms (a scoped swap inside the
                 // menu) in place -- swapping the whole `<tbody>` here would
                 // slam shut any menu the user has open.
-                tbody id=(ROWS_ID) hx-get=(rows_route) hx-trigger="sse:units-changed" hx-swap="innerHTML" {
+                tbody id=(ROWS_ID) hx-get=(rows_route) hx-trigger="sse:units-changed, sse:image-tags-changed" hx-swap="innerHTML" {
                     (list_rows(spec, units, csrf, all_units, groups))
                 }
             }
@@ -1059,10 +1069,12 @@ mod tests {
 
     fn render(spec: &ListSpec, units: &[Entry], all: &[QuadletUnit], view: ListView) -> String {
         let missing = HashMap::new();
+        let tags = HashMap::new();
         let lists = ListContext {
             known: &[],
             synced: &[],
             missing: &missing,
+            tags: &tags,
             ports: None,
             view,
         };

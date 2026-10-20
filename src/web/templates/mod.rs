@@ -9,6 +9,7 @@ pub mod generic;
 pub mod gitsync;
 pub mod icons;
 pub mod images;
+pub mod imagetags;
 pub mod list;
 pub mod logs;
 pub mod networks;

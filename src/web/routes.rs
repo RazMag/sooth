@@ -9,8 +9,8 @@ use crate::auth;
 use crate::config::AppState;
 
 use super::handlers::{
-    detail, edit_delete, environment, gitsync, groups, list, logs, pods, ports, raw_create,
-    secrets, selfupdate, services, settings, unit_ops, validate,
+    detail, edit_delete, environment, gitsync, groups, imagetags, list, logs, pods, ports,
+    raw_create, secrets, selfupdate, services, settings, unit_ops, validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
@@ -71,6 +71,10 @@ fn mount_unit_routes(
         .route(
             &format!("{prefix}/{{file_name}}/image-update"),
             get(unit_ops::image_update_check).post(unit_ops::image_update),
+        )
+        .route(
+            &format!("{prefix}/{{file_name}}/image-tag"),
+            post(unit_ops::image_tag),
         )
         .route(
             &format!("{prefix}/{{file_name}}/delete"),
@@ -157,6 +161,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/settings/github-token", post(settings::save_github_token))
         .route("/settings/restart", post(settings::restart))
         .route("/settings/health/refresh", post(settings::refresh_health))
+        .route("/settings/image-tags", get(imagetags::card))
+        .route("/settings/image-tags/check", post(imagetags::check_now))
         .route("/settings/self-update", get(selfupdate::card))
         .route("/settings/self-update/check", post(selfupdate::check_now))
         .route(
