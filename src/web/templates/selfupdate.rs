@@ -138,16 +138,18 @@ fn status_line(status: &UpdateStatus, csrf: &str) -> Markup {
 
 /// The `hx-vals` JSON for a CSRF-only htmx request -- the plain-button
 /// replacement for a `csrf_input()` hidden field inside a `form.inline-form`.
-fn csrf_vals(csrf: &str) -> String {
+pub(crate) fn csrf_vals(csrf: &str) -> String {
     format!(r#"{{"csrf_token":"{csrf}"}}"#)
 }
 
 /// A coarse "how long ago" for the last check -- same rough formatting as
 /// `gitsync::checked_at`.
 fn checked_at(status: &UpdateStatus) -> String {
-    let Some(at) = status.checked_at else {
-        return "never".to_string();
-    };
+    status.checked_at.map_or_else(|| "never".to_string(), ago)
+}
+
+/// `at` as a coarse "how long ago" (`"5m ago"`).
+pub(crate) fn ago(at: SystemTime) -> String {
     let secs = SystemTime::now()
         .duration_since(at)
         .map(|d| d.as_secs())
