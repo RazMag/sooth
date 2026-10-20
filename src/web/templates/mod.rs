@@ -955,7 +955,7 @@ pub fn port_why(why: Option<&Why>, member: &str, pod: &str, port: &str) -> Strin
     match why {
         Some(Why::Assigned) => format!(
             "{pod} publishes {port}. Assigned to {member} by hand on the Ports screen \
-             (X-Sooth-ServesPort= in its [Unit] section, which podman ignores)."
+             (saved by sooth, not in the quadlet)."
         ),
         Some(Why::Declared) => format!(
             "{pod} publishes {port}. Matched automatically: {member} declares it with ExposeHostPort=."
@@ -1420,6 +1420,7 @@ mod tests {
                 entries: vec![("Image".into(), "docker.io/library/nginx".into())],
             }],
             raw: String::new(),
+            port_notes: Default::default(),
         };
         let markup = detail::detail_page(
             &unit,
@@ -1447,7 +1448,7 @@ mod tests {
 
     #[test]
     fn host_network_ports_render_without_a_container_half() {
-        let raw = "[Unit]\nX-Sooth-HostPort=8080\nX-Sooth-HostPort=53/udp\n\n[Container]\nImage=x\nNetwork=host\n";
+        let raw = "[Container]\nImage=x\nNetwork=host\n";
         let unit = QuadletUnit {
             file_name: "edge.container".into(),
             group: String::new(),
@@ -1455,6 +1456,13 @@ mod tests {
             kind: UnitKind::Container,
             sections: crate::quadlet::parser::parse(raw).unwrap(),
             raw: raw.into(),
+            port_notes: crate::quadlet::portnotes::PortNotes {
+                host: ["8080", "53/udp"]
+                    .iter()
+                    .map(|p| crate::quadlet::ports::parse_exposed(p).unwrap())
+                    .collect(),
+                ..Default::default()
+            },
         };
         let live = ports_summary(&unit, true).into_string();
         assert!(live.contains(r#"data-host-port="8080""#));
@@ -1475,6 +1483,7 @@ mod tests {
             kind,
             sections: crate::quadlet::parser::parse(raw).unwrap(),
             raw: raw.into(),
+            port_notes: Default::default(),
         };
         let pod = unit("web.pod", UnitKind::Pod, "[Pod]\nPublishPort=8080:80\n");
         let member = unit(

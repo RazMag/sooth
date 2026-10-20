@@ -4,6 +4,31 @@ All notable changes to sooth are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sooth uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.6.2] - 2026-10-20
+
+### Fixed
+
+- **Port assignments and host-network ports survive a git sync.** Since
+  0.6.0 these were saved as `X-Sooth-ServesPort=` / `X-Sooth-HostPort=`
+  lines in the container's quadlet file. In a git-synced directory that is
+  a local edit, and the next sync that brought in a new commit reset the
+  file and threw it away. Sooth now keeps them in its own file,
+  `.sooth/port-notes.toml` in the quadlet directory, so quadlet files are no
+  longer touched and nothing is reloaded when you change them. A unit's
+  entry is dropped when the unit goes: deleted in sooth, deleted upstream
+  and removed by a git sync, or removed along with its git sync. Lines
+  written by 0.6.0 or 0.6.1 are no longer read: assign those ports again on
+  the Ports screen, and delete the old lines if you like.
+- **A container you stop no longer shows as failed.** A container that
+  takes longer than podman's stop timeout to shut down (or ignores SIGTERM)
+  is killed, exits with status 137, and systemd marks it failed. When sooth
+  stops a unit and the stop leaves it failed, sooth now resets it to
+  inactive. The exit status is still in the unit's log. A unit that crashes
+  on its own still shows as failed. Containers already showing as failed
+  stay that way until you start them again.
+
 ## [0.6.1] - 2026-10-17
 
 ### Added
@@ -271,6 +296,8 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
+[Unreleased]: https://github.com/RazMag/sooth/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/RazMag/sooth/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/RazMag/sooth/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/RazMag/sooth/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/RazMag/sooth/compare/v0.4.1...v0.5.0

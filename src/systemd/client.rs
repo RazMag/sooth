@@ -1,4 +1,10 @@
-use zbus::{Connection, proxy, zvariant::OwnedObjectPath};
+use std::time::Duration;
+
+use futures_util::StreamExt;
+use zbus::{
+    Connection, proxy,
+    zvariant::{ObjectPath, OwnedObjectPath},
+};
 
 use super::SystemdError;
 use super::status::{self, UnitStatus};
@@ -22,10 +28,24 @@ pub trait Manager {
     fn stop_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
     fn restart_unit(&self, name: &str, mode: &str) -> zbus::Result<OwnedObjectPath>;
     fn reload(&self) -> zbus::Result<()>;
+    /// `systemctl --user reset-failed <name>`: a `failed` unit back to
+    /// `inactive`.
+    fn reset_failed_unit(&self, name: &str) -> zbus::Result<()>;
     fn get_unit(&self, name: &str) -> zbus::Result<OwnedObjectPath>;
     /// Required once at startup for `PropertiesChanged` signals on unit
     /// objects to actually be emitted to this connection.
     fn subscribe(&self) -> zbus::Result<()>;
+
+    /// A queued job finished -- for a stop job, once the unit has reached
+    /// `inactive` or `failed`.
+    #[zbus(signal)]
+    fn job_removed(
+        &self,
+        id: u32,
+        job: ObjectPath<'_>,
+        unit: &str,
+        result: &str,
+    ) -> zbus::Result<()>;
 
     /// The user manager's environment block -- exactly what `systemctl --user
     /// show-environment` prints, as `KEY=VALUE` strings. This is the variable
@@ -77,12 +97,29 @@ impl Client {
             .map_err(|e| SystemdError::action_failed(unit, "start", e))
     }
 
+    /// Queues a stop, and once it has finished clears a `failed` state the
+    /// stop itself left behind (see [`clear_failed_stop`]). Returns as soon
+    /// as the job is queued, like the other actions; the status watch shows
+    /// the unit going down.
     pub async fn stop(&self, unit: &str) -> Result<(), SystemdError> {
-        self.manager
+        // Listen before queueing, so a job that finishes at once isn't missed.
+        let removed = self
+            .manager
+            .receive_job_removed()
+            .await
+            .map_err(|e| SystemdError::action_failed(unit, "stop", e))?;
+        let job = self
+            .manager
             .stop_unit(unit, "replace")
             .await
-            .map(|_| ())
-            .map_err(|e| SystemdError::action_failed(unit, "stop", e))
+            .map_err(|e| SystemdError::action_failed(unit, "stop", e))?;
+        tokio::spawn(clear_failed_stop(
+            self.clone(),
+            unit.to_string(),
+            job,
+            removed,
+        ));
+        Ok(())
     }
 
     pub async fn restart(&self, unit: &str) -> Result<(), SystemdError> {
@@ -101,6 +138,13 @@ impl Client {
             .reload()
             .await
             .map_err(|e| SystemdError::action_failed("(daemon)", "reload", e))
+    }
+
+    pub async fn reset_failed(&self, unit: &str) -> Result<(), SystemdError> {
+        self.manager
+            .reset_failed_unit(unit)
+            .await
+            .map_err(|e| SystemdError::action_failed(unit, "reset-failed", e))
     }
 
     pub async fn status(&self, unit: &str) -> Result<UnitStatus, SystemdError> {
@@ -145,5 +189,59 @@ impl Client {
             .unset_environment(&refs)
             .await
             .map_err(|e| SystemdError::action_failed("(daemon)", "unset-environment", e))
+    }
+}
+
+/// How long [`clear_failed_stop`] waits for a stop job before giving up on
+/// it: well past systemd's default 90s `TimeoutStopSec=`, after which the
+/// job ends one way or another.
+const STOP_JOB_WAIT: Duration = Duration::from_secs(180);
+
+/// Once the stop job `job` for `unit` has finished, resets the unit if it
+/// ended up `failed`.
+///
+/// A unit sooth was asked to stop shouldn't show as failed for having
+/// stopped. But a podman container regularly does: quadlet's `ExecStop=` is
+/// `podman rm -f`, which SIGKILLs a container still running after its stop
+/// timeout (one whose PID 1 ignores SIGTERM, or is just slow), the main
+/// process then exits 137, and systemd records `Result=exit-code`. The
+/// journal keeps the exit status; this only clears the state. A unit that
+/// crashed on its own, without a stop from sooth, is left failed.
+async fn clear_failed_stop(
+    client: Client,
+    unit: String,
+    job: OwnedObjectPath,
+    mut removed: JobRemovedStream,
+) {
+    let finished = async {
+        while let Some(signal) = removed.next().await {
+            if signal
+                .args()
+                .is_ok_and(|args| args.job.as_str() == job.as_str())
+            {
+                return true;
+            }
+        }
+        false
+    };
+    if !matches!(
+        tokio::time::timeout(STOP_JOB_WAIT, finished).await,
+        Ok(true)
+    ) {
+        tracing::debug!(
+            unit,
+            "stop job not seen finishing; not checking for a failed state"
+        );
+        return;
+    }
+    match client.status(&unit).await {
+        Ok(status) if status.is_failed() => match client.reset_failed(&unit).await {
+            Ok(()) => tracing::info!(unit, "unit failed while stopping; reset to inactive"),
+            Err(e) => {
+                tracing::warn!(unit, error = %e, "reset of a unit that failed while stopping failed")
+            }
+        },
+        Ok(_) => {}
+        Err(e) => tracing::warn!(unit, error = %e, "status check after stop failed"),
     }
 }
