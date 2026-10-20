@@ -2195,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "sooth"
-version = "0.6.2"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "argon2",
