@@ -352,8 +352,10 @@ per request, so you don't restart the server. Without watch, restart
 skips the frontend build entirely (e.g. a read-only checkout).
 
 `scripts/run-dev.sh` (or `just dev`) builds and runs sooth against a
-throwaway scratch quadlet directory (seeded with a demo container and a
-demo pod -- two containers, a network and a volume) instead of
+throwaway scratch quadlet directory (seeded with a demo container, a
+demo pod -- two containers, a network and a volume -- and a few containers
+pinned to old version tags, which get newer-tag badges once the startup
+check has listed their registries) instead of
 your real `~/.config/containers/systemd`, so you can poke at the dashboard
 without touching anything real:
 

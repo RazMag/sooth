@@ -2,8 +2,9 @@
 #
 # Runs sooth against a scratch quadlet directory instead of your real
 # ~/.config/containers/systemd, so you can poke at the dashboard without
-# touching anything real. Builds the binary, seeds a demo container and a
-# demo pod (two containers, a network, a volume; unless --no-seed), and
+# touching anything real. Builds the binary, seeds a demo container, a
+# demo pod (two containers, a network, a volume) and a few containers pinned
+# to old version tags (unless --no-seed), and
 # either prompts for a password via `sooth --hash-password` or uses one you
 # pass with --hash.
 #
@@ -182,6 +183,19 @@ if [ -z "$no_seed_flag" ] && [ ! -e "$scratch/webapp.pod" ]; then
         > "$scratch/webapp-web.container"
     printf '[Container]\nImage=docker.io/library/alpine\nPod=webapp.pod\nExec=sleep infinity\nVolume=webapp-data.volume:/data\n' \
         > "$scratch/webapp-worker.container"
+fi
+
+# Containers pinned to old version tags, so the newer-tag badges and their
+# Switch menus show up (src/imagetags): one pinned in its own Image=, and an
+# .image quadlet two containers share. The tag check lists their registries
+# on startup -- that needs network access. Small alpine images, since a
+# Switch really pulls the new one.
+if [ -z "$no_seed_flag" ] && [ ! -e "$scratch/pinned-web.container" ]; then
+    echo "==> seeding the pinned-tag demo containers in $scratch"
+    printf '[Container]\nImage=docker.io/library/nginx:1.25.3-alpine\n' > "$scratch/pinned-web.container"
+    printf '[Image]\nImage=docker.io/library/redis:7.2.4-alpine\n' > "$scratch/pinned-cache.image"
+    printf '[Container]\nImage=pinned-cache.image\n' > "$scratch/pinned-cache.container"
+    printf '[Container]\nImage=pinned-cache.image\n' > "$scratch/pinned-cache-replica.container"
 fi
 
 if [ -n "$config_flag" ]; then
