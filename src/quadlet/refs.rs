@@ -141,6 +141,61 @@ pub fn container_image(container: &QuadletUnit, all: &[QuadletUnit]) -> Option<S
         .map(|s| s.trim().to_string())
 }
 
+/// Where a container's image reference is written: its own `Image=` line,
+/// or the `Image=` of the `.image` quadlet it names -- what a tag switch
+/// (`web::core::switch_image_tag`) rewrites.
+#[derive(Debug)]
+pub struct ImageLine<'a> {
+    /// The file holding the line: the container itself, or its `.image`.
+    pub unit: &'a QuadletUnit,
+    pub section: &'static str,
+    /// The reference as written (trimmed).
+    pub value: String,
+}
+
+/// See [`ImageLine`]. `Err` says why there's no line to rewrite: the image
+/// is built locally, or an `.image` quadlet re-tags what it pulls
+/// (`ImageTag=`), or the reference is missing.
+pub fn image_line<'a>(
+    container: &'a QuadletUnit,
+    all: &'a [QuadletUnit],
+) -> Result<ImageLine<'a>, &'static str> {
+    let value = container
+        .section("Container")
+        .and_then(|s| s.get("Image"))
+        .map(str::trim)
+        .ok_or("it has no Image= line")?;
+    if value.ends_with(".build") {
+        return Err("its image is built locally");
+    }
+    if !value.ends_with(".image") {
+        return Ok(ImageLine {
+            unit: container,
+            section: "Container",
+            value: value.to_string(),
+        });
+    }
+    let image = all
+        .iter()
+        .find(|u| u.kind == UnitKind::Image && u.file_name == value)
+        .ok_or("its .image quadlet is missing")?;
+    let section = image
+        .section("Image")
+        .ok_or("its .image quadlet has no [Image] section")?;
+    if section.get("ImageTag").is_some() {
+        return Err("its .image quadlet re-tags the image (ImageTag=)");
+    }
+    let value = section
+        .get("Image")
+        .map(str::trim)
+        .ok_or("its .image quadlet has no Image= line")?;
+    Ok(ImageLine {
+        unit: image,
+        section: "Image",
+        value: value.to_string(),
+    })
+}
+
 /// The networks and volumes (in that order) a Pod's own `[Pod]` section
 /// declares via `Network=`/`Volume=`, trimmed to just the resource
 /// reference (the part before any `:OPTS`/`:DEST`) and resolved against
@@ -934,6 +989,51 @@ mod tests {
     fn pod_own_refs_empty_when_no_pod_section() {
         let not_a_pod = unit("x.container", UnitKind::Container, "Container", &[]);
         assert_eq!(pod_own_refs(&not_a_pod, &[]), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
+    fn image_line_finds_the_line_to_rewrite() {
+        let c = |image: &str| {
+            unit(
+                "web.container",
+                UnitKind::Container,
+                "Container",
+                &[("Image", image)],
+            )
+        };
+        let all = vec![
+            unit(
+                "nginx.image",
+                UnitKind::Image,
+                "Image",
+                &[("Image", "docker.io/library/nginx:1.25")],
+            ),
+            unit(
+                "retag.image",
+                UnitKind::Image,
+                "Image",
+                &[("Image", "nginx:1.25"), ("ImageTag", "mine:1")],
+            ),
+        ];
+        let own = c("nginx:1.25");
+        let line = image_line(&own, &all).unwrap();
+        assert_eq!(
+            (line.unit.file_name.as_str(), line.section),
+            ("web.container", "Container")
+        );
+        assert_eq!(line.value, "nginx:1.25");
+
+        let via = c("nginx.image");
+        let line = image_line(&via, &all).unwrap();
+        assert_eq!(
+            (line.unit.file_name.as_str(), line.section),
+            ("nginx.image", "Image")
+        );
+        assert_eq!(line.value, "docker.io/library/nginx:1.25");
+
+        assert!(image_line(&c("retag.image"), &all).is_err());
+        assert!(image_line(&c("gone.image"), &all).is_err());
+        assert!(image_line(&c("app.build"), &all).is_err());
     }
 
     #[test]

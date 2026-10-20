@@ -63,5 +63,8 @@ fn render_event(event: DashboardEvent) -> Vec<Result<Event, Infallible>> {
         DashboardEvent::SelfUpdateChanged => {
             vec![Ok(Event::default().event("self-update-changed").data("1"))]
         }
+        DashboardEvent::ImageTagsChanged => {
+            vec![Ok(Event::default().event("image-tags-changed").data("1"))]
+        }
     }
 }

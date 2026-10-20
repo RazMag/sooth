@@ -117,6 +117,7 @@ macro_rules! list_handlers {
             let known = discovery::list_groups(&state.quadlet_dir);
             let synced = state.git_sync.synced_groups();
             let missing = core::missing_refs(&state, &units).await;
+            let tags = core::newer_tags(&state, &units, &all);
             let view = resolve_list_view(&session, query.view.as_deref()).await;
             Ok(templates::list::list_page(
                 $spec,
@@ -127,6 +128,7 @@ macro_rules! list_handlers {
                     known: &known,
                     synced: &synced,
                     missing: &missing,
+                    tags: &tags,
                     ports: None,
                     view,
                 },
@@ -146,6 +148,7 @@ macro_rules! list_handlers {
             let known = discovery::list_groups(&state.quadlet_dir);
             let synced = state.git_sync.synced_groups();
             let missing = core::missing_refs(&state, &units).await;
+            let tags = core::newer_tags(&state, &units, &all);
             let view = resolve_list_view(&session, None).await;
             Ok(templates::list::list_rows(
                 $spec,
@@ -156,6 +159,7 @@ macro_rules! list_handlers {
                     known: &known,
                     synced: &synced,
                     missing: &missing,
+                    tags: &tags,
                     ports: None,
                     view,
                 },

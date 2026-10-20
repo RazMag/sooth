@@ -63,6 +63,23 @@ pub fn patch_line(raw: &str, section: &str, key: &str, value: &str, present: boo
     join_lines(lines, had_trailing_nl)
 }
 
+/// Rewrites the value of the `key=old` line in `section` to `new`, leaving
+/// the rest of that line (spacing around `=`, a CRLF ending) and every other
+/// line untouched. `None` when no such line exists -- e.g. the file was
+/// edited since the caller read `old` from it.
+pub fn replace_value(raw: &str, section: &str, key: &str, old: &str, new: &str) -> Option<String> {
+    let (mut lines, had_trailing_nl) = split_lines(raw);
+    let header_idx = lines.iter().position(|l| opens_section(l, section))?;
+    let idx = section_body(&lines, header_idx).find(|&i| {
+        lines[i]
+            .split_once('=')
+            .is_some_and(|(k, v)| k.trim() == key && v.trim() == old)
+    })?;
+    let (k, v) = lines[idx].split_once('=')?;
+    lines[idx] = format!("{k}={}", v.replacen(old, new, 1));
+    Some(join_lines(lines, had_trailing_nl))
+}
+
 /// Splits `raw` on `\n` into a mutable line vector, dropping the empty
 /// trailing element `split` leaves after a final newline, alongside whether
 /// that trailing newline was present. Pair with [`join_lines`] to
@@ -130,6 +147,19 @@ pub(crate) fn insert_pos(lines: &[String], body: std::ops::Range<usize>) -> usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replaces_one_value_in_place() {
+        let raw =
+            "# keep\n[Container]\nImage = nginx:1.25 \r\nPod=a.pod\n[Image]\nImage=nginx:1.25\n";
+        let out = replace_value(raw, "Container", "Image", "nginx:1.25", "nginx:1.27").unwrap();
+        assert_eq!(
+            out,
+            "# keep\n[Container]\nImage = nginx:1.27 \r\nPod=a.pod\n[Image]\nImage=nginx:1.25\n"
+        );
+        assert!(replace_value(raw, "Container", "Image", "nginx:1.26", "x").is_none());
+        assert!(replace_value(raw, "Service", "Image", "nginx:1.25", "x").is_none());
+    }
 
     #[test]
     fn inserts_at_end_of_section() {

@@ -11,6 +11,7 @@ mod events;
 mod health;
 mod hostenv;
 mod imageinfo;
+mod imagetags;
 mod journal;
 mod logging;
 mod quadlet;
@@ -152,6 +153,15 @@ async fn run() -> anyhow::Result<()> {
     );
     self_update.start(&config.self_update);
 
+    // Pinned-image tag check: one poll task, live-reconfigurable like
+    // `self_update` above. Its tag listings live in memory only.
+    let image_tags = imagetags::ImageTagsManager::new(
+        Arc::new(config_path.clone()),
+        Arc::new(quadlet_dir.clone()),
+        events_tx.clone(),
+    );
+    image_tags.start(&config.image_tags);
+
     // Live status updates: forward systemd PropertiesChanged signals onto
     // the dashboard's event channel.
     let watch_task = systemd::watch::spawn(
@@ -200,6 +210,7 @@ async fn run() -> anyhow::Result<()> {
         restart: restart.clone(),
         git_sync: git_sync.clone(),
         self_update: self_update.clone(),
+        image_tags: image_tags.clone(),
     };
 
     let app = web::build_router(state);
@@ -227,6 +238,7 @@ async fn run() -> anyhow::Result<()> {
     fs_watch_task.abort();
     git_sync.abort_all();
     self_update.abort();
+    image_tags.abort();
 
     if restart_requested.load(Ordering::SeqCst) {
         // The listener is dropped by now, so the port is free for the fresh

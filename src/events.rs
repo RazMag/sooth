@@ -24,6 +24,10 @@ pub enum DashboardEvent {
     /// applying, errored) or its settings changed -- see
     /// `crate::selfupdate`. Drives the Settings page's Updates card.
     SelfUpdateChanged,
+    /// The pinned-image tag check (`crate::imagetags`) started or finished
+    /// a pass, or its settings changed. Drives the list rows' "newer tag"
+    /// badge and the Settings card.
+    ImageTagsChanged,
 }
 
 pub type EventSender = tokio::sync::broadcast::Sender<DashboardEvent>;

@@ -52,6 +52,7 @@ pub async fn page(
     let known = discovery::list_groups(&state.quadlet_dir);
     let synced = state.git_sync.synced_groups();
     let missing = core::missing_refs(&state, &units).await;
+    let tags = core::newer_tags(&state, &units, &all);
     let ports = split_ports(&units, &all).await;
     let stats = compute_stats(&units);
     let view = resolve_list_view(&session, query.view.as_deref()).await;
@@ -64,6 +65,7 @@ pub async fn page(
             known: &known,
             synced: &synced,
             missing: &missing,
+            tags: &tags,
             ports: Some(&ports),
             view,
         },
@@ -82,6 +84,7 @@ pub async fn rows(
     let known = discovery::list_groups(&state.quadlet_dir);
     let synced = state.git_sync.synced_groups();
     let missing = core::missing_refs(&state, &units).await;
+    let tags = core::newer_tags(&state, &units, &all);
     let ports = split_ports(&units, &all).await;
     let view = resolve_list_view(&session, None).await;
     Ok(templates::list::list_rows(
@@ -93,6 +96,7 @@ pub async fn rows(
             known: &known,
             synced: &synced,
             missing: &missing,
+            tags: &tags,
             ports: Some(&ports),
             view,
         },

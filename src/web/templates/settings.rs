@@ -2,9 +2,12 @@ use std::path::Path;
 
 use maud::{DOCTYPE, Markup, html};
 
-use super::{BannerKind, Icon, NavItem, banner, csrf_input, icon, page_header, selfupdate, shell};
+use super::{
+    BannerKind, Icon, NavItem, banner, csrf_input, icon, imagetags, page_header, selfupdate, shell,
+};
 use crate::config::Config;
 use crate::health::Health;
+use crate::imagetags::{ImageTagsConfig, TagsStatus};
 use crate::selfupdate::{SelfUpdateConfig, UpdateStatus};
 
 /// The values a settings form round-trips as plain strings (so a rejected
@@ -20,6 +23,8 @@ pub struct FormValues {
     pub self_update_mode: String,
     pub self_update_poll_interval_secs: String,
     pub self_update_repo: String,
+    pub image_tags_enabled: bool,
+    pub image_tags_poll_interval_secs: String,
     /// Active vs. saved GitHub token -- never the token itself, which
     /// (unlike every other field here) is never round-tripped into the
     /// rendered page.
@@ -31,11 +36,12 @@ impl FormValues {
     /// not `config.self_update` -- unlike the rest of `Config`, self-update
     /// settings apply immediately rather than only on the next load, so
     /// `state.config` (frozen at startup) would show a saved change as
-    /// reverted until a restart.
+    /// reverted until a restart. `image_tags` likewise.
     pub fn from_config(
         config: &Config,
         config_path: &Path,
         self_update: &SelfUpdateConfig,
+        image_tags: &ImageTagsConfig,
     ) -> Self {
         let quadlet_dir = config
             .quadlet_dir
@@ -52,6 +58,8 @@ impl FormValues {
             self_update_mode: self_update.mode.as_str().to_string(),
             self_update_poll_interval_secs: self_update.poll_interval_secs.to_string(),
             self_update_repo: self_update.repo.clone(),
+            image_tags_enabled: image_tags.enabled,
+            image_tags_poll_interval_secs: image_tags.poll_interval_secs.to_string(),
             github_token: GithubTokenStatus::detect(config, config_path),
         }
     }
@@ -214,6 +222,7 @@ fn text_field(
 pub struct LiveStatus<'a> {
     pub health: Health,
     pub self_update_status: &'a UpdateStatus,
+    pub image_tags_status: &'a TagsStatus,
 }
 
 pub fn page(
@@ -228,6 +237,7 @@ pub fn page(
     let LiveStatus {
         health,
         self_update_status,
+        image_tags_status,
     } = live;
     let body = html! {
         (page_header("Settings", html! {}))
@@ -384,6 +394,34 @@ pub fn page(
                         input.input type="text" id="self_update_repo" name="repo"
                             value=(values.self_update_repo) placeholder="owner/name";
                         p.field-hint { "Point this at your own fork if it publishes its own releases." }
+                    }
+                    p.field-hint { "Applies immediately -- no restart needed." }
+                }
+                div.card #image-tags-card {
+                    h3 { "Pinned image tags" }
+                    p.field-hint {
+                        "A container whose image names a version tag (" code { "nginx:1.27.2" }
+                        ", not " code { "latest" } ") gets a badge on its row when the registry "
+                        "has a newer version of the same kind of tag, with a button to switch to it. "
+                        "Prereleases are never offered."
+                    }
+                    (imagetags::status_fragment(image_tags_status, csrf))
+                    div.field {
+                        label.checkbox-line for="image_tags_enabled" {
+                            input type="checkbox" id="image_tags_enabled" name="image_tags_enabled"
+                                checked[values.image_tags_enabled];
+                            "Check in the background"
+                        }
+                        p.field-hint {
+                            "Off still leaves " em { "Check now" } " and each row's "
+                            em { "Check for update" } " working."
+                        }
+                    }
+                    div.field {
+                        label for="image_tags_poll_interval_secs" { "Check every" }
+                        select.input id="image_tags_poll_interval_secs" name="image_tags_poll_interval_secs" {
+                            (selfupdate::interval_options(&values.image_tags_poll_interval_secs))
+                        }
                     }
                     p.field-hint { "Applies immediately -- no restart needed." }
                 }

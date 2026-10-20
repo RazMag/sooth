@@ -5,7 +5,8 @@
 //! self-update fields (`mode`/`poll_interval_secs`/`repo`) are the one
 //! exception: `save` also calls `AppState.self_update.configure(..)`, which
 //! persists them and applies them live in the same request -- see
-//! `crate::selfupdate`.
+//! `crate::selfupdate`. The pinned-image tag fields (`image_tags_*`) apply
+//! live the same way, via `AppState.image_tags` (`crate::imagetags`).
 
 use std::net::SocketAddr;
 
@@ -20,6 +21,17 @@ use crate::error::{AppError, FragmentError, PageError};
 use crate::web::templates::settings::{EnvLocks, FormValues};
 use crate::web::templates::{self};
 
+/// The form as currently saved -- the live self-update / image-tag
+/// settings, the startup `Config` for the rest.
+fn current_values(state: &AppState) -> FormValues {
+    FormValues::from_config(
+        &state.config,
+        &state.config_path,
+        &state.self_update.config_snapshot(),
+        &state.image_tags.config_snapshot(),
+    )
+}
+
 #[derive(Deserialize)]
 pub struct SavedQuery {
     saved: Option<String>,
@@ -33,11 +45,7 @@ pub async fn page(
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
-    let values = FormValues::from_config(
-        &state.config,
-        &state.config_path,
-        &state.self_update.config_snapshot(),
-    );
+    let values = current_values(&state);
     let message = match query.saved.as_deref() {
         Some("password") => {
             Some("Password saved. Restart Sooth for the new password to take effect.")
@@ -47,6 +55,7 @@ pub async fn page(
         None => None,
     };
     let self_update_status = state.self_update.snapshot();
+    let image_tags_status = state.image_tags.snapshot();
     templates::settings::page(
         &values,
         &EnvLocks::detect(),
@@ -57,6 +66,7 @@ pub async fn page(
         templates::settings::LiveStatus {
             health: state.health.get(),
             self_update_status: &self_update_status,
+            image_tags_status: &image_tags_status,
         },
     )
 }
@@ -73,6 +83,7 @@ async fn render_error(
         .await
         .unwrap_or_default();
     let self_update_status = state.self_update.snapshot();
+    let image_tags_status = state.image_tags.snapshot();
     (
         axum::http::StatusCode::UNPROCESSABLE_ENTITY,
         templates::settings::page(
@@ -85,6 +96,7 @@ async fn render_error(
             templates::settings::LiveStatus {
                 health: state.health.get(),
                 self_update_status: &self_update_status,
+                image_tags_status: &image_tags_status,
             },
         ),
     )
@@ -103,6 +115,9 @@ pub struct SettingsForm {
     mode: String,
     poll_interval_secs: String,
     repo: String,
+    #[serde(default)]
+    image_tags_enabled: Option<String>,
+    image_tags_poll_interval_secs: String,
 }
 
 pub async fn save(
@@ -119,11 +134,7 @@ pub async fn save(
     // token isn't part of this form (it has its own, see
     // `save_github_token`), so its display fields come from the still-live
     // `state.config` rather than anything just submitted.
-    let unchanged = FormValues::from_config(
-        &state.config,
-        &state.config_path,
-        &state.self_update.config_snapshot(),
-    );
+    let unchanged = current_values(&state);
     let entered = || FormValues {
         bind_addr: form.bind_addr.clone(),
         quadlet_dir: form.quadlet_dir.clone(),
@@ -133,6 +144,8 @@ pub async fn save(
         self_update_mode: form.mode.clone(),
         self_update_poll_interval_secs: form.poll_interval_secs.clone(),
         self_update_repo: form.repo.clone(),
+        image_tags_enabled: form.image_tags_enabled.is_some(),
+        image_tags_poll_interval_secs: form.image_tags_poll_interval_secs.clone(),
         github_token: unchanged.github_token.clone(),
     };
 
@@ -190,6 +203,22 @@ pub async fn save(
         .await);
     }
 
+    let Some(image_tags_poll_interval_secs) = form
+        .image_tags_poll_interval_secs
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .filter(|s| *s >= 60)
+    else {
+        return Ok(render_error(
+            &state,
+            &session,
+            &entered(),
+            "Pinned image tag check interval must be at least 60 seconds",
+        )
+        .await);
+    };
+
     let updates = [
         ("bind_addr", toml::Value::String(bind_addr.to_string())),
         ("quadlet_dir", toml::Value::String(quadlet_dir.to_string())),
@@ -224,6 +253,15 @@ pub async fn save(
     {
         return Ok(render_error(&state, &session, &entered(), &e.to_string()).await);
     }
+    if let Err(e) = state
+        .image_tags
+        .configure(crate::imagetags::ImageTagsConfig {
+            enabled: form.image_tags_enabled.is_some(),
+            poll_interval_secs: image_tags_poll_interval_secs,
+        })
+    {
+        return Ok(render_error(&state, &session, &entered(), &e.to_string()).await);
+    }
 
     tracing::info!(path = %state.config_path.display(), "settings saved");
     Ok(Redirect::to("/settings?saved=settings").into_response())
@@ -246,11 +284,7 @@ pub async fn change_password(
         return Err(AppError::Csrf.into());
     }
 
-    let values = FormValues::from_config(
-        &state.config,
-        &state.config_path,
-        &state.self_update.config_snapshot(),
-    );
+    let values = current_values(&state);
     let fail = |msg: &'static str| render_error(&state, &session, &values, msg);
 
     if EnvLocks::detect().auth_password_hash {
@@ -309,11 +343,7 @@ pub async fn save_github_token(
     }
 
     if EnvLocks::detect().github_token {
-        let values = FormValues::from_config(
-            &state.config,
-            &state.config_path,
-            &state.self_update.config_snapshot(),
-        );
+        let values = current_values(&state);
         return Ok(render_error(
             &state,
             &session,

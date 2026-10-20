@@ -18,8 +18,9 @@ use crate::imageinfo;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
 use crate::quadlet::ports::{self, ExposedPort, MemberPorts, SplitPorts};
 use crate::quadlet::refs::{self, MissingRefs};
+use crate::quadlet::versiontag::{self, Candidate};
 use crate::quadlet::{
-    QuadletUnit, UnitKind, containerref, discovery, install, naming, portnotes, writer,
+    QuadletUnit, UnitKind, containerref, discovery, iniedit, install, naming, portnotes, writer,
 };
 use crate::systemd::UnitStatus;
 
@@ -224,6 +225,183 @@ pub fn pullable_image(file_name: &str, units: &[QuadletUnit]) -> Option<String> 
         .find(|u| u.kind == UnitKind::Container && u.file_name == file_name)
         .filter(|_| !builds_locally(file_name, units))
         .and_then(|u| refs::container_image(u, units))
+}
+
+/// A pinned container's newer tags, for its list-row badge
+/// (`templates::imagetags::tag_badge`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewerTags {
+    /// The tag it's pinned to now.
+    pub current: String,
+    pub candidates: Vec<Candidate>,
+    /// Why "Switch" is refused, when it is.
+    pub blocked: Option<String>,
+    /// The `.image` quadlet the tag is written in and how many containers
+    /// use it -- switching moves all of them.
+    pub shared: Option<(String, usize)>,
+}
+
+/// [`NewerTags`] for each pinned container among `units` that has any, by
+/// file name -- from the tag listings `AppState.image_tags` already holds,
+/// so a render never waits on a registry.
+pub fn newer_tags(
+    state: &AppState,
+    units: &[(QuadletUnit, UnitStatus)],
+    all: &[QuadletUnit],
+) -> HashMap<String, NewerTags> {
+    newer_tags_with(
+        units.iter().map(|(u, _)| u),
+        all,
+        &state.git_sync.synced_groups(),
+        |image| state.image_tags.newer(image),
+    )
+}
+
+/// [`newer_tags`] for one container, read fresh from disk.
+pub fn newer_tags_of(state: &AppState, file_name: &str) -> Result<Option<NewerTags>, AppError> {
+    let all = discovery::load_all(&state.quadlet_dir)?;
+    let unit = all.iter().filter(|u| u.file_name == file_name);
+    Ok(
+        newer_tags_with(unit, &all, &state.git_sync.synced_groups(), |image| {
+            state.image_tags.newer(image)
+        })
+        .remove(file_name),
+    )
+}
+
+/// The pure part of [`newer_tags`].
+fn newer_tags_with<'a>(
+    units: impl Iterator<Item = &'a QuadletUnit>,
+    all: &[QuadletUnit],
+    synced_groups: &[String],
+    newer: impl Fn(&str) -> Vec<Candidate>,
+) -> HashMap<String, NewerTags> {
+    let mut out = HashMap::new();
+    for unit in units.filter(|u| u.kind == UnitKind::Container) {
+        let Some(image) = refs::container_image(unit, all) else {
+            continue;
+        };
+        let candidates = newer(&image);
+        let Some((_, current)) = versiontag::split_tag(&image).filter(|_| !candidates.is_empty())
+        else {
+            continue;
+        };
+        let (blocked, shared) = match refs::image_line(unit, all) {
+            Err(why) => (Some(format!("Can't switch here: {why}.")), None),
+            Ok(line) => {
+                let blocked = destination_overlap(synced_groups, &line.unit.group).map(|g| {
+                    format!(
+                        "Can't switch here: {} is synced from git ('{g}') -- change the tag \
+                         in the repository instead.",
+                        line.unit.file_name
+                    )
+                });
+                let shared = (line.unit.kind == UnitKind::Image).then(|| {
+                    let users = refs::consumers_of(line.unit, all).len();
+                    (line.unit.file_name.clone(), users)
+                });
+                (blocked, shared)
+            }
+        };
+        out.insert(
+            unit.file_name.clone(),
+            NewerTags {
+                current: current.to_string(),
+                candidates,
+                blocked,
+                shared,
+            },
+        );
+    }
+    out
+}
+
+/// What [`switch_image_tag`] did.
+#[derive(Debug)]
+pub struct TagSwitch {
+    /// The new image reference.
+    pub image: String,
+    /// Services restarted onto it (those that were running or failed).
+    pub restarted: Vec<String>,
+}
+
+/// Moves a pinned container onto `tag`, one of the newer tags sooth found
+/// for it (never an arbitrary value from the request): pulls the new
+/// image first, so a failed pull leaves everything as it was, then rewrites
+/// the tag in the `Image=` line (the container's own, or its `.image`
+/// quadlet's -- `refs::image_line`) as text, reloads, and restarts every
+/// container using that line which is running or failed. Refused when the
+/// line sits in a git-synced group: the next sync would put the old tag
+/// back. CSRF is the caller's job.
+pub async fn switch_image_tag(
+    state: &AppState,
+    file_name: &str,
+    tag: &str,
+) -> Result<TagSwitch, AppError> {
+    let invalid = |msg: String| AppError::from(crate::quadlet::QuadletError::Validation(msg));
+    let all = discovery::load_all(&state.quadlet_dir)?;
+    let container = all
+        .iter()
+        .find(|u| u.kind == UnitKind::Container && u.file_name == file_name)
+        .ok_or_else(|| AppError::NotFound(file_name.to_string()))?;
+    let image = refs::container_image(container, &all)
+        .ok_or_else(|| invalid(format!("{file_name} names no image")))?;
+    if !state.image_tags.newer(&image).iter().any(|c| c.tag == tag) {
+        return Err(invalid(format!(
+            "{tag} isn't a newer tag of {image} that Sooth knows of -- check again"
+        )));
+    }
+    let line =
+        refs::image_line(container, &all).map_err(|why| invalid(format!("Can't switch: {why}")))?;
+    if let Some(g) = destination_overlap(&state.git_sync.synced_groups(), &line.unit.group) {
+        return Err(git_sync_conflict(&g));
+    }
+    let (repo, _) = versiontag::split_tag(&line.value)
+        .ok_or_else(|| invalid(format!("{} has no tag to change", line.value)))?;
+    let new_ref = format!("{repo}:{tag}");
+    let patched =
+        iniedit::replace_value(&line.unit.raw, line.section, "Image", &line.value, &new_ref)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{} changed on disk -- reload and try again",
+                    line.unit.file_name
+                ))
+            })?;
+
+    imageinfo::pull(&new_ref).await.map_err(invalid)?;
+    writer::write_atomic(&state.quadlet_dir, &line.unit.rel_path(), &patched)?;
+    state.systemd.reload().await?;
+    let _ = state.events.send(DashboardEvent::UnitsChanged);
+    tracing::info!(file = %line.unit.rel_path(), from = %line.value, to = %new_ref, "image tag switched");
+
+    let users: Vec<&QuadletUnit> = if line.unit.kind == UnitKind::Image {
+        let names = refs::consumers_of(line.unit, &all);
+        all.iter()
+            .filter(|u| names.contains(&u.file_name))
+            .collect()
+    } else {
+        vec![container]
+    };
+    let mut restarted = Vec::new();
+    for unit in users {
+        let service = unit.service_name();
+        let status = state.systemd.status(&service).await?;
+        if !(status.is_active() || status.is_failed()) {
+            continue;
+        }
+        tracing::info!(unit = %service, image = %new_ref, "restarting for switched image tag");
+        state.systemd.restart(&service).await?;
+        let status = state.systemd.status(&service).await?;
+        let _ = state.events.send(DashboardEvent::Status {
+            service: service.clone(),
+            status,
+        });
+        restarted.push(service);
+    }
+    Ok(TagSwitch {
+        image: new_ref,
+        restarted,
+    })
 }
 
 /// The Services list's Ports column for `pods` and their members: each pod's
@@ -935,6 +1113,55 @@ mod tests {
         assert_eq!(section_index_path(UnitKind::Image), "/images");
         assert_eq!(section_index_path(UnitKind::Build), "/images");
         assert_eq!(section_index_path(UnitKind::Kube), "/units");
+    }
+
+    #[test]
+    fn newer_tags_says_where_the_tag_lives_and_when_switching_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        std::fs::create_dir_all(d.join("synced")).unwrap();
+        let put = |name: &str, body: &str| std::fs::write(d.join(name), body).unwrap();
+        put(
+            "own.container",
+            "[Container]\nImage=docker.io/library/nginx:1.25\n",
+        );
+        put("a.container", "[Container]\nImage=pg.image\n");
+        put("b.container", "[Container]\nImage=pg.image\n");
+        put(
+            "pg.image",
+            "[Image]\nImage=docker.io/library/postgres:16.4\n",
+        );
+        put(
+            "synced/git.container",
+            "[Container]\nImage=docker.io/library/nginx:1.25\n",
+        );
+        put(
+            "latest.container",
+            "[Container]\nImage=docker.io/library/nginx:latest\n",
+        );
+        let all = discovery::load_all(d).unwrap();
+        let newer = |image: &str| {
+            let tags: Vec<String> = ["1.27", "16.6"].iter().map(|t| t.to_string()).collect();
+            versiontag::split_tag(image)
+                .map(|(_, tag)| versiontag::newer(tag, &tags))
+                .unwrap_or_default()
+        };
+        let got = newer_tags_with(all.iter(), &all, &synced(&["synced"]), newer);
+
+        let own = &got["own.container"];
+        assert_eq!(own.current, "1.25");
+        assert_eq!(own.candidates[0].tag, "1.27");
+        assert_eq!((own.blocked.as_ref(), own.shared.as_ref()), (None, None));
+        assert_eq!(got["a.container"].shared, Some(("pg.image".to_string(), 2)));
+        assert!(
+            got["git.container"]
+                .blocked
+                .as_ref()
+                .unwrap()
+                .contains("synced")
+        );
+        assert!(!got.contains_key("latest.container"));
+        assert!(!got.contains_key("pg.image"));
     }
 
     fn synced(groups: &[&str]) -> Vec<String> {

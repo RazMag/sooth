@@ -3,6 +3,7 @@ pub mod edit_delete;
 pub mod environment;
 pub mod gitsync;
 pub mod groups;
+pub mod imagetags;
 pub mod list;
 pub mod logs;
 pub mod pods;
