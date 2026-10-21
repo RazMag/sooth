@@ -976,6 +976,52 @@
   .gitsync-disclosure-body { margin-top: 0.6rem; max-width: 26rem; }
   .gitsync-disclosure-body > .field:last-of-type { margin-bottom: 0.6rem; }
 
+  /* The Add / Edit git-sync dialogs (templates/gitsync.rs): wider than the
+     generic modal, laid out as a grid -- everything full width except the
+     branch picker and the poll interval, which share a row. On a screen
+     with room to spare, `overflow: visible` lets the group picker's panel
+     hang past the dialog's edge instead of scrolling it; a small one keeps
+     the modal's own scrolling, since it may not fit. */
+  .modal-dialog.gitsync-dialog { width: min(38rem, calc(100vw - 2.5rem)); }
+  @media (min-width: 32rem) and (min-height: 48rem) {
+    .modal-dialog.gitsync-dialog { overflow: visible; }
+  }
+  .gitsync-dialog .modal-body { padding: 1.1rem 1.25rem 0; }
+  .gitsync-dialog .modal-header code { font-size: 0.95em; }
+  .gitsync-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 11rem;
+    column-gap: 1rem;
+  }
+  .gitsync-grid > * { grid-column: 1 / -1; }
+  .gitsync-grid > .field:has(.branch-picker) { grid-column: 1; }
+  .gitsync-grid > .field:has(.input-unit) { grid-column: 2; }
+  .gitsync-grid .field > .input:not(textarea),
+  .gitsync-grid .branch-picker > .input { width: 100%; max-width: none; }
+  .gitsync-grid .branch-picker { display: flex; flex-direction: column; gap: 0.3rem; }
+  .gitsync-grid .branch-picker > .field-hint { margin: 0; }
+  /* The group field's own hint sits under its picker, not after the
+     field's bottom margin. */
+  .gitsync-grid .field[data-group-field] { margin-bottom: 0.3rem; }
+  @media (max-width: 32rem) {
+    .gitsync-grid { grid-template-columns: minmax(0, 1fr); }
+    .gitsync-grid > .field:has(.branch-picker),
+    .gitsync-grid > .field:has(.input-unit) { grid-column: 1; }
+  }
+  .gitsync-hint { margin: 0 0 0.9rem; }
+  .field-error { color: var(--color-danger); }
+  .input-unit { display: flex; align-items: center; gap: 0.5rem; }
+  .input-unit > .input { width: 5.5rem; }
+  .input-unit > span { font-size: 0.85rem; color: var(--color-muted); }
+  /* Footer bar: a rule above, buttons right, the clone-wait note left. */
+  .gitsync-dialog-actions {
+    align-items: center;
+    margin: 0.4rem -1.25rem 0;
+    padding: 0.8rem 1.25rem;
+    border-top: 1px solid var(--color-line);
+  }
+  .gitsync-wait { margin: 0 auto 0 0; }
+
   /* Secrets page (templates/secrets.rs + frontend/secrets.js): every row stays
      one line -- the Value column holds a mask or the revealed value (first
      line only, ellipsized; the full value is its tooltip and what Copy

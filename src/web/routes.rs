@@ -153,6 +153,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/git-sync", get(gitsync::page).post(gitsync::add))
         .route("/git-sync/rows", get(gitsync::rows))
         .route("/git-sync/edit", post(gitsync::edit))
+        .route("/git-sync/branches", post(gitsync::branches))
         .route("/git-sync/sync", post(gitsync::sync_now))
         .route("/git-sync/force", post(gitsync::force_resync))
         .route("/git-sync/delete", post(gitsync::delete))
