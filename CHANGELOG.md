@@ -6,6 +6,17 @@ All notable changes to sooth are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-21
+
+### Fixed
+
+- **A git sync switched to another branch stopped picking up new commits.**
+  After editing a sync to track a different branch, it showed "Up to date"
+  at the commit it switched to, even after the branch moved on, and "Sync
+  now" didn't help. Every check now fetches the tracked branch explicitly.
+  Syncs already in this state catch up on their first check after
+  upgrading.
+
 ## [1.0.1] - 2026-10-21
 
 ### Added
@@ -355,7 +366,8 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
-[Unreleased]: https://github.com/RazMag/sooth/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/RazMag/sooth/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/RazMag/sooth/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/RazMag/sooth/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/RazMag/sooth/compare/v0.6.2...v1.0.0
 [0.6.2]: https://github.com/RazMag/sooth/compare/v0.6.1...v0.6.2
