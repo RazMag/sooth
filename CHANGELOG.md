@@ -6,6 +6,37 @@ All notable changes to sooth are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-21
+
+### Added
+
+- **Pick a git sync's branch from a list.** The Branch field on the Git
+  Sync page used to be a free-text box. Once you enter a remote, sooth now
+  asks it for its branches and shows them in a dropdown, with the remote's
+  default branch marked. "Remote default" is still the first choice, and it
+  keeps a sync on whatever the remote's default branch is. Editing a sync
+  lists the remote's branches with the tracked one selected. If that branch
+  has been deleted on the remote, it stays in the list marked "(not on
+  remote)". Private `https://github.com/...` remotes use the GitHub token
+  from Settings, just like a clone. If the branches can't be listed, you get
+  the old text box back with git's error.
+
+### Changed
+
+- **Adding and editing a git sync happens in a dialog.** "+ Git sync" in
+  the page header opens the Add form, and each sync's Edit button opens the
+  same kind of dialog, both laid out in two columns. The Add dialog reopens
+  with your values if the add fails. An open Edit dialog no longer closes
+  when a sync's status updates, and a rejected change shows its error in the
+  dialog instead of a browser alert.
+
+### Fixed
+
+- **A rejected git sync edit no longer breaks the sync.** Changing a sync's
+  remote to one that couldn't be fetched was refused, but the checkout was
+  left pointing at the bad URL. Every check after that failed until the
+  checkout was fixed by hand. The previous remote is now put back.
+
 ## [1.0.0] - 2026-10-21
 
 ### Added
@@ -324,7 +355,8 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
-[Unreleased]: https://github.com/RazMag/sooth/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/RazMag/sooth/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/RazMag/sooth/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/RazMag/sooth/compare/v0.6.2...v1.0.0
 [0.6.2]: https://github.com/RazMag/sooth/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/RazMag/sooth/compare/v0.6.0...v0.6.1
