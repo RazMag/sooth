@@ -41,8 +41,8 @@ pub struct GitAuth {
 
 impl GitAuth {
     /// Writes the askpass wrapper script into `state_dir` (created if
-    /// missing) and returns a `GitAuth` that [`clone`]/[`fetch`]/
-    /// [`fetch_ref`] will use for a GitHub HTTPS remote, or `None` if
+    /// missing) and returns a `GitAuth` that [`clone`]/[`fetch`] will
+    /// use for a GitHub HTTPS remote, or `None` if
     /// `token` is blank -- the "no token configured" case, where those
     /// remotes behave exactly as before this existed.
     pub fn setup(exe_path: &Path, state_dir: &Path, token: &str) -> std::io::Result<Option<Self>> {
@@ -198,7 +198,16 @@ fn parse_ls_remote(out: &str) -> RemoteBranches {
     listing
 }
 
-/// `git -C <dir> fetch --quiet origin <branch>`. `remote` is `origin`'s
+/// `git -C <dir> fetch --quiet origin
+/// +refs/heads/<branch>:refs/remotes/origin/<branch>` -- an explicit,
+/// forced refspec, so `origin/<branch>` is always what the remote has now.
+/// A bare `fetch origin <branch>` only updates `FETCH_HEAD` unless the
+/// checkout's configured `remote.origin.fetch` happens to map that branch,
+/// and the `--single-branch` clone only maps the branch it cloned: after an
+/// edit switches branches, every poll would compare `HEAD` against a
+/// remote-tracking ref frozen at the switch and report "up to date"
+/// forever. Forced (`+`) so a force-pushed remote still lands and shows up
+/// as a divergence rather than as a failed fetch. `remote` is `origin`'s
 /// configured URL -- not passed on the command line (the fetch targets the
 /// already-configured `origin`), only used to decide whether `auth` applies.
 pub async fn fetch(
@@ -214,32 +223,7 @@ pub async fn fetch(
         .arg("fetch")
         .arg("--quiet")
         .arg("origin")
-        .arg(branch);
-    run(cmd).await?;
-    Ok(())
-}
-
-/// `git -C <dir> fetch --quiet origin <branch>:refs/remotes/origin/<branch>`
-/// -- an explicit refspec, unlike [`fetch`], so the remote-tracking ref
-/// exists locally even for a branch the original `--single-branch` clone
-/// never fetched. Needed before [`checkout_branch`] can switch to a branch
-/// that isn't the one already checked out (see `GitSyncManager::edit`).
-/// `remote` is the same "which URL is this really talking to" hint as
-/// `fetch`'s.
-pub async fn fetch_ref(
-    dir: &Path,
-    branch: &str,
-    remote: &str,
-    auth: Option<&GitAuth>,
-) -> Result<(), GitSyncError> {
-    let mut cmd = base_command();
-    apply_auth(&mut cmd, remote, auth);
-    cmd.arg("-C")
-        .arg(dir)
-        .arg("fetch")
-        .arg("--quiet")
-        .arg("origin")
-        .arg(format!("{branch}:refs/remotes/origin/{branch}"));
+        .arg(format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"));
     run(cmd).await?;
     Ok(())
 }
@@ -262,7 +246,7 @@ pub async fn set_remote_url(dir: &Path, remote: &str) -> Result<(), GitSyncError
 /// discarding whatever the working tree previously held (consistent with
 /// [`super::manager`]'s "files in a synced group are remote-managed"
 /// posture). Used when a sync's tracked branch or remote changes, after
-/// [`fetch_ref`] has made sure `origin/<branch>` exists locally.
+/// [`fetch`] has made sure `origin/<branch>` exists locally.
 pub async fn checkout_branch(dir: &Path, branch: &str) -> Result<(), GitSyncError> {
     let mut cmd = base_command();
     cmd.arg("-C")
@@ -627,7 +611,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_ref_and_checkout_branch_switch_tracked_branches() {
+    async fn fetch_and_checkout_branch_switch_tracked_branches() {
         let origin = make_origin();
         assert!(
             git(origin.path(), &["checkout", "--quiet", "-b", "staging"])
@@ -663,7 +647,7 @@ mod tests {
         // Switching the tracked branch (the `GitSyncManager::edit` path):
         // fetch the new branch's ref explicitly, since `--single-branch`
         // never brought it down, then check it out.
-        fetch_ref(
+        fetch(
             dest.path(),
             "staging",
             &origin.path().display().to_string(),

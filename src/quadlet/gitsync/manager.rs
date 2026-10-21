@@ -224,7 +224,7 @@ impl GitSyncManager {
                     git::set_remote_url(&target, &remote).await?;
                 }
                 let before = git::rev_parse(&target, "HEAD").await?;
-                git::fetch_ref(
+                git::fetch(
                     &target,
                     &resolved_branch,
                     &remote,
@@ -368,15 +368,15 @@ impl GitSyncManager {
             (entry.config.clone(), entry.status.clone())
         };
         let target = quadlet_dir.join(&config.group);
-        let branch = config.branch.as_deref().unwrap_or("HEAD");
 
         set_state(&status, SyncState::Syncing);
         let _ = self.events.send(DashboardEvent::GitSyncChanged);
 
         let result: Result<String, GitSyncError> = async {
+            let branch = resolve_branch(&target, config.branch.as_deref()).await?;
             git::fetch(
                 &target,
-                branch,
+                &branch,
                 &config.remote,
                 self.github_auth.as_ref().as_ref(),
             )
@@ -981,6 +981,56 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(quadlet_dir.path().join("synced/web.container")).unwrap(),
             "[Container]\nImage=staging\n"
+        );
+    }
+
+    /// The `--single-branch` clone's `remote.origin.fetch` only maps `main`,
+    /// so after an edit to `staging` a bare `fetch origin staging` would
+    /// leave `origin/staging` frozen at the switch and every later poll
+    /// would report "up to date" while the remote moved on.
+    #[tokio::test]
+    async fn a_poll_after_a_branch_switch_follows_the_new_branch() {
+        let origin = make_origin();
+        assert!(
+            git(origin.path(), &["checkout", "--quiet", "-b", "staging"])
+                .status
+                .success()
+        );
+
+        let quadlet_dir = tempfile::tempdir().unwrap();
+        let (mgr, _config_dir) = manager();
+        mgr.add(
+            "synced".to_string(),
+            origin.path().display().to_string(),
+            Some("main".to_string()),
+            3600,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap();
+        mgr.edit(
+            "synced",
+            origin.path().display().to_string(),
+            Some("staging".to_string()),
+            3600,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap();
+        wait_for_commit(&mgr, &head(origin.path())).await;
+
+        std::fs::write(
+            origin.path().join("web.container"),
+            "[Container]\nImage=staging-2\n",
+        )
+        .unwrap();
+        commit_all(origin.path(), "staging moves on");
+        mgr.sync_now("synced").unwrap();
+        wait_for_commit(&mgr, &head(origin.path())).await;
+
+        assert_eq!(
+            std::fs::read_to_string(quadlet_dir.path().join("synced/web.container")).unwrap(),
+            "[Container]\nImage=staging-2\n"
         );
     }
 

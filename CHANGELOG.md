@@ -6,6 +6,15 @@ All notable changes to sooth are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A git sync switched to another branch stopped picking up new commits.**
+  After editing a sync to track a different branch, it showed "Up to date"
+  at the commit it switched to, even after the branch moved on, and "Sync
+  now" didn't help. Every check now fetches the tracked branch explicitly.
+  Syncs already in this state catch up on their first check after
+  upgrading.
+
 ## [1.0.1] - 2026-10-21
 
 ### Added
