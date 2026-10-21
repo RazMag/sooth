@@ -117,6 +117,16 @@ impl GitSyncManager {
         }
     }
 
+    /// The branches `remote` offers (see [`git::list_branches`]), with the
+    /// same GitHub token auth a clone of it would get. Read-only: nothing is
+    /// cloned or persisted.
+    pub async fn list_branches(&self, remote: &str) -> Result<git::RemoteBranches, GitSyncError> {
+        if remote.is_empty() {
+            return Err(GitSyncError::Validation("enter a remote URL first".into()));
+        }
+        git::list_branches(remote, self.github_auth.as_ref().as_ref()).await
+    }
+
     /// Validates and clones a new sync, persists it, starts the workloads it
     /// brings in that should be running (see `UnitSync::reload_and_apply`),
     /// then starts polling it immediately.

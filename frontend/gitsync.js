@@ -31,7 +31,14 @@ function restoreOpenDisclosures(container, open) {
     if (!details) continue;
     details.open = true;
     for (const el of details.querySelectorAll("input, textarea, select")) {
-      if (el.name && el.name in values) el.value = values[el.name];
+      if (!el.name || !(el.name in values)) continue;
+      const value = values[el.name];
+      // A fresh branch <select> holds only the configured branch until its
+      // listing re-loads (which posts the form, so it keeps this choice).
+      if (el.tagName === "SELECT" && ![...el.options].some((o) => o.value === value)) {
+        el.add(new Option(value, value));
+      }
+      el.value = value;
     }
   }
 }
@@ -41,11 +48,31 @@ export function initGitSync() {
   if (!container || initGitSync._wired === container) return;
   initGitSync._wired = container;
 
+  // An Edit form lists its remote's branches only once it's opened (see
+  // `branch_field` in templates/gitsync.rs), not for every card on every
+  // refresh. `toggle` doesn't bubble, hence the capture listener; a reopen
+  // by `restoreOpenDisclosures` fires it too, re-listing the fresh form --
+  // before htmx has processed the swapped-in picker (it does at settle),
+  // hence the (idempotent) `process` first.
+  container.addEventListener(
+    "toggle",
+    (e) => {
+      const picker = e.target.open && e.target.querySelector?.(".branch-picker");
+      if (!picker) return;
+      window.htmx.process(picker);
+      window.htmx.trigger(picker, "gitsync:list-branches");
+    },
+    true
+  );
+
   let pending = null;
-  container.addEventListener("htmx:beforeSwap", () => {
-    pending = captureOpenDisclosures(container);
+  // Only the container's own refresh -- a branch picker's swap inside a
+  // card bubbles up here too.
+  container.addEventListener("htmx:beforeSwap", (e) => {
+    if (e.detail.target === container) pending = captureOpenDisclosures(container);
   });
-  container.addEventListener("htmx:afterSwap", () => {
+  container.addEventListener("htmx:afterSwap", (e) => {
+    if (e.detail.target !== container) return;
     if (pending) restoreOpenDisclosures(container, pending);
     pending = null;
   });

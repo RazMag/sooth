@@ -6,6 +6,7 @@ use maud::{Markup, html};
 use super::settings::{GithubTokenStatus, github_token_summary};
 use super::{BannerKind, NavItem, banner, csrf_input, group_field, page_header, shell};
 use crate::health::Health;
+use crate::quadlet::gitsync::git::RemoteBranches;
 use crate::quadlet::gitsync::{GitSyncConfig, SyncState, SyncStatus};
 
 /// One sync card's data: its config, live status, the `Secret=` names its
@@ -125,12 +126,7 @@ fn render(
                     input.input type="text" id="remote" name="remote" value=(values.remote)
                         placeholder="git@github.com:you/quadlets.git" required;
                 }
-                div.field {
-                    label for="branch" { "Branch" }
-                    p.field-hint { "Leave blank to track the remote's default branch." }
-                    input.input type="text" id="branch" name="branch" value=(values.branch)
-                        placeholder="main";
-                }
+                (branch_field(BranchMode::Add, &values.remote, &values.branch))
                 div.field {
                     label for="poll_interval_secs" { "Poll interval (seconds)" }
                     p.field-hint { "How often to check the remote for new commits." }
@@ -235,13 +231,8 @@ fn sync_card(
                             label { "Remote URL" }
                             input.input type="text" name="remote" value=(config.remote) required;
                         }
-                        div.field {
-                            label { "Branch" }
-                            p.field-hint { "Leave blank to keep tracking the current branch." }
-                            input.input type="text" name="branch"
-                                value=(config.branch.as_deref().unwrap_or(""))
-                                placeholder=(config.branch.as_deref().unwrap_or("main"));
-                        }
+                        (branch_field(BranchMode::Edit, &config.remote,
+                            config.branch.as_deref().unwrap_or("")))
                         div.field {
                             label { "Poll interval (seconds)" }
                             input.input type="text" name="poll_interval_secs"
@@ -284,6 +275,121 @@ fn sync_card(
     }
 }
 
+/// Which form a branch picker sits in. In the add form a blank branch
+/// means "track the remote's default"; in a sync's Edit form it means "keep
+/// the branch already tracked" (see `GitSyncManager::edit`), and a listed
+/// branch is always preselected instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchMode {
+    Add,
+    Edit,
+}
+
+impl BranchMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            BranchMode::Add => "add",
+            BranchMode::Edit => "edit",
+        }
+    }
+}
+
+/// The Branch field: a text box until the remote's branches are listed, then
+/// a `<select>` of them. The picker re-fetches `POST /git-sync/branches`
+/// (with the whole form, so the typed remote and current choice go along)
+/// whenever the remote changes -- and, in an Edit form, when the disclosure
+/// opens (`frontend/gitsync.js` fires `gitsync:list-branches`), so a page of
+/// cards doesn't `ls-remote` every sync on load or on every
+/// `git-sync-changed` refresh.
+fn branch_field(mode: BranchMode, remote: &str, selected: &str) -> Markup {
+    let trigger = match mode {
+        BranchMode::Add if remote.trim().is_empty() => "change from:#remote",
+        BranchMode::Add => "load, change from:#remote",
+        BranchMode::Edit => {
+            "gitsync:list-branches, change[target.name=='remote'] from:closest form"
+        }
+    };
+    let vals = format!(r#"{{"mode":"{}"}}"#, mode.as_str());
+    html! {
+        div.field {
+            label for=[(mode == BranchMode::Add).then_some("branch")] {
+                "Branch " span.htmx-indicator.muted { "listing branches…" }
+            }
+            // Target and swap spelled out: the Edit form around it is
+            // `hx-swap="none"`, which it would otherwise inherit.
+            div.branch-picker hx-post="/git-sync/branches" hx-trigger=(trigger)
+                hx-target="this" hx-swap="innerHTML"
+                hx-vals=(vals) hx-sync="this:replace" hx-indicator="closest .field" {
+                @match mode {
+                    BranchMode::Edit if !selected.is_empty() => {
+                        select.input name="branch" { option value=(selected) selected { (selected) } }
+                    }
+                    _ => (branch_text(mode, selected, None)),
+                }
+            }
+        }
+    }
+}
+
+/// The picker's contents for a listing attempt -- the payload of
+/// `POST /git-sync/branches`. A failed listing (or no remote yet) falls back
+/// to the plain text box, with the reason, so a remote `ls-remote` can't
+/// reach (but a clone somehow could) still takes a typed branch.
+pub fn branch_picker(
+    mode: BranchMode,
+    selected: &str,
+    listing: Option<&Result<RemoteBranches, String>>,
+) -> Markup {
+    let listing = match listing {
+        None => return branch_text(mode, selected, None),
+        Some(Err(e)) => return branch_text(mode, selected, Some(e)),
+        Some(Ok(l)) if l.branches.is_empty() => {
+            return branch_text(mode, selected, Some("the remote has no branches"));
+        }
+        Some(Ok(l)) => l,
+    };
+    let selected = match mode {
+        BranchMode::Edit if selected.is_empty() => listing.default.as_deref().unwrap_or(""),
+        _ => selected,
+    };
+    let unlisted = !selected.is_empty() && !listing.branches.iter().any(|b| b == selected);
+    html! {
+        select.input id=[(mode == BranchMode::Add).then_some("branch")] name="branch" {
+            @if mode == BranchMode::Add {
+                option value="" selected[selected.is_empty()] {
+                    "Remote default"
+                    @if let Some(d) = &listing.default { " (" (d) ")" }
+                }
+            }
+            @for b in &listing.branches {
+                option value=(b) selected[b == selected] {
+                    (b)
+                    @if listing.default.as_deref() == Some(b.as_str()) { " (default)" }
+                }
+            }
+            @if unlisted {
+                option value=(selected) selected { (selected) " (not on remote)" }
+            }
+        }
+    }
+}
+
+fn branch_text(mode: BranchMode, value: &str, error: Option<&str>) -> Markup {
+    let blank = match mode {
+        BranchMode::Add => "Leave blank to track the remote's default branch.",
+        BranchMode::Edit => "Leave blank to keep tracking the current branch.",
+    };
+    html! {
+        @if let Some(e) = error {
+            p.field-hint { "Couldn't list the remote's branches: " (e) }
+        }
+        p.field-hint { (blank) }
+        input.input type="text" id=[(mode == BranchMode::Add).then_some("branch")] name="branch"
+            value=(value) placeholder="main"
+            autocomplete="off" autocapitalize="off" spellcheck="false";
+    }
+}
+
 fn state_badge(state: &SyncState) -> Markup {
     let (class, label) = match state {
         SyncState::Cloning => ("badge-warn", "Cloning…".to_string()),
@@ -320,5 +426,47 @@ fn checked_at(status: &SyncStatus) -> String {
         format!("{}m ago", secs / 60)
     } else {
         format!("{}h ago", secs / 3600)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listing() -> Result<RemoteBranches, String> {
+        Ok(RemoteBranches {
+            default: Some("main".into()),
+            branches: vec!["main".into(), "staging".into()],
+        })
+    }
+
+    #[test]
+    fn add_picker_offers_the_remote_default_as_a_blank_choice() {
+        let html = branch_picker(BranchMode::Add, "", Some(&listing())).into_string();
+        assert!(html.contains(r#"<option value="" selected>Remote default (main)</option>"#));
+        assert!(html.contains(r#"<option value="staging">staging</option>"#));
+        assert!(html.contains(r#"id="branch""#));
+    }
+
+    #[test]
+    fn edit_picker_preselects_the_tracked_branch_with_no_blank_choice() {
+        let html = branch_picker(BranchMode::Edit, "staging", Some(&listing())).into_string();
+        assert!(html.contains(r#"<option value="staging" selected>staging</option>"#));
+        assert!(!html.contains(r#"value="""#));
+    }
+
+    #[test]
+    fn a_branch_missing_from_the_remote_stays_selectable() {
+        let html = branch_picker(BranchMode::Edit, "gone", Some(&listing())).into_string();
+        assert!(html.contains(r#"<option value="gone" selected>gone (not on remote)</option>"#));
+    }
+
+    #[test]
+    fn a_failed_listing_falls_back_to_a_text_box_with_the_reason() {
+        let failed = Err("Repository not found".to_string());
+        let html = branch_picker(BranchMode::Add, "dev", Some(&failed)).into_string();
+        assert!(html.contains("Repository not found"));
+        assert!(html.contains(r#"type="text""#) && html.contains(r#"value="dev""#));
+        assert!(!html.contains("<select"));
     }
 }

@@ -16,7 +16,7 @@ use crate::error::{AppError, FragmentError, PageError};
 use crate::quadlet::gitsync::{GitSyncConfig, GitSyncError, SyncStatus};
 use crate::quadlet::{QuadletUnit, discovery, refs};
 use crate::web::core;
-use crate::web::templates::gitsync::{AddFormValues, SyncEntry};
+use crate::web::templates::gitsync::{AddFormValues, BranchMode, SyncEntry};
 use crate::web::templates::settings::GithubTokenStatus;
 use crate::web::templates::{self};
 
@@ -164,6 +164,54 @@ pub async fn add(
         }
         Err(e) => Ok(render_error(&e.to_string())),
     }
+}
+
+#[derive(Deserialize)]
+pub struct BranchesForm {
+    csrf_token: String,
+    #[serde(default)]
+    remote: String,
+    #[serde(default)]
+    branch: String,
+    #[serde(default)]
+    mode: String,
+}
+
+/// The Branch field's picker contents for the remote typed into the add or
+/// Edit form (posted whole by `templates::gitsync::branch_field`). A failed
+/// listing is still a 200 -- htmx drops non-2xx bodies -- rendered as the
+/// text box with git's message. CSRF-checked despite changing nothing: it
+/// makes sooth contact whatever URL the request names, with the GitHub
+/// token for a GitHub one, which a cross-site page shouldn't get to trigger.
+pub async fn branches(
+    State(state): State<AppState>,
+    session: Session,
+    Form(form): Form<BranchesForm>,
+) -> Result<Response, FragmentError> {
+    if !crate::auth::csrf::verify(&session, &form.csrf_token).await {
+        return Err(AppError::Csrf.into());
+    }
+    let mode = if form.mode == "edit" {
+        BranchMode::Edit
+    } else {
+        BranchMode::Add
+    };
+    let remote = form.remote.trim();
+    let listing = if remote.is_empty() {
+        None
+    } else {
+        Some(
+            state
+                .git_sync
+                .list_branches(remote)
+                .await
+                .map_err(|e| e.to_string()),
+        )
+    };
+    Ok(
+        templates::gitsync::branch_picker(mode, form.branch.trim(), listing.as_ref())
+            .into_response(),
+    )
 }
 
 // `group` travels as a form field, not a URL path segment: a nested group
