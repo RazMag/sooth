@@ -82,7 +82,7 @@ CSS/JS embedded, so it runs from any directory.
   on a per-sync interval, and fast-forwards the local checkout whenever it
   moves (adding/removing a sync applies immediately, no restart). The
   branch it tracks is picked from the remote's own branches (listed once
-  you enter the remote, or open a sync's Edit form) and can be switched
+  you enter the remote, or open a sync's Edit dialog) and can be switched
   later; leave it on "Remote default" to follow the remote's `HEAD`. Auth is
   whatever already works for this user's own `git` — SSH agent,
   `~/.ssh/config`, a credential helper — sooth stores no credentials of its

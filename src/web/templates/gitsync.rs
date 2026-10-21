@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use maud::{Markup, html};
 
 use super::settings::{GithubTokenStatus, github_token_summary};
-use super::{BannerKind, NavItem, banner, csrf_input, group_field, page_header, shell};
+use super::{BannerKind, Icon, NavItem, banner, csrf_input, group_field, icon, page_header, shell};
 use crate::health::Health;
 use crate::quadlet::gitsync::git::RemoteBranches;
 use crate::quadlet::gitsync::{GitSyncConfig, SyncState, SyncStatus};
@@ -89,7 +89,11 @@ fn render(
     health: Health,
 ) -> Markup {
     let body = html! {
-        (page_header("Git Sync", html! {}))
+        (page_header("Git Sync", html! {
+            button.btn.btn-sm.btn-primary type="button" data-gitsync-add {
+                (icon(Icon::Plus)) span { "Git sync" }
+            }
+        }))
         p.page-meta {
             "Keep a group directory in sync with a git repository. Sooth checks each "
             "remote on its own interval and fast-forwards the local checkout when it "
@@ -102,61 +106,127 @@ fn render(
             (rows(entries, csrf))
         }
 
-        h2 { "Add a git-sync" }
-        div.card {
-            @if let Some(msg) = add_error { (banner(BannerKind::Error, msg)) }
-            form.settings-form method="post" action="/git-sync" id="git-sync-add-form" {
+        (add_dialog(csrf, values, known_groups, token, add_error))
+        (edit_dialog(csrf))
+    };
+    shell("Git Sync", Some(NavItem::GitSync), Some(health), body)
+}
+
+/// The "Add a git-sync" modal, opened from the page header. A rejected
+/// submission re-renders the page with it already open
+/// (`data-gitsync-open-on-load`, see `frontend/gitsync.js`) and the values as
+/// typed. A plain form post, not htmx: it redirects back to the page once
+/// the clone is done.
+fn add_dialog(
+    csrf: &str,
+    values: &AddFormValues,
+    known_groups: &[String],
+    token: &GithubTokenStatus,
+    error: Option<&str>,
+) -> Markup {
+    html! {
+        dialog.modal-dialog.gitsync-dialog #git-sync-add-dialog data-gitsync-dialog
+            data-gitsync-open-on-load[error.is_some()] {
+            div.modal-header {
+                h2 { "Add a git sync" }
+                button.btn-icon type="button" data-gitsync-dialog-close aria-label="Close" {
+                    (icon(Icon::X))
+                }
+            }
+            form.modal-body method="post" action="/git-sync" id="git-sync-add-form" {
+                @if let Some(msg) = error { (banner(BannerKind::Error, msg)) }
                 (csrf_input(csrf))
-                (group_field(&values.group, known_groups, true))
-                p.field-hint {
-                    "Must be a new or empty subdirectory -- git-sync clones directly into it, "
-                    "e.g. " code { "media" } " or " code { "infra/monitoring" } "."
-                }
-                div.field {
-                    label for="remote" { "Remote URL" }
-                    p.field-hint {
-                        "Anything " code { "git clone" } " accepts. A private "
-                        code { "https://github.com/..." } " repo authenticates with the GitHub "
-                        "token from " a href="/settings#github-token-card" { "Settings" } "; "
-                        "any other private remote needs this user's own git to already be able "
-                        "to reach it (SSH agent, " code { "~/.ssh/config" } ", or a credential "
-                        "helper)."
+                div.gitsync-grid {
+                    div {
+                        (group_field(&values.group, known_groups, true))
+                        p.field-hint.gitsync-hint {
+                            "A new or empty folder, e.g. " code { "media" } " or "
+                            code { "infra/monitoring" } " -- the repository is cloned straight into it."
+                        }
                     }
-                    p.field-hint #git-sync-token-status { (github_token_summary(token)) }
-                    input.input type="text" id="remote" name="remote" value=(values.remote)
-                        placeholder="git@github.com:you/quadlets.git" required;
+                    div.field {
+                        label for="remote" { "Remote URL" }
+                        input.input type="text" id="remote" name="remote" value=(values.remote)
+                            placeholder="git@github.com:you/quadlets.git" required
+                            autocomplete="off" autocapitalize="off" spellcheck="false";
+                        p.field-hint {
+                            "Anything " code { "git clone" } " accepts. A private "
+                            code { "https://github.com/…" } " repo uses the GitHub token from "
+                            a href="/settings#github-token-card" { "Settings" } "; other private "
+                            "remotes use this user's own git auth (SSH agent, "
+                            code { "~/.ssh/config" } ", a credential helper)."
+                        }
+                        p.field-hint #git-sync-token-status { (github_token_summary(token)) }
+                    }
+                    (branch_field(BranchMode::Add, &values.remote, &values.branch))
+                    (interval_field("poll_interval_secs", &values.poll_interval_secs))
                 }
-                (branch_field(BranchMode::Add, &values.remote, &values.branch))
-                div.field {
-                    label for="poll_interval_secs" { "Poll interval (seconds)" }
-                    p.field-hint { "How often to check the remote for new commits." }
-                    input.input type="text" id="poll_interval_secs" name="poll_interval_secs"
-                        value=(values.poll_interval_secs);
-                }
-                button.btn.btn-primary type="submit" id="git-sync-add-submit" { "Add" }
-                p.field-hint #git-sync-add-wait hidden {
-                    "Cloning the repository -- this can take a moment for a large one."
+                div.modal-actions.gitsync-dialog-actions {
+                    p.field-hint.gitsync-wait #git-sync-add-wait hidden {
+                        "Cloning the repository -- this can take a moment for a large one."
+                    }
+                    button.btn.btn-ghost type="button" data-gitsync-dialog-close { "Cancel" }
+                    button.btn.btn-primary type="submit" id="git-sync-add-submit" { "Add" }
                 }
             }
         }
-        // The POST blocks on a real `git clone` (see
-        // `GitSyncManager::add`), so this is a genuine multi-second wait,
-        // not an instant round trip -- swap the button for a spinner and
-        // reveal the note above so it reads as "working", not stalled.
-        // Plain inline script (same pattern as `restarting_page`'s) since
-        // this page-specific one-shot behavior doesn't earn a spot in the
-        // bundled `frontend/**`.
-        script {
-            (maud::PreEscaped(
-                "document.getElementById('git-sync-add-form').addEventListener('submit', function () {\
-                 document.getElementById('git-sync-add-submit').classList.add('btn-loading');\
-                 document.getElementById('git-sync-add-submit').disabled = true;\
-                 document.getElementById('git-sync-add-wait').hidden = false;\
-                 });"
-            ))
+    }
+}
+
+/// The page's one shared Edit modal, filled in from the clicked card's Edit
+/// button by `frontend/gitsync.js`. It lives outside `#git-sync-rows`, so a
+/// `git-sync-changed` refresh of the cards never closes it mid-edit. Posts
+/// over htmx; the script closes it on success and shows a rejection's
+/// message inline.
+fn edit_dialog(csrf: &str) -> Markup {
+    html! {
+        dialog.modal-dialog.gitsync-dialog #git-sync-edit-dialog data-gitsync-dialog
+            data-gitsync-edit-dialog {
+            div.modal-header {
+                h2 { "Edit " code data-gitsync-edit-group {} }
+                button.btn-icon type="button" data-gitsync-dialog-close aria-label="Close" {
+                    (icon(Icon::X))
+                }
+            }
+            form.modal-body hx-post="/git-sync/edit" hx-swap="none"
+                hx-disabled-elt="find button[type=submit]" {
+                div data-gitsync-edit-error {}
+                (csrf_input(csrf))
+                input type="hidden" name="group" value="";
+                div.gitsync-grid {
+                    div.field {
+                        label for="git-sync-edit-remote" { "Remote URL" }
+                        input.input type="text" id="git-sync-edit-remote" name="remote" required
+                            autocomplete="off" autocapitalize="off" spellcheck="false";
+                        p.field-hint {
+                            "Changing the remote or branch checks the new one out, replacing "
+                            "the files in the group."
+                        }
+                    }
+                    (branch_field(BranchMode::Edit, "", ""))
+                    (interval_field("git-sync-edit-interval", ""))
+                }
+                div.modal-actions.gitsync-dialog-actions {
+                    button.btn.btn-ghost type="button" data-gitsync-dialog-close { "Cancel" }
+                    button.btn.btn-primary type="submit" { "Save" }
+                }
+            }
         }
-    };
-    shell("Git Sync", Some(NavItem::GitSync), Some(health), body)
+    }
+}
+
+/// "Check every [60] seconds" -- the poll interval, sized for a number.
+fn interval_field(id: &str, value: &str) -> Markup {
+    html! {
+        div.field {
+            label for=(id) { "Check every" }
+            div.input-unit {
+                input.input type="text" id=(id) name="poll_interval_secs" value=(value)
+                    inputmode="numeric" required;
+                span { "seconds" }
+            }
+        }
+    }
 }
 
 /// The status cards only -- the payload of `GET /git-sync/rows`, re-fetched
@@ -220,27 +290,9 @@ fn sync_card(
                         button.btn.btn-sm type="submit" { "Force resync" }
                     }
                 }
-                details.gitsync-disclosure data-group=(config.group) data-kind="edit" {
-                    summary.btn.btn-sm { "Edit" }
-                    form.gitsync-disclosure-body
-                        hx-post="/git-sync/edit" hx-swap="none"
-                        hx-on::response-error="alert('That change was rejected — check the remote and branch and try again.')" {
-                        (csrf_input(csrf))
-                        input type="hidden" name="group" value=(config.group);
-                        div.field {
-                            label { "Remote URL" }
-                            input.input type="text" name="remote" value=(config.remote) required;
-                        }
-                        (branch_field(BranchMode::Edit, &config.remote,
-                            config.branch.as_deref().unwrap_or("")))
-                        div.field {
-                            label { "Poll interval (seconds)" }
-                            input.input type="text" name="poll_interval_secs"
-                                value=(config.poll_interval_secs);
-                        }
-                        button.btn.btn-sm.btn-primary type="submit" { "Save" }
-                    }
-                }
+                button.btn.btn-sm type="button" data-gitsync-edit=(config.group)
+                    data-remote=(config.remote) data-branch=(config.branch.as_deref().unwrap_or(""))
+                    data-interval=(config.poll_interval_secs) { "Edit" }
             }
             // Set apart from the routine actions above: the trigger itself
             // is always a plain button, and only reveals the confirmation
@@ -297,10 +349,9 @@ impl BranchMode {
 /// The Branch field: a text box until the remote's branches are listed, then
 /// a `<select>` of them. The picker re-fetches `POST /git-sync/branches`
 /// (with the whole form, so the typed remote and current choice go along)
-/// whenever the remote changes -- and, in an Edit form, when the disclosure
-/// opens (`frontend/gitsync.js` fires `gitsync:list-branches`), so a page of
-/// cards doesn't `ls-remote` every sync on load or on every
-/// `git-sync-changed` refresh.
+/// whenever the remote changes -- and, in the Edit dialog, each time it
+/// opens for a sync (`frontend/gitsync.js` fires `gitsync:list-branches`),
+/// so the page doesn't `ls-remote` every sync on load.
 fn branch_field(mode: BranchMode, remote: &str, selected: &str) -> Markup {
     let trigger = match mode {
         BranchMode::Add if remote.trim().is_empty() => "change from:#remote",
@@ -312,7 +363,7 @@ fn branch_field(mode: BranchMode, remote: &str, selected: &str) -> Markup {
     let vals = format!(r#"{{"mode":"{}"}}"#, mode.as_str());
     html! {
         div.field {
-            label for=[(mode == BranchMode::Add).then_some("branch")] {
+            label for=(branch_id(mode)) {
                 "Branch " span.htmx-indicator.muted { "listing branches…" }
             }
             // Target and swap spelled out: the Edit form around it is
@@ -354,7 +405,7 @@ pub fn branch_picker(
     };
     let unlisted = !selected.is_empty() && !listing.branches.iter().any(|b| b == selected);
     html! {
-        select.input id=[(mode == BranchMode::Add).then_some("branch")] name="branch" {
+        select.input id=(branch_id(mode)) name="branch" {
             @if mode == BranchMode::Add {
                 option value="" selected[selected.is_empty()] {
                     "Remote default"
@@ -380,13 +431,21 @@ fn branch_text(mode: BranchMode, value: &str, error: Option<&str>) -> Markup {
         BranchMode::Edit => "Leave blank to keep tracking the current branch.",
     };
     html! {
-        @if let Some(e) = error {
-            p.field-hint { "Couldn't list the remote's branches: " (e) }
-        }
-        p.field-hint { (blank) }
-        input.input type="text" id=[(mode == BranchMode::Add).then_some("branch")] name="branch"
+        input.input type="text" id=(branch_id(mode)) name="branch"
             value=(value) placeholder="main"
             autocomplete="off" autocapitalize="off" spellcheck="false";
+        @if let Some(e) = error {
+            p.field-hint.field-error { "Couldn't list the remote's branches: " (e) }
+        }
+        p.field-hint { (blank) }
+    }
+}
+
+/// Both dialogs are in the page at once, so each picker gets its own id.
+fn branch_id(mode: BranchMode) -> &'static str {
+    match mode {
+        BranchMode::Add => "branch",
+        BranchMode::Edit => "git-sync-edit-branch",
     }
 }
 
@@ -438,6 +497,45 @@ mod tests {
             default: Some("main".into()),
             branches: vec!["main".into(), "staging".into()],
         })
+    }
+
+    fn config() -> GitSyncConfig {
+        GitSyncConfig {
+            group: "infra/web".into(),
+            remote: "git@example.com:me/q.git".into(),
+            branch: Some("staging".into()),
+            poll_interval_secs: 90,
+        }
+    }
+
+    #[test]
+    fn a_card_edit_button_carries_what_the_shared_dialog_needs() {
+        let entry = (
+            config(),
+            SyncStatus::default(),
+            Default::default(),
+            Default::default(),
+        );
+        let html = rows(&[entry], "tok").into_string();
+        assert!(html.contains(r#"data-gitsync-edit="infra/web""#));
+        assert!(html.contains(r#"data-remote="git@example.com:me/q.git""#));
+        assert!(html.contains(r#"data-branch="staging""#));
+        assert!(html.contains(r#"data-interval="90""#));
+    }
+
+    #[test]
+    fn only_a_rejected_add_reopens_its_dialog() {
+        let values = AddFormValues::default();
+        let open = add_dialog(
+            "tok",
+            &values,
+            &[],
+            &GithubTokenStatus::default(),
+            Some("bad"),
+        );
+        let shut = add_dialog("tok", &values, &[], &GithubTokenStatus::default(), None);
+        assert!(open.into_string().contains("data-gitsync-open-on-load"));
+        assert!(!shut.into_string().contains("data-gitsync-open-on-load"));
     }
 
     #[test]
