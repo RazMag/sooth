@@ -117,6 +117,16 @@ impl GitSyncManager {
         }
     }
 
+    /// The branches `remote` offers (see [`git::list_branches`]), with the
+    /// same GitHub token auth a clone of it would get. Read-only: nothing is
+    /// cloned or persisted.
+    pub async fn list_branches(&self, remote: &str) -> Result<git::RemoteBranches, GitSyncError> {
+        if remote.is_empty() {
+            return Err(GitSyncError::Validation("enter a remote URL first".into()));
+        }
+        git::list_branches(remote, self.github_auth.as_ref().as_ref()).await
+    }
+
     /// Validates and clones a new sync, persists it, starts the workloads it
     /// brings in that should be running (see `UnitSync::reload_and_apply`),
     /// then starts polling it immediately.
@@ -203,30 +213,45 @@ impl GitSyncManager {
         let target = quadlet_dir.join(group);
 
         let remote_changed = remote != existing.remote;
-        if remote_changed {
-            git::set_remote_url(&target, &remote).await?;
-        }
         let resolved_branch = branch
             .filter(|b| !b.is_empty())
             .unwrap_or_else(|| existing.branch.clone().unwrap_or_default());
         let branch_changed = Some(&resolved_branch) != existing.branch.as_ref();
 
         if remote_changed || branch_changed {
-            let before = git::rev_parse(&target, "HEAD").await?;
-            git::fetch_ref(
-                &target,
-                &resolved_branch,
-                &remote,
-                self.github_auth.as_ref().as_ref(),
-            )
-            .await?;
-            let after = git::rev_parse(&target, &format!("origin/{resolved_branch}")).await?;
-            let units =
-                UnitSync::plan(self.systemd.as_deref(), group, &target, &before, &after).await;
-            units.stop_removed().await;
-            git::checkout_branch(&target, &resolved_branch).await?;
-            units.forget_removed(quadlet_dir);
-            units.reload_and_apply().await;
+            let switched = async {
+                if remote_changed {
+                    git::set_remote_url(&target, &remote).await?;
+                }
+                let before = git::rev_parse(&target, "HEAD").await?;
+                git::fetch_ref(
+                    &target,
+                    &resolved_branch,
+                    &remote,
+                    self.github_auth.as_ref().as_ref(),
+                )
+                .await?;
+                let after = git::rev_parse(&target, &format!("origin/{resolved_branch}")).await?;
+                let units =
+                    UnitSync::plan(self.systemd.as_deref(), group, &target, &before, &after).await;
+                units.stop_removed().await;
+                git::checkout_branch(&target, &resolved_branch).await?;
+                units.forget_removed(quadlet_dir);
+                units.reload_and_apply().await;
+                Ok::<(), GitSyncError>(())
+            }
+            .await;
+            // A rejected edit keeps the old config (and its poll task), so
+            // `origin` has to go back too -- otherwise every later poll
+            // fetches from the URL that was just refused.
+            if let Err(e) = switched {
+                if remote_changed
+                    && let Err(restore) = git::set_remote_url(&target, &existing.remote).await
+                {
+                    warn!(group, error = %restore, "failed to restore git-sync remote after a rejected edit");
+                }
+                return Err(e);
+            }
         }
 
         let config = GitSyncConfig {
@@ -957,6 +982,39 @@ mod tests {
             std::fs::read_to_string(quadlet_dir.path().join("synced/web.container")).unwrap(),
             "[Container]\nImage=staging\n"
         );
+    }
+
+    #[tokio::test]
+    async fn a_rejected_edit_leaves_origin_on_the_old_remote() {
+        let origin = make_origin();
+        let quadlet_dir = tempfile::tempdir().unwrap();
+        let (mgr, _config_dir) = manager();
+        let remote = origin.path().display().to_string();
+        mgr.add(
+            "synced".to_string(),
+            remote.clone(),
+            Some("main".to_string()),
+            60,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap();
+
+        let missing = origin.path().join("no-such-repo").display().to_string();
+        mgr.edit(
+            "synced",
+            missing,
+            Some("main".to_string()),
+            60,
+            quadlet_dir.path(),
+        )
+        .await
+        .unwrap_err();
+
+        let checkout = quadlet_dir.path().join("synced");
+        let url = git(&checkout, &["remote", "get-url", "origin"]);
+        assert_eq!(String::from_utf8_lossy(&url.stdout).trim(), remote);
+        assert_eq!(mgr.snapshot()[0].0.remote, remote);
     }
 
     #[tokio::test]

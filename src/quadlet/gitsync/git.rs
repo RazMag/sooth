@@ -149,6 +149,55 @@ pub async fn clone(
     Ok(())
 }
 
+/// A remote's branches as `git ls-remote` reports them: every
+/// `refs/heads/*` name in the remote's own (ref name) order, plus the one
+/// its `HEAD` points at -- `None` when the remote doesn't advertise a
+/// symbolic `HEAD` (an empty repo, or a server too old to send it).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RemoteBranches {
+    pub default: Option<String>,
+    pub branches: Vec<String>,
+}
+
+/// `git ls-remote --symref -- <remote> HEAD refs/heads/*` -- the branches a
+/// sync could track, for the Git Sync page's branch picker. Needs no
+/// checkout, so it works before a sync exists (the add form) as well as
+/// for an existing one's possibly-just-edited remote.
+pub async fn list_branches(
+    remote: &str,
+    auth: Option<&GitAuth>,
+) -> Result<RemoteBranches, GitSyncError> {
+    let mut cmd = base_command();
+    apply_auth(&mut cmd, remote, auth);
+    cmd.arg("ls-remote")
+        .arg("--symref")
+        .arg("--")
+        .arg(remote)
+        .arg("HEAD")
+        .arg("refs/heads/*");
+    Ok(parse_ls_remote(&run(cmd).await?))
+}
+
+/// Parses `ls-remote --symref` output: `ref: refs/heads/<b>\tHEAD` names the
+/// default, `<sha>\trefs/heads/<b>` lists a branch, anything else (the
+/// `<sha>\tHEAD` line) is skipped.
+fn parse_ls_remote(out: &str) -> RemoteBranches {
+    let mut listing = RemoteBranches::default();
+    for line in out.lines() {
+        let Some((left, name)) = line.split_once('\t') else {
+            continue;
+        };
+        if let Some(target) = left.strip_prefix("ref: ") {
+            if name == "HEAD" {
+                listing.default = target.strip_prefix("refs/heads/").map(str::to_string);
+            }
+        } else if let Some(branch) = name.strip_prefix("refs/heads/") {
+            listing.branches.push(branch.to_string());
+        }
+    }
+    listing
+}
+
 /// `git -C <dir> fetch --quiet origin <branch>`. `remote` is `origin`'s
 /// configured URL -- not passed on the command line (the fetch targets the
 /// already-configured `origin`), only used to decide whether `auth` applies.
@@ -629,6 +678,38 @@ mod tests {
             std::fs::read_to_string(dest.path().join("web.container")).unwrap(),
             "[Container]\nImage=staging\n"
         );
+    }
+
+    #[tokio::test]
+    async fn list_branches_reports_every_branch_and_the_default() {
+        let origin = make_origin();
+        assert!(git(origin.path(), &["branch", "staging"]).status.success());
+
+        let listing = list_branches(&origin.path().display().to_string(), None)
+            .await
+            .unwrap();
+
+        assert_eq!(listing.default.as_deref(), Some("main"));
+        assert_eq!(listing.branches, ["main", "staging"]);
+    }
+
+    #[test]
+    fn parse_ls_remote_skips_the_head_sha_and_non_branch_refs() {
+        let out = "ref: refs/heads/trunk\tHEAD\n\
+                   abc\tHEAD\n\
+                   abc\trefs/heads/feat/x\n\
+                   def\trefs/heads/trunk\n\
+                   123\trefs/tags/v1\n";
+        let listing = parse_ls_remote(out);
+        assert_eq!(listing.default.as_deref(), Some("trunk"));
+        assert_eq!(listing.branches, ["feat/x", "trunk"]);
+    }
+
+    #[test]
+    fn parse_ls_remote_without_a_symref_has_no_default() {
+        let listing = parse_ls_remote("abc\trefs/heads/main\n");
+        assert_eq!(listing.default, None);
+        assert_eq!(listing.branches, ["main"]);
     }
 
     #[tokio::test]
