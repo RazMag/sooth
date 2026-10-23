@@ -1044,6 +1044,11 @@
   .secret-copy-off { visibility: hidden; }
   .secret-row-actions { text-align: right; }
   .secret-row-actions .inline-form { display: inline-flex; }
+  /* Registries page (templates/registries.rs): one line per login, the
+     row's Update/Remove icons right-aligned like the Secrets table's. */
+  .registries-table td { white-space: nowrap; vertical-align: middle; }
+  .registry-row-actions { text-align: right; }
+  .registry-row-actions .inline-form { display: inline-flex; }
   .btn-icon-sm { padding: 0.3rem; }
   .btn-icon-sm svg { width: 0.95rem; height: 0.95rem; }
   .btn-icon-danger:hover { color: var(--color-danger); }

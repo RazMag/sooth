@@ -15,6 +15,7 @@ mod imagetags;
 mod journal;
 mod logging;
 mod quadlet;
+mod registries;
 mod secrets;
 mod selfupdate;
 mod systemd;
