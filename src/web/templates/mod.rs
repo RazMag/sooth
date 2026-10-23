@@ -15,6 +15,7 @@ pub mod logs;
 pub mod networks;
 pub mod pods;
 pub mod ports;
+pub mod registries;
 pub mod secrets;
 pub mod selfupdate;
 pub mod services;
@@ -48,6 +49,7 @@ pub enum NavItem {
     Ports,
     Environment,
     Secrets,
+    Registries,
     GitSync,
     /// Not part of `all()` -- rendered as its own control in the sidebar
     /// footer, not the main nav list.
@@ -64,6 +66,7 @@ impl NavItem {
             NavItem::Ports => "/ports",
             NavItem::Environment => "/environment",
             NavItem::Secrets => "/secrets",
+            NavItem::Registries => "/registries",
             NavItem::GitSync => "/git-sync",
             NavItem::Settings => "/settings",
         }
@@ -78,6 +81,7 @@ impl NavItem {
             NavItem::Ports => "Ports",
             NavItem::Environment => "Environment",
             NavItem::Secrets => "Secrets",
+            NavItem::Registries => "Registries",
             NavItem::GitSync => "Git Sync",
             NavItem::Settings => "Settings",
         }
@@ -92,12 +96,13 @@ impl NavItem {
             NavItem::Ports => Icon::Ports,
             NavItem::Environment => Icon::Environment,
             NavItem::Secrets => Icon::Secrets,
+            NavItem::Registries => Icon::Registries,
             NavItem::GitSync => Icon::GitSync,
             NavItem::Settings => Icon::Settings,
         }
     }
 
-    fn all() -> [NavItem; 8] {
+    fn all() -> [NavItem; 9] {
         [
             NavItem::Services,
             NavItem::Volumes,
@@ -106,6 +111,7 @@ impl NavItem {
             NavItem::Ports,
             NavItem::Environment,
             NavItem::Secrets,
+            NavItem::Registries,
             NavItem::GitSync,
         ]
     }

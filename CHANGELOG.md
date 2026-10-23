@@ -6,6 +6,19 @@ All notable changes to sooth are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-23
+
+### Added
+
+- **Log in to private registries.** A new Registries page logs in to a
+  container registry, so containers can use private images. The login is
+  saved to `~/.config/containers/auth.json`, so it still works after a
+  reboot. A plain `podman login` doesn't survive a reboot, because it saves
+  under `$XDG_RUNTIME_DIR`. The page lists each registry you're logged in to
+  and its username, flags logins that will be lost at reboot, and can update
+  or remove each one. podman checks the credentials with the registry
+  before saving them.
+
 ## [1.0.2] - 2026-10-21
 
 ### Fixed
@@ -366,7 +379,8 @@ All notable changes to sooth are documented here. The format follows
 
 - The detail page's move-to-group dropdown now closes on an outside click.
 
-[Unreleased]: https://github.com/RazMag/sooth/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/RazMag/sooth/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/RazMag/sooth/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/RazMag/sooth/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/RazMag/sooth/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/RazMag/sooth/compare/v0.6.2...v1.0.0
