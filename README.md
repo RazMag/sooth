@@ -112,6 +112,17 @@ CSS/JS embedded, so it runs from any directory.
   editor's insert panel can add a `Secret=` line, and deleting a secret is
   refused while any quadlet still references it. See
   [Secrets and Git Sync](#secrets-and-git-sync).
+- **Registries** — log in to the container registries your private images
+  come from. sooth runs `podman login` and saves the login to
+  `~/.config/containers/auth.json`, where podman finds it for every unit,
+  including after a reboot. A plain `podman login` from a shell saves to
+  `$XDG_RUNTIME_DIR` instead, which is cleared at reboot. The page lists
+  each registry with its username, never the password, and flags
+  session-only logins as "Until reboot". Logging in to a registry again
+  replaces its credentials (and removes a session-only login for it that
+  would otherwise take precedence), and Remove logs out of it. The password
+  is piped to podman on stdin and never logged or shown again. Prefer a
+  read-only access token: podman stores it unencrypted (owner-only).
 - **Self-update** — checks GitHub Releases for a newer `sooth` binary on a
   schedule, from the Updates card on the Settings page: *Off* (the default),
   *Notify* (surface an "update available" banner, then let a human download

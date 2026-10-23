@@ -6,6 +6,17 @@ All notable changes to sooth are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Log in to private registries.** A new Registries page logs in to a
+  container registry, so containers can use private images. The login is
+  saved to `~/.config/containers/auth.json`, so it still works after a
+  reboot. A plain `podman login` doesn't survive a reboot, because it saves
+  under `$XDG_RUNTIME_DIR`. The page lists each registry you're logged in to
+  and its username, flags logins that will be lost at reboot, and can update
+  or remove each one. podman checks the credentials with the registry
+  before saving them.
+
 ## [1.0.2] - 2026-10-21
 
 ### Fixed
