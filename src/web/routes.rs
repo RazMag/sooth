@@ -147,6 +147,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/groups/delete", post(groups::delete))
         .route("/ports", get(ports::index))
         .route("/ports/rows", get(ports::rows))
+        .route("/ports/conflicts", get(ports::conflicts))
         .route("/ports/pull", post(ports::pull))
         .route("/ports/assign", post(ports::assign))
         .route("/ports/host", post(ports::host_port))

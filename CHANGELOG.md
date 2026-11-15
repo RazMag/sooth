@@ -33,6 +33,9 @@ All notable changes to sooth are documented here. The format follows
 - **Flat layout.** Every list can show its units in one name-sorted list,
   next to Pods and Directories, with chips naming each unit's pod and
   folder.
+- **Port conflicts up front.** The Ports page opens with a card for each
+  host port claimed more than once: who holds it, which stopped unit would
+  fail to bind, and a button to change that unit's port.
 - **Machine page.** "This machine" in the sidebar is now one entry, a
   page with this host's facts (architecture, OS, podman and sooth versions,
   quadlet folder), its health checks, the podman and git versions, and a

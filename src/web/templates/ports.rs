@@ -247,9 +247,107 @@ pub fn host_port_why(file_name: &str, port: &str) -> String {
     )
 }
 
+/// One port claimed by more than one unit, for the conflict card.
+struct Clash<'r, 'a> {
+    label: String,
+    rows: Vec<&'r PortRow<'a>>,
+}
+
+/// Groups the conflicting rows: rows that name each other land in one
+/// clash, keyed by the set of units and the protocol.
+fn clashes<'r, 'a>(rows: &'r [PortRow<'a>]) -> Vec<Clash<'r, 'a>> {
+    let mut out: Vec<(Vec<String>, Clash)> = Vec::new();
+    for row in rows.iter().filter(|r| !r.conflicts.is_empty()) {
+        let mut key: Vec<String> = row.conflicts.iter().map(|(n, _)| n.clone()).collect();
+        key.push(row.owner.file_name.clone());
+        key.push(row.mapping.protocol.as_str().to_string());
+        key.sort();
+        key.dedup();
+        match out.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, clash)) => clash.rows.push(row),
+            None => {
+                let port = match row.mapping.host_port {
+                    Some(r) if r.start == r.end => r.start.to_string(),
+                    Some(r) => format!("{}-{}", r.start, r.end),
+                    None => "?".to_string(),
+                };
+                let label = format!("{port}/{}", row.mapping.protocol.as_str());
+                out.push((
+                    key,
+                    Clash {
+                        label,
+                        rows: vec![row],
+                    },
+                ));
+            }
+        }
+    }
+    out.into_iter().map(|(_, c)| c).collect()
+}
+
+fn names(rows: &[&PortRow]) -> String {
+    let names: Vec<&str> = rows.iter().map(|r| r.owner.file_name.as_str()).collect();
+    match names.as_slice() {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// What's going on with one clash, in a sentence.
+fn clash_story(rows: &[&PortRow]) -> String {
+    let (up, down): (Vec<&PortRow>, Vec<&PortRow>) =
+        rows.iter().partition(|r| r.owner.status.is_active());
+    match (up.as_slice(), down.len()) {
+        ([holder], 0) => format!("{} holds it.", holder.owner.file_name),
+        ([holder], n) => format!(
+            "{} holds it. {} {} stopped and would fail to bind when started.",
+            holder.owner.file_name,
+            names(&down),
+            if n == 1 { "is" } else { "are" }
+        ),
+        ([], _) => "None of them is running; only the first to start will bind it.".to_string(),
+        _ => format!("{} all publish it, but only one can bind it.", names(&up)),
+    }
+}
+
+/// The card above the Ports table: each host port claimed more than once,
+/// who holds it, and a way to edit the others. Re-fetched with the rows
+/// (`GET /ports/conflicts`); empty when there's no clash.
+pub fn conflicts_card(rows: &[PortRow]) -> Markup {
+    let clashes = clashes(rows);
+    html! {
+        @for clash in &clashes {
+            section.card.clash-card {
+                h2.card-title {
+                    code { (clash.label) } " is claimed "
+                    (match clash.rows.len() { 2 => "twice".to_string(), n => format!("{n} times") })
+                }
+                p.clash-story { (clash_story(&clash.rows)) }
+                div.clash-claims {
+                    @for row in &clash.rows {
+                        span.clash-claim {
+                            a href=(row.owner.href) { (row.owner.file_name) }
+                            " · " code { (row.mapping.raw) }
+                            @if !row.owner.status.is_active() {
+                                " " a.btn.btn-sm href={(row.owner.href) "/edit"} { "Change port…" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub fn ports_page(rows: &[PortRow], hosts: &[HostNet], csrf: &str, health: Health) -> Markup {
     let body = html! {
         (page_header("Ports", html! {}))
+        div #ports-conflicts hx-get="/ports/conflicts"
+            hx-trigger="sse:any-status delay:300ms, sse:units-changed delay:300ms"
+            hx-swap="innerHTML" {
+            (conflicts_card(rows))
+        }
         (ports_content(rows, hosts, csrf, None))
     };
     shell("Ports", Some(NavItem::Ports), Some(health), body)
@@ -381,5 +479,62 @@ fn host_network(hosts: &[HostNet], csrf: &str, error: Option<&str>) -> Markup {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::quadlet::ports::{HostPortRange, Protocol};
+
+    fn mapping(file: &str, raw: &str) -> PortMapping {
+        PortMapping {
+            file_name: file.into(),
+            host_port: Some(HostPortRange {
+                start: 8080,
+                end: 8080,
+            }),
+            protocol: Protocol::Tcp,
+            container_port: "8080".into(),
+            raw: raw.into(),
+            host_network: false,
+        }
+    }
+
+    #[test]
+    fn conflict_card_names_the_holder_and_the_one_that_would_fail() {
+        let mut up = UnitStatus::not_found();
+        up.active_state = "active".into();
+        let down = UnitStatus::not_found();
+        let (a, b) = (
+            mapping("qbit.container", "8080:8080"),
+            mapping("paperless.container", "8080:8000"),
+        );
+        let unit = |f: &str, st| UnitRef {
+            file_name: f.into(),
+            href: format!("/containers/{f}"),
+            status: st,
+            unpulled: None,
+        };
+        let rows = vec![
+            PortRow {
+                mapping: &a,
+                owner: unit("qbit.container", &up),
+                members: None,
+                conflicts: vec![("paperless.container".into(), None)],
+            },
+            PortRow {
+                mapping: &b,
+                owner: unit("paperless.container", &down),
+                members: None,
+                conflicts: vec![("qbit.container".into(), None)],
+            },
+        ];
+        let html = conflicts_card(&rows).into_string();
+        assert_eq!(html.matches("clash-card").count(), 1, "{html}");
+        assert!(html.contains("8080/tcp</code> is claimed twice"));
+        assert!(html.contains("qbit.container holds it. paperless.container is stopped and would fail to bind when started."));
+        assert!(html.contains(r#"href="/containers/paperless.container/edit""#));
+        assert!(conflicts_card(&rows[..0]).into_string().is_empty());
     }
 }

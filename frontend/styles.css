@@ -1601,6 +1601,12 @@
     .tab-bar { overflow-x: auto; }
   }
 
+  /* Ports conflict card (`ports::conflicts_card`). */
+  .clash-card { margin-bottom: 1rem; border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-line)); }
+  .clash-story { margin: 0 0 0.6rem; color: var(--color-muted); font-size: 0.875rem; }
+  .clash-claims { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; font-size: 0.875rem; }
+  .clash-claim { display: inline-flex; align-items: center; gap: 0.3rem; }
+
   /* Services bulk bar (`services::bulk_bar`, `frontend/bulk.js`). */
   .bulk-bar {
     display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;

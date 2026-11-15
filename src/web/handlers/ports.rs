@@ -167,6 +167,11 @@ pub async fn rows(
     .await?)
 }
 
+/// The conflict card above the table, re-fetched on the same events.
+pub async fn conflicts(State(state): State<AppState>) -> Result<maud::Markup, FragmentError> {
+    Ok(with_rows(&state, |rows, _| templates::ports::conflicts_card(rows)).await?)
+}
+
 #[derive(Deserialize)]
 pub struct PullForm {
     csrf_token: String,
