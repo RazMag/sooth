@@ -16,6 +16,9 @@ All notable changes to sooth are documented here. The format follows
   Configuration sections.
 - **Status reads word first.** The Status column says "Running" with how
   long it has been up, or "Failed" with the exit code and when it failed.
+  It now comes right after the name in every list, and Services shows Boot
+  and Auto-update as their own columns ("on" / "off" / the policy) instead
+  of icons.
 
 ### Added
 

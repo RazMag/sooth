@@ -494,7 +494,7 @@ pub fn kind_dot(kind: UnitKind) -> Markup {
 
 /// Reads a container's current `[Container]` `AutoUpdate=` policy from the
 /// parsed model (`None` == off / absent / unrecognised).
-fn autoupdate_mode(unit: &QuadletUnit) -> Option<AutoUpdateMode> {
+pub(crate) fn autoupdate_mode(unit: &QuadletUnit) -> Option<AutoUpdateMode> {
     unit.section("Container")
         .and_then(|s| s.get("AutoUpdate"))
         .and_then(AutoUpdateMode::parse)

@@ -1417,7 +1417,7 @@
   .cell-code { font-size: 0.8rem; color: var(--color-muted); overflow-wrap: break-word; }
   /* The name column carries the tree, chips and second line -- give it the
      room, and let detail columns (image refs, subnets) wrap instead. */
-  .tree-table th:first-child { width: 42%; }
+  .tree-table th:first-child { width: 34%; }
 
   /* Status: the live badge, then autostart / auto-update as bare icons. */
   .status-cell { display: flex; align-items: center; gap: 0.4rem; }
@@ -1555,6 +1555,11 @@
      itself hid (`[hidden]`) stay hidden. */
   .data-table [data-filtering] tr.is-collapsed:not([hidden]),
   .data-table [data-filtering] tr.pod-collapsed:not([hidden]) { display: table-row; }
+
+  /* Services' Boot / Auto-update columns (`list::boot_flag`). */
+  .flag-cell { font-size: 0.8rem; white-space: nowrap; }
+  .flag-on { color: var(--color-ink); }
+  .flag-off { color: var(--color-faint); }
 
   /* Toolbar state filter (`list::state_filter`): pure CSS via `:has()`, so
      it survives SSE badge swaps. A unit row whose badge doesn't match the
