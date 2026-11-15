@@ -25,7 +25,7 @@ fn done(headers: &HeaderMap) -> Response {
     if headers.contains_key("hx-request") {
         StatusCode::NO_CONTENT.into_response()
     } else {
-        Redirect::to("/").into_response()
+        Redirect::to("/services").into_response()
     }
 }
 

@@ -17,7 +17,7 @@ use crate::web::templates::{self};
 
 const KINDS: &[UnitKind] = templates::services::SPEC.kinds;
 
-fn compute_stats(units: &[(QuadletUnit, UnitStatus)]) -> Stats {
+pub fn compute_stats(units: &[(QuadletUnit, UnitStatus)]) -> Stats {
     let running = units.iter().filter(|(_, s)| s.is_active()).count();
     let failed = units.iter().filter(|(_, s)| s.is_failed()).count();
     Stats {

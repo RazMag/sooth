@@ -6,6 +6,7 @@ pub mod groups;
 pub mod imagetags;
 pub mod list;
 pub mod logs;
+pub mod overview;
 pub mod pods;
 pub mod ports;
 pub mod raw_create;

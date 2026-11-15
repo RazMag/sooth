@@ -19,6 +19,10 @@ All notable changes to sooth are documented here. The format follows
 
 ### Added
 
+- **Overview page.** The home page now says how many services are up,
+  with tiles for running, failed, newer image tags and Git Sync, a card for
+  this machine, and a "Needs you" list of problems with the action that
+  fixes each. Services moved to `/services`.
 - **Filter Services by state.** An All / Running / Stopped / Failed switch
   above the Services table shows only the units in that state.
 

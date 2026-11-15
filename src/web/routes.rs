@@ -9,8 +9,8 @@ use crate::auth;
 use crate::config::AppState;
 
 use super::handlers::{
-    detail, edit_delete, environment, gitsync, groups, imagetags, list, logs, pods, ports,
-    raw_create, registries, secrets, selfupdate, services, settings, unit_ops, validate,
+    detail, edit_delete, environment, gitsync, groups, imagetags, list, logs, overview, pods,
+    ports, raw_create, registries, secrets, selfupdate, services, settings, unit_ops, validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
@@ -105,7 +105,9 @@ fn mount_unit_routes(
 pub fn build_router(state: AppState) -> Router {
     let mut protected = Router::new()
         // Services: the home page, combining Containers + Pods.
-        .route("/", get(services::page))
+        .route("/", get(overview::page))
+        .route("/overview/body", get(overview::body))
+        .route("/services", get(services::page))
         .route("/services/rows", get(services::rows))
         .route("/services/counts", get(services::counts))
         // Containers/Pods: no standalone list page (that's Services above),

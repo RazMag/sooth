@@ -13,6 +13,7 @@ pub mod imagetags;
 pub mod list;
 pub mod logs;
 pub mod networks;
+pub mod overview;
 pub mod pods;
 pub mod ports;
 pub mod registries;
@@ -42,6 +43,7 @@ pub use icons::{Icon, brand_mark, favicon_href, icon};
 /// error pages).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavItem {
+    Overview,
     Services,
     Volumes,
     Networks,
@@ -59,7 +61,8 @@ pub enum NavItem {
 impl NavItem {
     pub fn href(self) -> &'static str {
         match self {
-            NavItem::Services => "/",
+            NavItem::Overview => "/",
+            NavItem::Services => "/services",
             NavItem::Volumes => "/volumes",
             NavItem::Networks => "/networks",
             NavItem::Images => "/images",
@@ -74,6 +77,7 @@ impl NavItem {
 
     pub fn label(self) -> &'static str {
         match self {
+            NavItem::Overview => "Overview",
             NavItem::Services => "Services",
             NavItem::Volumes => "Volumes",
             NavItem::Networks => "Networks",
@@ -89,6 +93,7 @@ impl NavItem {
 
     fn nav_icon(self) -> Icon {
         match self {
+            NavItem::Overview => Icon::Overview,
             NavItem::Services => Icon::Services,
             NavItem::Volumes => Icon::Volumes,
             NavItem::Networks => Icon::Networks,
@@ -108,7 +113,10 @@ impl NavItem {
     /// the sidebar footer.
     fn sections() -> [(&'static str, &'static [NavItem]); 3] {
         [
-            ("Fleet", &[NavItem::Services, NavItem::Ports]),
+            (
+                "Fleet",
+                &[NavItem::Overview, NavItem::Services, NavItem::Ports],
+            ),
             (
                 "This machine",
                 &[
@@ -359,7 +367,7 @@ fn status_display(status: &UnitStatus) -> (&'static str, &'static str) {
     }
 }
 
-fn now_usec() -> u64 {
+pub(crate) fn now_usec() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_micros() as u64)
@@ -387,7 +395,7 @@ fn rough_span(usec: u64) -> String {
 /// The second line of a status cell, under the state word: how long a
 /// running unit has been up, and for a failed one why and when. Empty when
 /// there's nothing worth saying (a transitional state, an unknown time).
-fn status_detail(status: &UnitStatus, now: u64) -> String {
+pub(crate) fn status_detail(status: &UnitStatus, now: u64) -> String {
     let ago = |t: u64| (t > 0 && t <= now).then(|| rough_span(now - t));
     if status.is_failed() {
         match (status.failure.as_deref(), ago(status.state_change_usec)) {
@@ -1533,8 +1541,14 @@ mod tests {
 
     #[test]
     fn section_back_target_covers_every_kind() {
-        assert_eq!(section_back_target(UnitKind::Container), ("/", "Services"));
-        assert_eq!(section_back_target(UnitKind::Pod), ("/", "Services"));
+        assert_eq!(
+            section_back_target(UnitKind::Container),
+            ("/services", "Services")
+        );
+        assert_eq!(
+            section_back_target(UnitKind::Pod),
+            ("/services", "Services")
+        );
         assert_eq!(
             section_back_target(UnitKind::Volume),
             ("/volumes", "Volumes")

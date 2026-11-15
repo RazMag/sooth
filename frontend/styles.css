@@ -2019,6 +2019,36 @@
   }
   .login-card h1 { display: flex; align-items: center; justify-content: center; gap: 0.5rem; text-align: center; margin: 0 0 1rem; }
 
+  /* Overview page (`templates::overview`). */
+  .overview-summary { margin: -0.25rem 0 1rem; color: var(--color-muted); max-width: 60rem; }
+  .overview-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .stat-card-note { color: var(--color-faint); font-size: 0.78rem; margin-top: 0.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 0.75rem; margin-top: 0.75rem; align-items: start; }
+  .machine-head { display: flex; align-items: center; gap: 0.7rem; }
+  .machine-avatar {
+    display: inline-grid; place-items: center; flex: none;
+    width: 2.1rem; height: 2.1rem; border-radius: 0.5rem;
+    background: var(--color-raised); border: 1px solid var(--color-line);
+    font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; color: var(--color-accent-ink);
+  }
+  .machine-name { font-weight: 620; }
+  .machine-meta { color: var(--color-muted); font-size: 0.8rem; }
+  .machine-counts { margin-top: 0.75rem; font-size: 0.85rem; color: var(--color-muted); }
+  .count-ok { color: var(--color-ok); font-weight: 560; }
+  .count-failed { color: var(--color-danger); font-weight: 560; }
+  .machine-warn { margin-top: 0.6rem; font-size: 0.8rem; color: var(--color-warn); }
+  .need-list { list-style: none; margin: 0; padding: 0; }
+  .need { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0; border-top: 1px solid var(--color-line); }
+  .need:first-child { border-top: 0; padding-top: 0; }
+  .need-text { flex: 1; min-width: 0; }
+  .need-title { font-size: 0.9rem; }
+  .need-note { color: var(--color-muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .need-actions { display: flex; gap: 0.4rem; flex: none; }
+  @media (max-width: 900px) {
+    .overview-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+
   /* Deep Moss accent pieces ------------------------------- *
      The gradient runs light to deep moss and only ever sits on accent
      pieces: the primary button, the active nav item, tile and header

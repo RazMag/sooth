@@ -21,8 +21,12 @@ CSS/JS embedded, so it runs from any directory.
 
 ## Features
 
-- **Services** landing page — Containers and Pods combined, with a
-  total/running/failed stat bar. A pod's published ports show on the member
+- **Overview** home page — how many services are up, tiles for running,
+  failed, newer image tags and Git Sync, this machine's card, and a "Needs
+  you" list of problems with the action that fixes each.
+- **Services** page — Containers and Pods combined, with a
+  total/running/failed stat bar and an All / Running / Stopped / Failed
+  filter. A pod's published ports show on the member
   container that serves them (the one you assigned it to on the Ports
   screen, else by its `ExposeHostPort=` or its image's `EXPOSE`); only ports
   none of them serve stay on the pod row.
