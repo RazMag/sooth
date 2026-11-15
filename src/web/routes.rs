@@ -111,6 +111,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/services", get(services::page))
         .route("/services/rows", get(services::rows))
         .route("/services/counts", get(services::counts))
+        .route("/services/bulk", post(services::bulk))
         // Containers/Pods: no standalone list page (that's Services above),
         // but they still need a create entry point and POST target.
         .route("/containers", post(raw_create::create))

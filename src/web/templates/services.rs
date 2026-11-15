@@ -81,6 +81,35 @@ pub fn counts_fragment(stats: &Stats) -> Markup {
     stats_bar(stats)
 }
 
+/// The bulk bar, stuck to the bottom of the window under the table: hidden until a row's checkbox is
+/// ticked (`frontend/bulk.js` fills `units` and the count).
+fn bulk_bar(csrf: &str) -> Markup {
+    html! {
+        form #bulk-bar .bulk-bar hidden hx-post="/services/bulk" hx-target="#bulk-result" hx-swap="innerHTML" {
+            (super::csrf_input(csrf))
+            input type="hidden" name="units" value="";
+            span.bulk-count { span data-bulk-count { "0" } " selected" }
+            button.btn.btn-sm type="submit" name="action" value="restart" { (icon(Icon::Restart)) span { "Restart" } }
+            button.btn.btn-sm type="submit" name="action" value="start" { (icon(Icon::Play)) span { "Start" } }
+            button.btn.btn-sm type="submit" name="action" value="stop" { (icon(Icon::Stop)) span { "Stop" } }
+            button.btn.btn-sm.btn-ghost type="button" data-bulk-clear { "Clear" }
+            span #bulk-result .bulk-result role="status" {}
+        }
+    }
+}
+
+/// The bar's one-line answer: "Restarted 2 units." plus any that failed.
+pub fn bulk_result(ok: usize, failed: &[(String, String)], done: &str) -> Markup {
+    html! {
+        @if ok > 0 {
+            span { (done) " " (ok) (if ok == 1 { " unit." } else { " units." }) }
+        }
+        @for (name, err) in failed {
+            span.bulk-error { " " @if !name.is_empty() { strong { (name) } ": " } (err) }
+        }
+    }
+}
+
 pub fn services_page(
     units: &[(QuadletUnit, UnitStatus)],
     stats: &Stats,
@@ -100,6 +129,29 @@ pub fn services_page(
             (stats_bar(stats))
         }
         (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units, groups, create))
+        (bulk_bar(csrf))
     };
     shell("Services", Some(NavItem::Services), Some(health), body)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bulk_result_counts_and_lists_failures() {
+        let html = bulk_result(
+            2,
+            &[("radarr.container".into(), "boom".into())],
+            "Restarted",
+        )
+        .into_string();
+        assert!(html.contains("Restarted 2 units."));
+        assert!(html.contains("<strong>radarr.container</strong>: boom"));
+        assert!(
+            bulk_result(1, &[], "Stopped")
+                .into_string()
+                .contains("Stopped 1 unit.")
+        );
+    }
 }

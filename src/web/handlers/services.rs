@@ -107,3 +107,45 @@ pub async fn counts(State(state): State<AppState>) -> Result<impl IntoResponse, 
     let units = core::load_units_for_kinds(&state, KINDS).await?;
     Ok(templates::services::counts_fragment(&compute_stats(&units)))
 }
+
+#[derive(serde::Deserialize)]
+pub struct BulkForm {
+    csrf_token: String,
+    /// `start`, `stop` or `restart` -- the bulk bar button pressed.
+    action: String,
+    /// The selected units' file names, comma-separated (filled in by
+    /// `frontend/bulk.js`).
+    units: String,
+}
+
+/// The bulk bar: one action on every selected unit, in turn. Answers with
+/// a one-line result for the bar (always 200 -- htmx drops other bodies);
+/// the rows' badges update themselves over SSE.
+pub async fn bulk(
+    State(state): State<AppState>,
+    session: Session,
+    axum::Form(form): axum::Form<BulkForm>,
+) -> impl IntoResponse {
+    let (action, done): (&'static str, &str) = match form.action.as_str() {
+        "start" => ("start", "Started"),
+        "stop" => ("stop", "Stopped"),
+        "restart" => ("restart", "Restarted"),
+        _ => {
+            return templates::services::bulk_result(0, &[("".into(), "unknown action".into())], "");
+        }
+    };
+    let mut ok = 0;
+    let mut failed: Vec<(String, String)> = Vec::new();
+    for name in form
+        .units
+        .split(',')
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
+        match core::execute_action(&state, &session, name, &form.csrf_token, action).await {
+            Ok(_) => ok += 1,
+            Err(e) => failed.push((name.to_string(), e.0.to_string())),
+        }
+    }
+    templates::services::bulk_result(ok, &failed, done)
+}

@@ -33,6 +33,8 @@ All notable changes to sooth are documented here. The format follows
 - **Flat layout.** Every list can show its units in one name-sorted list,
   next to Pods and Directories, with chips naming each unit's pod and
   folder.
+- **Bulk actions on Services.** Tick rows to get a bar with Restart,
+  Start and Stop for all of them at once.
 - **Filter Services by state.** An All / Running / Stopped / Failed switch
   above the Services table shows only the units in that state.
 

@@ -258,6 +258,10 @@ fn row(
                             (pod_toggle(&unit.file_name))
                         }
                     }
+                    @if service_columns && !unit.is_template() {
+                        input.row-select type="checkbox" value=(unit.file_name)
+                            aria-label={"Select " (unit.file_name)};
+                    }
                     (kind_dot(unit.kind))
                     div.tree-name {
                         div.tree-title {
