@@ -4,8 +4,14 @@
 @source "../src/web/templates";
 
 /* ------------------------------------------------------------------ *
- *  Design tokens
+ *  Design tokens -- "Deep Moss"
  * ------------------------------------------------------------------ *
+ *  Neutral grey surfaces with one deep moss accent. Green never fills a
+ *  surface: the accent lives in buttons, the active nav item, links,
+ *  focus rings and thin edges, and a light-to-deep moss gradient is used
+ *  on those accent pieces only. Healthy status is teal, so it never reads
+ *  as a button.
+ *
  *  Light values are the @theme defaults (also the SSR / no-JS default).
  *  The pre-paint <head> script always resolves an effective theme and
  *  stamps `data-theme` on <html>, so the dark palette needs to exist in
@@ -14,42 +20,53 @@
  * ------------------------------------------------------------------ */
 
 @theme {
-  --font-sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: "Plus Jakarta Sans", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  --color-canvas: #f6f7f9;
+  --color-canvas: #f5f6f8;
   --color-surface: #ffffff;
   --color-raised: #eef0f3;
   --color-line: #e4e7eb;
   --color-line-strong: #d3d8de;
-  --color-ink: #1b1e24;
-  --color-muted: #616772;
-  --color-faint: #9096a0;
+  --color-ink: #14171d;
+  --color-muted: #49505b;
+  --color-faint: #6b7280;
 
-  --color-accent: #3d6fdd;
+  /* Accent: text/links/focus (`accent`), primary fills (`accent-btn`),
+     text on accent-highlighted controls (`accent-ink`), accent borders
+     and edges (`accent-line`). `accent-soft` is deliberately neutral --
+     a selected control is marked by a moss edge or text, not a green fill. */
+  --color-accent: #3f6212;
+  --color-accent-btn: #2f4a0e;
+  --color-accent-ink: #2f4a0e;
+  --color-accent-line: rgb(63 98 18 / 0.38);
   --color-on-accent: #ffffff;
-  --color-accent-soft: #eef2fd;
+  --color-accent-soft: #eef0f3;
 
-  --color-danger: #d13c46;
+  --color-danger: #c62f38;
   --color-danger-soft: #fbebec;
-  --color-warn: #b6791d;
-  --color-warn-soft: #f9f1e3;
-  --color-ok: #1c9d5d;
-  --color-ok-soft: #e7f5ec;
+  --color-warn: #b45309;
+  --color-warn-soft: #fbf3e4;
+  --color-ok: #0d9488;
+  --color-ok-soft: #e6f6f4;
 
   /* Unit kinds -- the list tables' kind dots and resource chips. */
-  --color-kind-pod: #7552d1;
-  --color-kind-pod-soft: #f0ecfb;
-  --color-kind-container: #3d6fdd;
+  --color-kind-pod: #7c5cf0;
+  --color-kind-pod-soft: #f0ecfd;
+  --color-kind-container: #2f6fe8;
   --color-kind-container-soft: #eaf0fd;
-  --color-kind-volume: #0f8783;
+  --color-kind-volume: #0d9488;
   --color-kind-volume-soft: #e2f3f2;
-  --color-kind-network: #c0621c;
-  --color-kind-network-soft: #fbeee3;
-  --color-kind-image: #b0428a;
-  --color-kind-image-soft: #f8e9f2;
-  --color-kind-kube: #56677f;
+  --color-kind-network: #ea580c;
+  --color-kind-network-soft: #fdeee3;
+  --color-kind-image: #db2777;
+  --color-kind-image-soft: #fbe9f2;
+  --color-kind-kube: #64748b;
   --color-kind-kube-soft: #eceff3;
+
+  /* The moss gradient, light to deep. Accent pieces only, never a surface. */
+  --color-grad-from: #9cbf5c;
+  --color-grad-to: #2b440c;
 
   --shadow-pop: 0 6px 24px -6px rgb(15 18 23 / 0.16), 0 2px 6px -2px rgb(15 18 23 / 0.08);
 
@@ -58,74 +75,80 @@
 
 @layer theme {
   [data-theme="dark"] {
-    --color-canvas: #0e1014;
-    --color-surface: #16191f;
-    --color-raised: #1e222a;
-    --color-line: #282d37;
-    --color-line-strong: #3a4150;
-    --color-ink: #e6e8ec;
-    --color-muted: #99a1ad;
-    --color-faint: #6b7280;
+    --color-canvas: #0c0e12;
+    --color-surface: #14171d;
+    --color-raised: #1a1e26;
+    --color-line: #232932;
+    --color-line-strong: #2f3642;
+    --color-ink: #e8eaef;
+    --color-muted: #b3b9c4;
+    --color-faint: #8b919d;
 
-    --color-accent: #5b8cff;
+    --color-accent: #7a9a40;
+    --color-accent-btn: #2f4a0e;
+    --color-accent-ink: #c3d49e;
+    --color-accent-line: rgb(122 154 64 / 0.5);
     --color-on-accent: #ffffff;
-    --color-accent-soft: #1a2540;
+    --color-accent-soft: #1a1e26;
 
-    --color-danger: #e5484d;
-    --color-danger-soft: #37211f;
-    --color-warn: #e0a72e;
-    --color-warn-soft: #362d18;
-    --color-ok: #35c46f;
-    --color-ok-soft: #15301f;
+    --color-danger: #f87171;
+    --color-danger-soft: #2a1518;
+    --color-warn: #fbbf24;
+    --color-warn-soft: #2a2310;
+    --color-ok: #2dd4bf;
+    --color-ok-soft: #0d2220;
 
-    --color-kind-pod: #a58bff;
+    --color-kind-pod: #b39dfa;
     --color-kind-pod-soft: #251f3d;
-    --color-kind-container: #6d9bff;
+    --color-kind-container: #7aa7ff;
     --color-kind-container-soft: #1a2540;
-    --color-kind-volume: #3fc4bf;
+    --color-kind-volume: #2dd4bf;
     --color-kind-volume-soft: #12302f;
-    --color-kind-network: #f0954a;
+    --color-kind-network: #fb923c;
     --color-kind-network-soft: #3a2716;
-    --color-kind-image: #e57ab8;
+    --color-kind-image: #f472b6;
     --color-kind-image-soft: #3a1d2e;
-    --color-kind-kube: #9aa7ba;
+    --color-kind-kube: #94a3b8;
     --color-kind-kube-soft: #232831;
 
-    --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.55), 0 2px 8px -2px rgb(0 0 0 / 0.4);
+    --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.45);
   }
 
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) {
-      --color-canvas: #0e1014;
-      --color-surface: #16191f;
-      --color-raised: #1e222a;
-      --color-line: #282d37;
-      --color-line-strong: #3a4150;
-      --color-ink: #e6e8ec;
-      --color-muted: #99a1ad;
-      --color-faint: #6b7280;
-      --color-accent: #5b8cff;
+      --color-canvas: #0c0e12;
+      --color-surface: #14171d;
+      --color-raised: #1a1e26;
+      --color-line: #232932;
+      --color-line-strong: #2f3642;
+      --color-ink: #e8eaef;
+      --color-muted: #b3b9c4;
+      --color-faint: #8b919d;
+      --color-accent: #7a9a40;
+      --color-accent-btn: #2f4a0e;
+      --color-accent-ink: #c3d49e;
+      --color-accent-line: rgb(122 154 64 / 0.5);
       --color-on-accent: #ffffff;
-      --color-accent-soft: #1a2540;
-      --color-danger: #e5484d;
-      --color-danger-soft: #37211f;
-      --color-warn: #e0a72e;
-      --color-warn-soft: #362d18;
-      --color-ok: #35c46f;
-      --color-ok-soft: #15301f;
-      --color-kind-pod: #a58bff;
+      --color-accent-soft: #1a1e26;
+      --color-danger: #f87171;
+      --color-danger-soft: #2a1518;
+      --color-warn: #fbbf24;
+      --color-warn-soft: #2a2310;
+      --color-ok: #2dd4bf;
+      --color-ok-soft: #0d2220;
+      --color-kind-pod: #b39dfa;
       --color-kind-pod-soft: #251f3d;
-      --color-kind-container: #6d9bff;
+      --color-kind-container: #7aa7ff;
       --color-kind-container-soft: #1a2540;
-      --color-kind-volume: #3fc4bf;
+      --color-kind-volume: #2dd4bf;
       --color-kind-volume-soft: #12302f;
-      --color-kind-network: #f0954a;
+      --color-kind-network: #fb923c;
       --color-kind-network-soft: #3a2716;
-      --color-kind-image: #e57ab8;
+      --color-kind-image: #f472b6;
       --color-kind-image-soft: #3a1d2e;
-      --color-kind-kube: #9aa7ba;
+      --color-kind-kube: #94a3b8;
       --color-kind-kube-soft: #232831;
-      --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.55), 0 2px 8px -2px rgb(0 0 0 / 0.4);
+      --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.45);
     }
   }
 }
@@ -773,7 +796,17 @@
     color: var(--color-ink);
   }
   .sidebar .brand:hover { text-decoration: none; }
-  .nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; flex: 1; }
+  .nav-list { display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
+  .nav-group { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+  .nav-section-label {
+    padding: 1rem 0.6rem 0.35rem;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-faint);
+  }
+  .nav-section-label:first-child { padding-top: 0.25rem; }
   .nav-list a {
     display: flex;
     align-items: center;
@@ -1946,6 +1979,85 @@
     box-shadow: var(--shadow-pop);
   }
   .login-card h1 { display: flex; align-items: center; justify-content: center; gap: 0.5rem; text-align: center; margin: 0 0 1rem; }
+
+  /* Deep Moss accent pieces ------------------------------- *
+     The gradient runs light to deep moss and only ever sits on accent
+     pieces: the primary button, the active nav item, tile and header
+     edges, the checked segment. Never on a surface. Every gradient has a
+     solid fallback underneath (the background-color / box-shadow it
+     replaces), so a browser without it still shows the accent. */
+  .btn-primary {
+    background-color: var(--color-accent-btn);
+    background-image: linear-gradient(180deg, #4f7a1b, var(--color-grad-to));
+    border-color: #3c5c14;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14), 0 6px 16px -10px rgb(95 138 36 / 0.9);
+  }
+  .btn-primary:hover {
+    background-color: var(--color-accent-btn);
+    background-image: linear-gradient(180deg, #5b8a24, #30500e);
+  }
+
+  .sidebar {
+    border-right-color: transparent;
+    border-image: linear-gradient(180deg, var(--color-accent-line), var(--color-line) 35%) 1;
+  }
+  .brand-mark { color: var(--color-accent); }
+  /* Section labels are the one place gradient text is used. */
+  .nav-section-label {
+    color: var(--color-accent);
+    background: linear-gradient(90deg, var(--color-grad-from), color-mix(in srgb, var(--color-grad-to) 60%, var(--color-grad-from)) 70%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    width: fit-content;
+  }
+  /* The light end of the gradient is too pale on a light sidebar. */
+  :root:not([data-theme="dark"]) .nav-section-label {
+    background-image: linear-gradient(90deg, #5b8a24, var(--color-grad-to));
+  }
+  .nav-list a[aria-current="page"] {
+    position: relative;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 70%), var(--color-raised);
+    color: var(--color-accent-ink);
+  }
+  .nav-list a[aria-current="page"] svg { color: var(--color-accent); }
+  .nav-list a[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.4rem;
+    bottom: 0.4rem;
+    width: 3px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--color-grad-from), var(--color-grad-to));
+  }
+  .btn-icon[aria-current="page"] { color: var(--color-accent); background: var(--color-raised); box-shadow: inset 0 0 0 1px var(--color-accent-line); }
+
+  .page-header {
+    padding-bottom: 0.9rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid transparent;
+    border-image: linear-gradient(90deg, var(--color-accent-line), transparent 65%) 1;
+  }
+
+  .stat-card {
+    background: linear-gradient(90deg, var(--color-grad-from), var(--color-grad-to)) top / 100% 2px no-repeat, var(--color-surface);
+  }
+  .stat-card-alert {
+    background: linear-gradient(90deg, #f87171, #7f1d1d) top / 100% 2px no-repeat, var(--color-surface);
+  }
+
+  .segmented input:checked + label {
+    background: var(--color-raised);
+    color: var(--color-accent-ink);
+    box-shadow: inset 0 -2px 0 var(--color-accent);
+  }
+
+  .tag-menu > summary.badge:hover,
+  .tag-menu[open] > summary.badge { background: var(--color-raised); box-shadow: inset 0 0 0 1px var(--color-accent-line); }
+  .data-table tr.group-row.drag-over > td { background: var(--color-raised); box-shadow: inset 2px 0 0 var(--color-accent); }
+  .banner-info { box-shadow: inset 3px 0 0 var(--color-accent); }
+  .view-opt.is-active { box-shadow: inset 0 -2px 0 var(--color-accent); color: var(--color-accent-ink); }
 }
 
 /* ------------------------------------------------------------------ *
