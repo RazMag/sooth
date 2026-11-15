@@ -12,6 +12,7 @@ pub mod images;
 pub mod imagetags;
 pub mod list;
 pub mod logs;
+pub mod machine;
 pub mod networks;
 pub mod overview;
 pub mod pods;
@@ -45,6 +46,7 @@ pub use icons::{Icon, brand_mark, favicon_href, icon};
 pub enum NavItem {
     Overview,
     Services,
+    Machine,
     Volumes,
     Networks,
     Images,
@@ -63,6 +65,7 @@ impl NavItem {
         match self {
             NavItem::Overview => "/",
             NavItem::Services => "/services",
+            NavItem::Machine => "/machine",
             NavItem::Volumes => "/volumes",
             NavItem::Networks => "/networks",
             NavItem::Images => "/images",
@@ -79,6 +82,7 @@ impl NavItem {
         match self {
             NavItem::Overview => "Overview",
             NavItem::Services => "Services",
+            NavItem::Machine => "Machine",
             NavItem::Volumes => "Volumes",
             NavItem::Networks => "Networks",
             NavItem::Images => "Images",
@@ -95,6 +99,7 @@ impl NavItem {
         match self {
             NavItem::Overview => Icon::Overview,
             NavItem::Services => Icon::Services,
+            NavItem::Machine => Icon::Monitor,
             NavItem::Volumes => Icon::Volumes,
             NavItem::Networks => Icon::Networks,
             NavItem::Images => Icon::Images,
@@ -117,20 +122,24 @@ impl NavItem {
                 "Fleet",
                 &[NavItem::Overview, NavItem::Services, NavItem::Ports],
             ),
-            (
-                "This machine",
-                &[
-                    NavItem::Volumes,
-                    NavItem::Networks,
-                    NavItem::Images,
-                    NavItem::Environment,
-                ],
-            ),
+            ("This machine", &[NavItem::Machine]),
             (
                 "Configuration",
                 &[NavItem::GitSync, NavItem::Secrets, NavItem::Registries],
             ),
         ]
+    }
+
+    /// The sidebar entry that stands for this page: the machine's own
+    /// resource pages sit under Machine (they're its tabs, see
+    /// [`machine_tabs`]), everything else is its own entry.
+    pub fn sidebar_entry(self) -> NavItem {
+        match self {
+            NavItem::Volumes | NavItem::Networks | NavItem::Images | NavItem::Environment => {
+                NavItem::Machine
+            }
+            other => other,
+        }
     }
 
     /// The sidebar item to highlight for a unit of a given kind -- the nav
@@ -208,7 +217,7 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                                     @for item in items {
                                         li {
                                             a href=(item.href())
-                                                aria-current=[active.filter(|a| a == item).map(|_| "page")] {
+                                                aria-current=[active.filter(|a| a.sidebar_entry() == *item).map(|_| "page")] {
                                                 (icon(item.nav_icon())) span { (item.label()) }
                                             }
                                         }
@@ -278,6 +287,27 @@ pub fn back_link(href: &str, label: &str) -> Markup {
 /// A page's title bar: `<h1>` plus a right-aligned slot for actions (a
 /// "+ New" button, a status badge, ...). Used by every full page so headers
 /// stay identical across sections.
+/// The tab bar every page about this machine carries under its header:
+/// the Machine page itself, then its resource lists. `active` is `None`
+/// for the All units list.
+pub fn machine_tabs(active: Option<NavItem>) -> Markup {
+    let tabs: [(Option<NavItem>, &str, &str); 6] = [
+        (Some(NavItem::Machine), "/machine", "Overview"),
+        (Some(NavItem::Volumes), "/volumes", "Volumes"),
+        (Some(NavItem::Networks), "/networks", "Networks"),
+        (Some(NavItem::Images), "/images", "Images & builds"),
+        (None, "/units", "All units"),
+        (Some(NavItem::Environment), "/environment", "Environment"),
+    ];
+    html! {
+        nav.tab-bar.machine-tabs aria-label="This machine" {
+            @for (item, href, label) in tabs {
+                a href=(href) aria-current=[(item == active).then_some("page")] { (label) }
+            }
+        }
+    }
+}
+
 pub fn page_header(title: &str, actions: Markup) -> Markup {
     html! {
         div.page-header {
@@ -1518,12 +1548,10 @@ mod tests {
             .flat_map(|(_, items)| items.iter().copied())
             .collect();
         for item in [
+            NavItem::Overview,
             NavItem::Services,
-            NavItem::Volumes,
-            NavItem::Networks,
-            NavItem::Images,
+            NavItem::Machine,
             NavItem::Ports,
-            NavItem::Environment,
             NavItem::Secrets,
             NavItem::Registries,
             NavItem::GitSync,

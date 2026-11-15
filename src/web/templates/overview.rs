@@ -187,7 +187,7 @@ fn machine_card(o: &Overview) -> Markup {
             div.machine-head {
                 span.machine-avatar aria-hidden="true" { (m.initials()) }
                 div {
-                    div.machine-name { (m.hostname) }
+                    a.machine-name href=(NavItem::Machine.href()) { (m.hostname) }
                     div.machine-meta {
                         (m.arch)
                         @if let Some(os) = &m.os { " · " (os) }

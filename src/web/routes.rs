@@ -9,8 +9,9 @@ use crate::auth;
 use crate::config::AppState;
 
 use super::handlers::{
-    detail, edit_delete, environment, gitsync, groups, imagetags, list, logs, overview, pods,
-    ports, raw_create, registries, secrets, selfupdate, services, settings, unit_ops, validate,
+    detail, edit_delete, environment, gitsync, groups, imagetags, list, logs, machine, overview,
+    pods, ports, raw_create, registries, secrets, selfupdate, services, settings, unit_ops,
+    validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
@@ -113,6 +114,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/overview/body", get(overview::body))
         .route("/overview/activity", get(overview::activity))
         .route("/services", get(services::page))
+        .route("/machine", get(machine::page))
         .route("/services/rows", get(services::rows))
         .route("/services/counts", get(services::counts))
         .route("/services/bulk", post(services::bulk))

@@ -1090,13 +1090,23 @@ pub fn list_page(
     groups: &ListContext,
     health: Health,
 ) -> Markup {
+    let on_machine = matches!(
+        spec.active_nav,
+        None | Some(NavItem::Volumes | NavItem::Networks | NavItem::Images)
+    );
     let body = html! {
         (page_header(spec.title, html! {}))
+        @if on_machine { (super::machine_tabs(spec.active_nav)) }
         (list_table(
             spec, units, csrf, &rows_route(spec), all_units, groups, new_actions(spec),
         ))
     };
-    shell(spec.title, spec.active_nav, Some(health), body)
+    shell(
+        spec.title,
+        spec.active_nav.or(Some(NavItem::Machine)),
+        Some(health),
+        body,
+    )
 }
 
 /// The `/rows` fragment route lives at `{new_href's section}/rows` -- derived
