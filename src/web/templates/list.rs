@@ -32,6 +32,8 @@ const STANDALONE: &str = ":standalone";
 /// - `Pods`: a branch tree -- each pod heads the units it owns, a resource
 ///   several pods use shows as a linked leaf under each of them, and every
 ///   other unit hangs off a "Standalone" trunk. No group sections, no drag.
+/// - `Flat`: every listed unit in one list sorted by name, each carrying
+///   chips for its folder and pod. No tree, no drag.
 /// - `Dirs`: the group directories as collapsible sections, units flat
 ///   inside them (a pod member carries a chip naming its pod); drag-and-drop
 ///   filing and "Add group" live here.
@@ -40,6 +42,7 @@ pub enum ListView {
     #[default]
     Pods,
     Dirs,
+    Flat,
 }
 
 impl ListView {
@@ -47,6 +50,7 @@ impl ListView {
         match s {
             "pods" => Some(Self::Pods),
             "dirs" => Some(Self::Dirs),
+            "flat" => Some(Self::Flat),
             _ => None,
         }
     }
@@ -55,6 +59,7 @@ impl ListView {
         match self {
             Self::Pods => "pods",
             Self::Dirs => "dirs",
+            Self::Flat => "flat",
         }
     }
 }
@@ -365,13 +370,20 @@ fn location_chips(
                 }
             }
         }
-        ListView::Dirs => {
+        ListView::Dirs | ListView::Flat => {
             let pod = refs::owning_pod(unit, all_units)
                 .and_then(|name| all_units.iter().find(|u| u.file_name == name));
+            let folder = (lists.view == ListView::Flat && !unit.group.is_empty())
+                .then_some(unit.group.as_str());
             html! {
                 @if let Some(pod) = pod {
                     a.chip.chip-pod href=(core::unit_url(pod)) title={"Part of " (pod.file_name)} {
                         (icon(Icon::Pod)) (naming::stem(&pod.file_name))
+                    }
+                }
+                @if let Some(folder) = folder {
+                    span.chip.chip-muted.chip-folder title={"Filed under " (folder)} {
+                        (icon(Icon::Folder)) (folder)
                     }
                 }
             }
@@ -891,6 +903,36 @@ pub fn list_rows(
     match lists.view {
         ListView::Pods => pod_rows(spec, units, csrf, all_units, lists),
         ListView::Dirs => dir_rows(spec, units, csrf, all_units, lists),
+        ListView::Flat => flat_rows(spec, units, csrf, all_units, lists),
+    }
+}
+
+/// [`ListView::Flat`]: the listed units sorted by name, no tree. A pod
+/// only appears when the table lists pods.
+fn flat_rows(
+    spec: &ListSpec,
+    units: &[Entry],
+    csrf: &str,
+    all_units: &[QuadletUnit],
+    lists: &ListContext,
+) -> Markup {
+    let mut shown: Vec<&Entry> = units
+        .iter()
+        .filter(|(u, _)| spec.kinds.contains(&u.kind))
+        .collect();
+    shown.sort_by(|(a, _), (b, _)| a.file_name.cmp(&b.file_name));
+    html! {
+        @if shown.is_empty() {
+            tr { td colspan=(spec.width()) .empty { (spec.empty_hint) } }
+        }
+        @for entry in shown {
+            (row(entry, spec, csrf, all_units, lists, &Place {
+                group: None,
+                tree: TreePos::Plain,
+                rails: Rails::default(),
+                listed: true,
+            }))
+        }
     }
 }
 
@@ -928,6 +970,7 @@ fn view_toggle(current: ListView) -> Markup {
         nav.view-toggle aria-label="Table layout" {
             (opt(ListView::Pods, Icon::Pod, "Pods"))
             (opt(ListView::Dirs, Icon::Folder, "Directories"))
+            (opt(ListView::Flat, Icon::Menu, "Flat"))
         }
     }
 }
@@ -1303,5 +1346,33 @@ mod tests {
         // Without the columns the same row keeps its icons and no flags.
         spec.service_columns = false;
         assert!(!render(&spec, &units, &[], ListView::Pods).contains("flag-cell"));
+    }
+
+    #[test]
+    fn flat_view_sorts_listed_units_without_a_tree() {
+        let spec = spec(&[UnitKind::Container]);
+        let all = vec![
+            unit("web.pod", UnitKind::Pod, "", &[]),
+            unit("zeta.container", UnitKind::Container, "media", &[]),
+            unit(
+                "alpha.container",
+                UnitKind::Container,
+                "",
+                &[("Pod", "web.pod")],
+            ),
+        ];
+        let units: Vec<Entry> = all
+            .iter()
+            .map(|u| (u.clone(), UnitStatus::not_found()))
+            .collect();
+        let html = render(&spec, &units, &all, ListView::Flat);
+        let a = html.find("alpha.container").unwrap();
+        let z = html.find("zeta.container").unwrap();
+        assert!(a < z);
+        // The pod isn't listed by this table, but alpha's chip names it.
+        assert!(!html.contains(r#"data-pod="web.pod""#));
+        assert!(html.contains("chip-pod"));
+        assert!(html.contains("Filed under media"));
+        assert_eq!(ListView::parse("flat"), Some(ListView::Flat));
     }
 }

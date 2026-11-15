@@ -30,6 +30,9 @@ All notable changes to sooth are documented here. The format follows
   starting and stopping, and Git Sync updates and failures, newest first,
   with an All / Problems / Changes filter. It's kept in `activity.jsonl`
   beside the config file (the last 500 entries), so it survives restarts.
+- **Flat layout.** Every list can show its units in one name-sorted list,
+  next to Pods and Directories, with chips naming each unit's pod and
+  folder.
 - **Filter Services by state.** An All / Running / Stopped / Failed switch
   above the Services table shows only the units in that state.
 
