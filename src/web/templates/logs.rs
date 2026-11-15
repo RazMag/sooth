@@ -19,26 +19,11 @@ use crate::quadlet::QuadletUnit;
 use crate::web::core;
 
 pub fn logs_page(unit: &QuadletUnit, lines: &[LogLine], health: Health) -> Markup {
-    let service = unit.service_name();
-    let stream_url = format!("{}/logs/stream", core::unit_url(unit));
-    let latest = lines.iter().rev().find_map(|l| l.invocation.as_deref());
-    let actions = html! {
-        label.checkbox-line {
-            input type="checkbox" data-log-latest checked;
-            span { "Latest run only" }
-        }
-    };
     let body = html! {
         (back_link(&core::unit_url(unit), &unit.file_name))
-        (page_header(&format!("Logs: {}", unit.file_name), actions))
-        p.page-meta { code { (service) } }
-        div #log-output .latest-only data-log-stream data-stream-url=(stream_url)
-            data-latest-inv=[latest] {
-            @if lines.is_empty() {
-                p.empty data-log-empty { "No log entries yet." }
-            }
-            @for row in rows(lines, latest) { (row) }
-        }
+        (page_header(&format!("Logs: {}", unit.file_name), latest_toggle()))
+        p.page-meta { code { (unit.service_name()) } }
+        (log_output(unit, lines))
     };
     shell(
         &format!("Logs: {}", unit.file_name),
@@ -46,6 +31,42 @@ pub fn logs_page(unit: &QuadletUnit, lines: &[LogLine], health: Health) -> Marku
         Some(health),
         body,
     )
+}
+
+/// The detail page's Logs tab, loaded the first time the tab is shown:
+/// the same live tail as the logs page, with a link to it full size.
+pub fn logs_panel(unit: &QuadletUnit, lines: &[LogLine]) -> Markup {
+    html! {
+        div.logs-panel-head {
+            (latest_toggle())
+            a.btn.btn-ghost.btn-sm href={(core::unit_url(unit)) "/logs"} { "Full page" }
+        }
+        (log_output(unit, lines))
+    }
+}
+
+fn latest_toggle() -> Markup {
+    html! {
+        label.checkbox-line {
+            input type="checkbox" data-log-latest checked;
+            span { "Latest run only" }
+        }
+    }
+}
+
+/// The live journal tail (`frontend/logs.js` opens its stream).
+fn log_output(unit: &QuadletUnit, lines: &[LogLine]) -> Markup {
+    let stream_url = format!("{}/logs/stream", core::unit_url(unit));
+    let latest = lines.iter().rev().find_map(|l| l.invocation.as_deref());
+    html! {
+        div #log-output .latest-only data-log-stream data-stream-url=(stream_url)
+            data-latest-inv=[latest] {
+            @if lines.is_empty() {
+                p.empty data-log-empty { "No log entries yet." }
+            }
+            @for row in rows(lines, latest) { (row) }
+        }
+    }
 }
 
 /// The lines plus a divider wherever the run changes. A line with no

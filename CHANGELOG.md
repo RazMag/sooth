@@ -33,6 +33,9 @@ All notable changes to sooth are documented here. The format follows
 - **Flat layout.** Every list can show its units in one name-sorted list,
   next to Pods and Directories, with chips naming each unit's pod and
   folder.
+- **Unit pages have tabs.** Overview, Config and Logs. The Logs tab opens
+  the live journal tail the first time you look at it, and the open tab is
+  kept in the URL (`#config`, `#logs`).
 - **Bulk actions on Services.** Tick rows to get a bar with Restart,
   Start and Stop for all of them at once.
 - **Filter Services by state.** An All / Running / Stopped / Failed switch

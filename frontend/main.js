@@ -7,6 +7,7 @@ import "htmx-ext-sse";
 import { initTheme } from "./theme.js";
 import { initFilter } from "./filter.js";
 import { initBulk } from "./bulk.js";
+import { initTabs } from "./tabs.js";
 import { initGroups } from "./groups.js";
 import { initPodTree } from "./podtree.js";
 import { initDragDrop } from "./dragdrop.js";
@@ -33,6 +34,7 @@ function boot() {
   initTheme();
   initFilter();
   initBulk();
+  initTabs();
   initGroups();
   initPodTree();
   initDragDrop();

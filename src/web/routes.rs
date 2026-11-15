@@ -89,6 +89,10 @@ fn mount_unit_routes(
             get(logs::logs_page),
         )
         .route(
+            &format!("{prefix}/{{file_name}}/logs/panel"),
+            get(logs::logs_panel),
+        )
+        .route(
             &format!("{prefix}/{{file_name}}/logs/stream"),
             get(logs::logs_stream),
         );

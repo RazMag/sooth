@@ -1556,6 +1556,31 @@
   .data-table [data-filtering] tr.is-collapsed:not([hidden]),
   .data-table [data-filtering] tr.pod-collapsed:not([hidden]) { display: table-row; }
 
+  /* Unit detail tabs (`detail::detail_page`, `frontend/tabs.js`). */
+  .unit-tabs { margin-top: 1rem; }
+  .tab-radio { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .tab-bar { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--color-line); }
+  .tab-bar label {
+    padding: 0.5rem 0.85rem; margin-bottom: -1px; cursor: pointer; user-select: none;
+    font-size: 0.875rem; font-weight: 520; color: var(--color-muted);
+    border-bottom: 2px solid transparent;
+  }
+  .tab-bar label:hover { color: var(--color-ink); }
+  .tab-panel { display: none; }
+  .tab-panel .detail-grid { margin-top: 1rem; }
+  .tab-panel[data-panel="config"], .tab-panel[data-panel="logs"] { padding-top: 1rem; }
+  .config-head, .logs-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+  .unit-tabs:has(#tab-overview:checked) [data-panel="overview"],
+  .unit-tabs:has(#tab-config:checked) [data-panel="config"],
+  .unit-tabs:has(#tab-logs:checked) [data-panel="logs"] { display: block; }
+  .unit-tabs:has(#tab-overview:checked) [data-tab="overview"],
+  .unit-tabs:has(#tab-config:checked) [data-tab="config"],
+  .unit-tabs:has(#tab-logs:checked) [data-tab="logs"] {
+    color: var(--color-accent-ink);
+    border-image: linear-gradient(90deg, var(--color-grad-from), var(--color-grad-to)) 1;
+  }
+  .unit-tabs:has(.tab-radio:focus-visible) .tab-bar { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
   /* Services bulk bar (`services::bulk_bar`, `frontend/bulk.js`). */
   .bulk-bar {
     display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
@@ -1624,6 +1649,8 @@
     align-items: start;
     margin-top: 1.25rem;
   }
+  .detail-grid.solo { grid-template-columns: minmax(0, 40rem); }
+  .detail-grid.solo .detail-aside { position: static; }
   .detail-main { min-width: 0; }
   .detail-main h2 { margin-top: 0; }
   .detail-aside {

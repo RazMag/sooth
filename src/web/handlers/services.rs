@@ -131,7 +131,11 @@ pub async fn bulk(
         "stop" => ("stop", "Stopped"),
         "restart" => ("restart", "Restarted"),
         _ => {
-            return templates::services::bulk_result(0, &[("".into(), "unknown action".into())], "");
+            return templates::services::bulk_result(
+                0,
+                &[("".into(), "unknown action".into())],
+                "",
+            );
         }
     };
     let mut ok = 0;

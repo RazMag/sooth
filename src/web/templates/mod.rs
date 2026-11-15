@@ -964,7 +964,6 @@ pub fn detail_links(base_url: &str, csrf: &str) -> Markup {
     html! {
         div.detail-links {
             a.btn.btn-ghost.btn-sm href={(base_url) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
-            a.btn.btn-ghost.btn-sm href={(base_url) "/logs"} { (icon(Icon::Logs)) span { "Logs" } }
             (delete_form(base_url, csrf, "btn btn-danger btn-sm"))
         }
     }
