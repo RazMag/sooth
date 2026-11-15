@@ -16,5 +16,6 @@ pub mod secrets;
 pub mod selfupdate;
 pub mod services;
 pub mod settings;
+pub mod tags;
 pub mod unit_ops;
 pub mod validate;

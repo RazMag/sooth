@@ -179,7 +179,7 @@ fn tiles(o: &Overview) -> Markup {
             }, services, o.stats.failed > 0))
             (tile("Newer image tags", o.newer_tags.len().to_string(),
                 html! { (if o.newer_tags.len() == 1 { "pinned image" } else { "pinned images" }) },
-                services, false))
+                NavItem::ImageTags.href(), false))
             (tile("Git Sync", o.sync.repos.to_string(), html! {
                 (if o.sync.repos == 1 { "repo" } else { "repos" })
                 @if o.sync.attention > 0 { " · " (o.sync.attention) " " (if o.sync.attention == 1 { "needs" } else { "need" }) " attention" }
@@ -274,7 +274,7 @@ fn needs_you(o: &Overview) -> Markup {
                         (need(
                             html! { (plural(o.newer_tags.len(), "pinned image has", "pinned images have")) " newer tags" },
                             html! { (o.newer_tags.join(", ")) },
-                            html! { a.btn.btn-sm href=(NavItem::Services.href()) { "Review tags" } },
+                            html! { a.btn.btn-sm href=(NavItem::ImageTags.href()) { "Review tags" } },
                         ))
                     }
                     @if o.sync.attention > 0 {

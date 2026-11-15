@@ -33,6 +33,9 @@ All notable changes to sooth are documented here. The format follows
 - **Flat layout.** Every list can show its units in one name-sorted list,
   next to Pods and Directories, with chips naming each unit's pod and
   folder.
+- **Images & tags page.** Every pinned container with a newer tag in one
+  table, with the same Switch menu as its Services row and the tag check's
+  status. The Overview's "Review tags" opens it.
 - **Health checks show.** A running container with a `HealthCmd=` shows
   podman's verdict (healthy / unhealthy / starting) beside its status on
   Services, and an unhealthy one is listed under "Needs you".

@@ -10,7 +10,7 @@ use crate::config::AppState;
 
 use super::handlers::{
     detail, edit_delete, environment, gitsync, groups, imagetags, list, logs, machine, overview,
-    pods, ports, raw_create, registries, secrets, selfupdate, services, settings, unit_ops,
+    pods, ports, raw_create, registries, secrets, selfupdate, services, settings, tags, unit_ops,
     validate,
 };
 
@@ -115,6 +115,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/overview/activity", get(overview::activity))
         .route("/services", get(services::page))
         .route("/machine", get(machine::page))
+        .route("/tags", get(tags::page))
+        .route("/tags/rows", get(tags::rows_fragment))
         .route("/services/rows", get(services::rows))
         .route("/services/counts", get(services::counts))
         .route("/services/bulk", post(services::bulk))

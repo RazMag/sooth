@@ -23,6 +23,7 @@ pub mod selfupdate;
 pub mod services;
 pub mod settings;
 pub mod starters;
+pub mod tagspage;
 pub mod volumes;
 
 use axum::http::StatusCode;
@@ -48,6 +49,7 @@ pub enum NavItem {
     Overview,
     Services,
     Machine,
+    ImageTags,
     Volumes,
     Networks,
     Images,
@@ -67,6 +69,7 @@ impl NavItem {
             NavItem::Overview => "/",
             NavItem::Services => "/services",
             NavItem::Machine => "/machine",
+            NavItem::ImageTags => "/tags",
             NavItem::Volumes => "/volumes",
             NavItem::Networks => "/networks",
             NavItem::Images => "/images",
@@ -84,6 +87,7 @@ impl NavItem {
             NavItem::Overview => "Overview",
             NavItem::Services => "Services",
             NavItem::Machine => "Machine",
+            NavItem::ImageTags => "Images & tags",
             NavItem::Volumes => "Volumes",
             NavItem::Networks => "Networks",
             NavItem::Images => "Images",
@@ -101,6 +105,7 @@ impl NavItem {
             NavItem::Overview => Icon::Overview,
             NavItem::Services => Icon::Services,
             NavItem::Machine => Icon::Monitor,
+            NavItem::ImageTags => Icon::Images,
             NavItem::Volumes => Icon::Volumes,
             NavItem::Networks => Icon::Networks,
             NavItem::Images => Icon::Images,
@@ -121,7 +126,12 @@ impl NavItem {
         [
             (
                 "Fleet",
-                &[NavItem::Overview, NavItem::Services, NavItem::Ports],
+                &[
+                    NavItem::Overview,
+                    NavItem::Services,
+                    NavItem::Ports,
+                    NavItem::ImageTags,
+                ],
             ),
             ("This machine", &[NavItem::Machine]),
             (
@@ -1552,6 +1562,7 @@ mod tests {
             NavItem::Overview,
             NavItem::Services,
             NavItem::Machine,
+            NavItem::ImageTags,
             NavItem::Ports,
             NavItem::Secrets,
             NavItem::Registries,
