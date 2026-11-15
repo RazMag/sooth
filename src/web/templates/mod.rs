@@ -22,6 +22,7 @@ pub mod secrets;
 pub mod selfupdate;
 pub mod services;
 pub mod settings;
+pub mod starters;
 pub mod volumes;
 
 use axum::http::StatusCode;

@@ -33,6 +33,10 @@ All notable changes to sooth are documented here. The format follows
 - **Flat layout.** Every list can show its units in one name-sorted list,
   next to Pods and Directories, with chips naming each unit's pod and
   folder.
+- **Start from a template.** The New container, volume, network and
+  image pages offer starter quadlets (a web app, an app with a data
+  volume, a database with a secret, a run-once job, a bind-mounted folder,
+  an internal network, ...) to open the editor with.
 - **Port conflicts up front.** The Ports page opens with a card for each
   host port claimed more than once: who holds it, which stopped unit would
   fail to bind, and a button to change that unit's port.
