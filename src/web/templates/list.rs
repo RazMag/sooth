@@ -110,6 +110,9 @@ pub struct ListSpec {
     pub columns: &'static [Column],
     pub new_href: &'static str,
     pub empty_hint: &'static str,
+    /// Show the All / Running / Stopped / Failed filter in the toolbar
+    /// (see [`state_filter`]); the workload lists only.
+    pub state_filter: bool,
 }
 
 /// Every kind in `kinds`, plus Pod -- what a list handler loads, so a pod
@@ -889,6 +892,29 @@ fn view_toggle(current: ListView) -> Markup {
     }
 }
 
+/// The toolbar's All / Running / Stopped / Failed filter: radios styled as
+/// a segmented control. No JS -- the CSS (`.state-filter` in `styles.css`)
+/// hides rows whose live badge doesn't match via `:has()`, so it keeps
+/// working across SSE badge swaps and `/rows` refreshes. Pod trunks and
+/// group headers stay as context.
+fn state_filter() -> Markup {
+    const STATES: [(&str, &str); 4] = [
+        ("all", "All"),
+        ("running", "Running"),
+        ("stopped", "Stopped"),
+        ("failed", "Failed"),
+    ];
+    html! {
+        div.segmented.segmented-sm.state-filter role="radiogroup" aria-label="Filter by state" {
+            @for (value, label) in STATES {
+                @let id = format!("state-filter-{value}");
+                input type="radio" name="state-filter" id=(id) value=(value) checked[value == "all"];
+                label for=(id) { (label) }
+            }
+        }
+    }
+}
+
 /// The toolbar's create action(s), right-aligned next to "Add group": a
 /// single "New" for the generic sections, "Container" + "Pod" for the
 /// Services home page. Same `.btn-sm` scale as the rest of the toolbar so
@@ -917,6 +943,9 @@ pub fn list_table(
         (known_groups_datalist(groups.known))
         div.toolbar {
             input.input.input-sm.filter-box type="search" data-filter-target=(ROWS_ID) placeholder="Filter…";
+            @if spec.state_filter {
+                (state_filter())
+            }
             (view_toggle(groups.view))
             div.toolbar-actions {
                 @if groups.view == ListView::Dirs {
@@ -1024,6 +1053,7 @@ mod tests {
             columns: &[],
             new_href: "/t/new",
             empty_hint: "",
+            state_filter: false,
         }
     }
 
@@ -1196,5 +1226,15 @@ mod tests {
         assert_eq!(nested_unit_count("media/arr/hd"), 1);
         assert_eq!(nested_unit_count("media-extra"), 1);
         assert_eq!(nested_unit_count("empty"), 0);
+    }
+
+    #[test]
+    fn state_filter_offers_four_states_with_all_checked() {
+        let html = state_filter().into_string();
+        for value in ["all", "running", "stopped", "failed"] {
+            assert!(html.contains(&format!(r#"value="{value}""#)), "{value}");
+        }
+        assert_eq!(html.matches("checked").count(), 1);
+        assert!(html.contains(r#"value="all" checked"#));
     }
 }

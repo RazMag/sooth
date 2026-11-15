@@ -14,6 +14,13 @@ All notable changes to sooth are documented here. The format follows
   gradient on accent pieces only. Healthy status is teal, so it never reads
   as a button. The sidebar is grouped into Fleet, This machine and
   Configuration sections.
+- **Status reads word first.** The Status column says "Running" with how
+  long it has been up, or "Failed" with the exit code and when it failed.
+
+### Added
+
+- **Filter Services by state.** An All / Running / Stopped / Failed switch
+  above the Services table shows only the units in that state.
 
 ## [1.1.0] - 2026-10-23
 

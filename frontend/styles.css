@@ -1556,6 +1556,20 @@
   .data-table [data-filtering] tr.is-collapsed:not([hidden]),
   .data-table [data-filtering] tr.pod-collapsed:not([hidden]) { display: table-row; }
 
+  /* Toolbar state filter (`list::state_filter`): pure CSS via `:has()`, so
+     it survives SSE badge swaps. A unit row whose badge doesn't match the
+     checked state is hidden; group headers, pod / Standalone trunks and
+     "empty group" rows stay as context. Matches inside collapsed groups and
+     pods are revealed, as with the filter box. "Stopped" includes units
+     systemd hasn't loaded. */
+  .toolbar:has(.state-filter [value="running"]:checked) ~ .table-wrap tbody > tr:not(.group-row, .tree-trunk, .group-empty):not(:has(.badge-running)),
+  .toolbar:has(.state-filter [value="stopped"]:checked) ~ .table-wrap tbody > tr:not(.group-row, .tree-trunk, .group-empty):not(:has(.badge-stopped, .badge-unknown)),
+  .toolbar:has(.state-filter [value="failed"]:checked) ~ .table-wrap tbody > tr:not(.group-row, .tree-trunk, .group-empty):not(:has(.badge-failed)) { display: none; }
+  .toolbar:has(.state-filter [value="running"]:checked) ~ .table-wrap tbody > tr:is(.is-collapsed, .pod-collapsed):not([hidden]):has(.badge-running),
+  .toolbar:has(.state-filter [value="stopped"]:checked) ~ .table-wrap tbody > tr:is(.is-collapsed, .pod-collapsed):not([hidden]):has(.badge-stopped, .badge-unknown),
+  .toolbar:has(.state-filter [value="failed"]:checked) ~ .table-wrap tbody > tr:is(.is-collapsed, .pod-collapsed):not([hidden]):has(.badge-failed) { display: table-row; }
+  .segmented-sm label { padding: 0.25rem 0.7rem; font-size: 0.8rem; }
+
   /* A pod's (or Standalone's) chevron, collapsing the rows under it --
      `frontend/podtree.js`. */
   .pod-toggle {

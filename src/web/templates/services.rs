@@ -48,6 +48,7 @@ pub const SPEC: ListSpec = ListSpec {
     columns: COLUMNS,
     new_href: "/containers/new",
     empty_hint: "No services yet — create a container or pod to get started.",
+    state_filter: true,
 };
 
 pub struct Stats {
