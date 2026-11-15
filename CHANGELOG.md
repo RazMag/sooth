@@ -33,6 +33,9 @@ All notable changes to sooth are documented here. The format follows
 - **Flat layout.** Every list can show its units in one name-sorted list,
   next to Pods and Directories, with chips naming each unit's pod and
   folder.
+- **Secrets & env.** Secrets, Registries and host variables (the old
+  Environment page) are one sidebar entry with three tabs, since all three
+  are values that stay on this machine.
 - **Images & tags page.** Every pinned container with a newer tag in one
   table, with the same Switch menu as its Services row and the tag check's
   status. The Overview's "Review tags" opens it.
@@ -49,8 +52,8 @@ All notable changes to sooth are documented here. The format follows
 - **Machine page.** "This machine" in the sidebar is now one entry, a
   page with this host's facts (architecture, OS, podman and sooth versions,
   quadlet folder), its health checks, the podman and git versions, and a
-  tile per resource. Volumes, Networks, Images & builds, All units and
-  Environment are its tabs.
+  tile per resource. Volumes, Networks, Images & builds and All units are
+  its tabs.
 - **Unit pages have tabs.** Overview, Config and Logs. The Logs tab opens
   the live journal tail the first time you look at it, and the open tab is
   kept in the URL (`#config`, `#logs`).

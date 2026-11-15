@@ -93,7 +93,7 @@ impl NavItem {
             NavItem::Images => "Images",
             NavItem::Ports => "Ports",
             NavItem::Environment => "Environment",
-            NavItem::Secrets => "Secrets",
+            NavItem::Secrets => "Secrets & env",
             NavItem::Registries => "Registries",
             NavItem::GitSync => "Git Sync",
             NavItem::Settings => "Settings",
@@ -134,21 +134,18 @@ impl NavItem {
                 ],
             ),
             ("This machine", &[NavItem::Machine]),
-            (
-                "Configuration",
-                &[NavItem::GitSync, NavItem::Secrets, NavItem::Registries],
-            ),
+            ("Configuration", &[NavItem::GitSync, NavItem::Secrets]),
         ]
     }
 
     /// The sidebar entry that stands for this page: the machine's own
-    /// resource pages sit under Machine (they're its tabs, see
-    /// [`machine_tabs`]), everything else is its own entry.
+    /// resource pages sit under Machine (its tabs, see [`machine_tabs`]),
+    /// Registries and host variables under Secrets & env (see
+    /// [`config_tabs`]), everything else is its own entry.
     pub fn sidebar_entry(self) -> NavItem {
         match self {
-            NavItem::Volumes | NavItem::Networks | NavItem::Images | NavItem::Environment => {
-                NavItem::Machine
-            }
+            NavItem::Volumes | NavItem::Networks | NavItem::Images => NavItem::Machine,
+            NavItem::Registries | NavItem::Environment => NavItem::Secrets,
             other => other,
         }
     }
@@ -302,18 +299,34 @@ pub fn back_link(href: &str, label: &str) -> Markup {
 /// the Machine page itself, then its resource lists. `active` is `None`
 /// for the All units list.
 pub fn machine_tabs(active: Option<NavItem>) -> Markup {
-    let tabs: [(Option<NavItem>, &str, &str); 6] = [
+    let tabs: [(Option<NavItem>, &str, &str); 5] = [
         (Some(NavItem::Machine), "/machine", "Overview"),
         (Some(NavItem::Volumes), "/volumes", "Volumes"),
         (Some(NavItem::Networks), "/networks", "Networks"),
         (Some(NavItem::Images), "/images", "Images & builds"),
         (None, "/units", "All units"),
-        (Some(NavItem::Environment), "/environment", "Environment"),
     ];
     html! {
         nav.tab-bar.machine-tabs aria-label="This machine" {
             @for (item, href, label) in tabs {
                 a href=(href) aria-current=[(item == active).then_some("page")] { (label) }
+            }
+        }
+    }
+}
+
+/// The tab bar of the Secrets & env pages: secrets, registry logins and
+/// host variables are all values that stay on this machine.
+pub fn config_tabs(active: NavItem) -> Markup {
+    let tabs = [
+        (NavItem::Secrets, "Secrets"),
+        (NavItem::Registries, "Registries"),
+        (NavItem::Environment, "Host variables"),
+    ];
+    html! {
+        nav.tab-bar.machine-tabs aria-label="Secrets & env" {
+            @for (item, label) in tabs {
+                a href=(item.href()) aria-current=[(item == active).then_some("page")] { (label) }
             }
         }
     }
@@ -1565,7 +1578,6 @@ mod tests {
             NavItem::ImageTags,
             NavItem::Ports,
             NavItem::Secrets,
-            NavItem::Registries,
             NavItem::GitSync,
         ] {
             assert_eq!(

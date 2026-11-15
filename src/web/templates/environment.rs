@@ -39,7 +39,7 @@ pub fn page(p: EnvironmentPage<'_>) -> Markup {
 
     let body = html! {
         (page_header("Environment", html! {}))
-        (super::machine_tabs(Some(NavItem::Environment)))
+        (super::config_tabs(NavItem::Environment))
         p.page-meta {
             "Host variables the systemd user manager passes to the quadlet generator. "
             "Reference any of them in a quadlet file as " code { "${NAME}" }

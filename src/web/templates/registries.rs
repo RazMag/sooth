@@ -34,6 +34,7 @@ pub fn page(p: RegistriesPage<'_>) -> Markup {
 
     let body = html! {
         (page_header("Registries", html! {}))
+        (super::config_tabs(NavItem::Registries))
         p.page-meta {
             "Logins for pulling private images. sooth saves them to " code { (saved_file) }
             ", where podman finds them for every unit it starts — including after a reboot. "
