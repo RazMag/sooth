@@ -359,28 +359,85 @@ fn status_display(status: &UnitStatus) -> (&'static str, &'static str) {
     }
 }
 
-/// The live-updating status badge for one unit. Rendered inline on
-/// list/detail pages and as the payload of `status-{service}` SSE events, so
-/// both paths converge on identical markup.
-pub fn status_badge(service: &str, status: &UnitStatus) -> Markup {
-    let (variant, label) = status_display(status);
-    let raw = format!("{}/{}", status.active_state, status.sub_state);
-    html! {
-        span id=(dom_id(service)) class={"badge " (variant)} title=(raw)
-            sse-swap={"status-" (service)} hx-swap="outerHTML" {
-            (label)
+fn now_usec() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or_default()
+}
+
+/// A short, rough span: "45s", "12 min", "3h", "6 days".
+fn rough_span(usec: u64) -> String {
+    let secs = usec / 1_000_000;
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{} min", secs / 60),
+        3600..86_400 => format!("{}h", secs / 3600),
+        _ => {
+            let days = secs / 86_400;
+            if days == 1 {
+                "1 day".to_string()
+            } else {
+                format!("{days} days")
+            }
         }
     }
 }
 
-/// A status badge with no SSE wiring -- for a unit shown more than once on a
+/// The second line of a status cell, under the state word: how long a
+/// running unit has been up, and for a failed one why and when. Empty when
+/// there's nothing worth saying (a transitional state, an unknown time).
+fn status_detail(status: &UnitStatus, now: u64) -> String {
+    let ago = |t: u64| (t > 0 && t <= now).then(|| rough_span(now - t));
+    if status.is_failed() {
+        match (status.failure.as_deref(), ago(status.state_change_usec)) {
+            (Some(why), Some(when)) => format!("{why} \u{b7} {when} ago"),
+            (Some(why), None) => why.to_string(),
+            (None, Some(when)) => format!("{when} ago"),
+            (None, None) => String::new(),
+        }
+    } else if status.is_active() {
+        ago(status.active_since_usec)
+            .map(|span| format!("up {span}"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
+fn status_inner(status: &UnitStatus) -> Markup {
+    let (_, label) = status_display(status);
+    let detail = status_detail(status, now_usec());
+    html! {
+        span.status-word { (label) }
+        @if !detail.is_empty() { span.status-detail { (detail) } }
+    }
+}
+
+/// The live-updating status cell for one unit: a status dot and a word
+/// ("Running"), with the detail under it ("up 6 days", "exit 1 \u{b7} 2h
+/// ago"). Rendered inline on list/detail pages and as the payload of
+/// `status-{service}` SSE events, so both paths converge on identical
+/// markup.
+pub fn status_badge(service: &str, status: &UnitStatus) -> Markup {
+    let (variant, _) = status_display(status);
+    let raw = format!("{}/{}", status.active_state, status.sub_state);
+    html! {
+        span id=(dom_id(service)) class={"badge status " (variant)} title=(raw)
+            sse-swap={"status-" (service)} hx-swap="outerHTML" {
+            (status_inner(status))
+        }
+    }
+}
+
+/// A status cell with no SSE wiring -- for a unit shown more than once on a
 /// page (e.g. a pod member on every one of its pod's port rows), where
 /// `status_badge`'s id would repeat. The surrounding fragment has to
 /// re-render itself to stay current.
 pub fn plain_status_badge(status: &UnitStatus) -> Markup {
-    let (variant, label) = status_display(status);
+    let (variant, _) = status_display(status);
     let raw = format!("{}/{}", status.active_state, status.sub_state);
-    html! { span class={"badge " (variant)} title=(raw) { (label) } }
+    html! { span class={"badge status " (variant)} title=(raw) { (status_inner(status)) } }
 }
 
 /// A small "Autostart" pill shown next to a unit's actions when its quadlet
@@ -1408,6 +1465,44 @@ pub fn error_fragment(message: &str, id: Uuid) -> Markup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn st(active_state: &str) -> UnitStatus {
+        UnitStatus {
+            load_state: "loaded".into(),
+            active_state: active_state.into(),
+            ..UnitStatus::not_found()
+        }
+    }
+
+    #[test]
+    fn status_detail_reads_uptime_and_failures() {
+        const DAY: u64 = 86_400_000_000;
+        let now = 100 * DAY;
+        let running = UnitStatus {
+            active_since_usec: now - 6 * DAY - 5,
+            ..st("active")
+        };
+        assert_eq!(status_detail(&running, now), "up 6 days");
+        let fresh = UnitStatus {
+            active_since_usec: now - 90_000_000,
+            ..st("active")
+        };
+        assert_eq!(status_detail(&fresh, now), "up 1 min");
+        let failed = UnitStatus {
+            failure: Some("exit 1".into()),
+            state_change_usec: now - 2 * 3_600_000_000,
+            ..st("failed")
+        };
+        assert_eq!(status_detail(&failed, now), "exit 1 \u{b7} 2h ago");
+        // No timestamp (never active, or a clock from the future): nothing.
+        assert_eq!(status_detail(&st("active"), now), "");
+        assert_eq!(status_detail(&st("inactive"), now), "");
+        let future = UnitStatus {
+            active_since_usec: now + 1,
+            ..st("active")
+        };
+        assert_eq!(status_detail(&future, now), "");
+    }
 
     #[test]
     fn sidebar_sections_list_every_nav_item_once() {

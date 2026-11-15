@@ -358,6 +358,31 @@
   .badge-warn { color: var(--color-ink); }
   .badge-warn::before { background: var(--color-warn); }
 
+  /* A unit's status cell: no pill, just the dot and a word, with the
+     detail ("up 6 days", "exit 1 · 2h ago") under it in small faint type.
+     Status uses status colours only, never the accent. */
+  .badge.status {
+    display: inline-grid;
+    grid-template-columns: auto auto;
+    align-items: center;
+    column-gap: 0.45rem;
+    row-gap: 0.05rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 0.85rem;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+  .badge.status .status-word { font-weight: 550; }
+  .badge.status .status-detail {
+    grid-column: 2;
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-faint);
+  }
+  .badge-failed .status-word { color: var(--color-danger); }
+
   .chip {
     display: inline-flex;
     align-items: center;
