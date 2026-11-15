@@ -6,6 +6,15 @@ All notable changes to sooth are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Deep Moss look (v2 work in progress).** The dashboard uses the new
+  Deep Moss palette in both themes: neutral grey surfaces, a deep moss
+  accent on buttons, links and the active page, and a light-to-deep moss
+  gradient on accent pieces only. Healthy status is teal, so it never reads
+  as a button. The sidebar is grouped into Fleet, This machine and
+  Configuration sections.
+
 ## [1.1.0] - 2026-10-23
 
 ### Added

@@ -51,7 +51,7 @@ pub enum NavItem {
     Secrets,
     Registries,
     GitSync,
-    /// Not part of `all()` -- rendered as its own control in the sidebar
+    /// Not part of `sections()` -- rendered as its own control in the sidebar
     /// footer, not the main nav list.
     Settings,
 }
@@ -102,17 +102,26 @@ impl NavItem {
         }
     }
 
-    fn all() -> [NavItem; 9] {
+    /// The sidebar's grouped sections, in order: a small caps label, then
+    /// its links. Fleet-wide pages first, then this machine's own resources,
+    /// then configuration. Settings is not here -- it's its own control in
+    /// the sidebar footer.
+    fn sections() -> [(&'static str, &'static [NavItem]); 3] {
         [
-            NavItem::Services,
-            NavItem::Volumes,
-            NavItem::Networks,
-            NavItem::Images,
-            NavItem::Ports,
-            NavItem::Environment,
-            NavItem::Secrets,
-            NavItem::Registries,
-            NavItem::GitSync,
+            ("Fleet", &[NavItem::Services, NavItem::Ports]),
+            (
+                "This machine",
+                &[
+                    NavItem::Volumes,
+                    NavItem::Networks,
+                    NavItem::Images,
+                    NavItem::Environment,
+                ],
+            ),
+            (
+                "Configuration",
+                &[NavItem::GitSync, NavItem::Secrets, NavItem::Registries],
+            ),
         ]
     }
 
@@ -184,12 +193,17 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                     div.nav-scrim data-nav-scrim {}
                     nav.sidebar {
                         a.brand href="/" { (brand_mark()) span { "Sooth" } }
-                        ul.nav-list {
-                            @for item in NavItem::all() {
-                                li {
-                                    a href=(item.href())
-                                        aria-current=[active.filter(|a| *a == item).map(|_| "page")] {
-                                        (icon(item.nav_icon())) span { (item.label()) }
+                        div.nav-list {
+                            @for (label, items) in NavItem::sections() {
+                                div.nav-section-label { (label) }
+                                ul.nav-group {
+                                    @for item in items {
+                                        li {
+                                            a href=(item.href())
+                                                aria-current=[active.filter(|a| a == item).map(|_| "page")] {
+                                                (icon(item.nav_icon())) span { (item.label()) }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1394,6 +1408,33 @@ pub fn error_fragment(message: &str, id: Uuid) -> Markup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_sections_list_every_nav_item_once() {
+        let listed: Vec<NavItem> = NavItem::sections()
+            .iter()
+            .flat_map(|(_, items)| items.iter().copied())
+            .collect();
+        for item in [
+            NavItem::Services,
+            NavItem::Volumes,
+            NavItem::Networks,
+            NavItem::Images,
+            NavItem::Ports,
+            NavItem::Environment,
+            NavItem::Secrets,
+            NavItem::Registries,
+            NavItem::GitSync,
+        ] {
+            assert_eq!(
+                listed.iter().filter(|i| **i == item).count(),
+                1,
+                "{:?}",
+                item.label()
+            );
+        }
+        assert!(!listed.contains(&NavItem::Settings));
+    }
 
     #[test]
     fn section_back_target_covers_every_kind() {
