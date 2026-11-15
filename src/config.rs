@@ -277,6 +277,9 @@ pub struct AppState {
     /// `crate::imagetags`. Also holds the last tag listing per repository,
     /// which the list rows' "newer tag" badge reads.
     pub image_tags: ImageTagsManager,
+    /// The Activity feed, kept in `activity.jsonl` beside the config file
+    /// -- see `crate::activity`.
+    pub activity: crate::activity::ActivityLog,
 }
 
 #[cfg(test)]

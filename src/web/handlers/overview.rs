@@ -64,8 +64,25 @@ async fn gather(state: &AppState) -> Result<Overview, AppError> {
     })
 }
 
+/// How many Activity entries the Overview shows.
+const ACTIVITY_SHOWN: usize = 30;
+
+fn now_secs() -> u64 {
+    now_usec() / 1_000_000
+}
+
 pub async fn page(State(state): State<AppState>) -> Result<impl IntoResponse, PageError> {
-    Ok(templates::overview::overview_page(&gather(&state).await?))
+    let overview = gather(&state).await?;
+    let activity = state.activity.recent(ACTIVITY_SHOWN);
+    Ok(templates::overview::overview_page(
+        &overview,
+        &activity,
+        now_secs(),
+    ))
+}
+
+pub async fn activity(State(state): State<AppState>) -> impl IntoResponse {
+    templates::overview::activity_items(&state.activity.recent(ACTIVITY_SHOWN), now_secs())
 }
 
 pub async fn body(State(state): State<AppState>) -> Result<impl IntoResponse, FragmentError> {

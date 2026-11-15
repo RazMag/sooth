@@ -2044,6 +2044,20 @@
   .need-title { font-size: 0.9rem; }
   .need-note { color: var(--color-muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .need-actions { display: flex; gap: 0.4rem; flex: none; }
+  .activity { margin-top: 0.75rem; }
+  .activity-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.4rem; }
+  .activity-head .card-title { margin: 0; }
+  .act-list { list-style: none; margin: 0; padding: 0; }
+  .act-item { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.45rem 0; border-top: 1px solid var(--color-line); font-size: 0.875rem; }
+  .act-item:first-child { border-top: 0; }
+  .act-dot { flex: none; width: 0.45rem; height: 0.45rem; border-radius: 999px; background: var(--color-faint); transform: translateY(-0.05rem); }
+  .act-problem .act-dot { background: var(--color-danger); }
+  .act-change .act-dot { background: var(--color-ok); }
+  .act-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .act-time { flex: none; color: var(--color-faint); font-size: 0.78rem; }
+  .act-empty { padding: 0.4rem 0; font-size: 0.85rem; }
+  .activity:has([value="problem"]:checked) .act-change,
+  .activity:has([value="change"]:checked) .act-problem { display: none; }
   @media (max-width: 900px) {
     .overview-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .overview-grid { grid-template-columns: minmax(0, 1fr); }

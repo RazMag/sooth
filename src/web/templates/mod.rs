@@ -375,7 +375,7 @@ pub(crate) fn now_usec() -> u64 {
 }
 
 /// A short, rough span: "45s", "12 min", "3h", "6 days".
-fn rough_span(usec: u64) -> String {
+pub(crate) fn rough_span(usec: u64) -> String {
     let secs = usec / 1_000_000;
     match secs {
         0..60 => format!("{secs}s"),

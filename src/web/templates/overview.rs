@@ -6,7 +6,8 @@
 use maud::{Markup, html};
 
 use super::services::Stats;
-use super::{Icon, NavItem, icon, shell};
+use super::{Icon, NavItem, icon, rough_span, shell};
+use crate::activity::{Entry, Kind};
 use crate::health::Health;
 
 /// What the host says about itself, for the machine card.
@@ -290,7 +291,55 @@ pub fn overview_body(o: &Overview) -> Markup {
     }
 }
 
-pub fn overview_page(o: &Overview) -> Markup {
+/// The Activity feed's entries, newest first -- also the
+/// `/overview/activity` fragment, re-fetched when an entry is added. `now`
+/// is Unix seconds.
+pub fn activity_items(entries: &[Entry], now: u64) -> Markup {
+    html! {
+        @if entries.is_empty() {
+            li.act-empty.muted { "Nothing yet. Units starting, stopping or failing show up here." }
+        }
+        @for e in entries {
+            li class=(match e.kind { Kind::Problem => "act-item act-problem", Kind::Change => "act-item act-change" }) {
+                span.act-dot aria-hidden="true" {}
+                span.act-text { strong { (e.subject) } " " (e.text) }
+                span.act-time title=(e.at) {
+                    @if e.at <= now { (rough_span((now - e.at) * 1_000_000)) " ago" }
+                }
+            }
+        }
+    }
+}
+
+/// The Activity card: an All / Problems / Changes filter (pure CSS, see
+/// `.activity` in `styles.css`) above the live list.
+fn activity_card(entries: &[Entry], now: u64) -> Markup {
+    const FILTERS: [(&str, &str); 3] = [
+        ("all", "All"),
+        ("problem", "Problems"),
+        ("change", "Changes"),
+    ];
+    html! {
+        section.card.activity {
+            div.activity-head {
+                h2.card-title { "Activity" }
+                div.segmented.segmented-sm role="radiogroup" aria-label="Show" {
+                    @for (value, label) in FILTERS {
+                        @let id = format!("activity-{value}");
+                        input type="radio" name="activity-filter" id=(id) value=(value) checked[value == "all"];
+                        label for=(id) { (label) }
+                    }
+                }
+            }
+            ul.act-list id="overview-activity" hx-get="/overview/activity"
+                hx-trigger="sse:activity-changed" hx-swap="innerHTML" {
+                (activity_items(entries, now))
+            }
+        }
+    }
+}
+
+pub fn overview_page(o: &Overview, activity: &[Entry], now: u64) -> Markup {
     let body = html! {
         div.page-header.overview-header {
             h1 id="overview-headline" { (headline(&o.stats)) }
@@ -303,6 +352,7 @@ pub fn overview_page(o: &Overview) -> Markup {
             hx-swap="innerHTML" {
             (overview_body(o))
         }
+        (activity_card(activity, now))
     };
     shell(
         &headline(&o.stats),
@@ -396,5 +446,19 @@ mod tests {
         let os = "NAME=Fedora\nPRETTY_NAME=\"Fedora Linux 43 (Server)\"\nID=fedora\n";
         assert_eq!(pretty_name(os).as_deref(), Some("Fedora Linux 43 (Server)"));
         assert_eq!(pretty_name("ID=x\n"), None);
+    }
+
+    #[test]
+    fn activity_marks_problems_and_reads_relative_time() {
+        let entries = vec![Entry {
+            at: 1_000,
+            kind: Kind::Problem,
+            subject: "radarr".into(),
+            text: "exited with status 1".into(),
+        }];
+        let html = activity_items(&entries, 1_000 + 3 * 3600).into_string();
+        assert!(html.contains("act-problem"));
+        assert!(html.contains("3h ago"));
+        assert!(activity_items(&[], 0).into_string().contains("Nothing yet"));
     }
 }

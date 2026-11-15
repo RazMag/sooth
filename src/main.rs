@@ -4,6 +4,7 @@
 // every assertion.
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 
+mod activity;
 mod auth;
 mod config;
 mod error;
@@ -200,6 +201,7 @@ async fn run() -> anyhow::Result<()> {
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
+    let activity_log = activity::ActivityLog::beside_config(&config_path);
     let state = AppState {
         config: Arc::new(config.clone()),
         quadlet_dir: Arc::new(quadlet_dir),
@@ -212,7 +214,9 @@ async fn run() -> anyhow::Result<()> {
         git_sync: git_sync.clone(),
         self_update: self_update.clone(),
         image_tags: image_tags.clone(),
+        activity: activity_log,
     };
+    let activity_task = activity::spawn(state.clone());
 
     let app = web::build_router(state);
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
@@ -237,6 +241,7 @@ async fn run() -> anyhow::Result<()> {
     // logged that it shut down.
     watch_task.abort();
     fs_watch_task.abort();
+    activity_task.abort();
     git_sync.abort_all();
     self_update.abort();
     image_tags.abort();

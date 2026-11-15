@@ -23,6 +23,10 @@ All notable changes to sooth are documented here. The format follows
   with tiles for running, failed, newer image tags and Git Sync, a card for
   this machine, and a "Needs you" list of problems with the action that
   fixes each. Services moved to `/services`.
+- **Activity feed.** The Overview lists units failing, recovering,
+  starting and stopping, and Git Sync updates and failures, newest first,
+  with an All / Problems / Changes filter. It's kept in `activity.jsonl`
+  beside the config file (the last 500 entries), so it survives restarts.
 - **Filter Services by state.** An All / Running / Stopped / Failed switch
   above the Services table shows only the units in that state.
 

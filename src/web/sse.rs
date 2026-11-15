@@ -66,5 +66,8 @@ fn render_event(event: DashboardEvent) -> Vec<Result<Event, Infallible>> {
         DashboardEvent::ImageTagsChanged => {
             vec![Ok(Event::default().event("image-tags-changed").data("1"))]
         }
+        DashboardEvent::ActivityChanged => {
+            vec![Ok(Event::default().event("activity-changed").data("1"))]
+        }
     }
 }

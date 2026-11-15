@@ -107,6 +107,7 @@ pub fn build_router(state: AppState) -> Router {
         // Services: the home page, combining Containers + Pods.
         .route("/", get(overview::page))
         .route("/overview/body", get(overview::body))
+        .route("/overview/activity", get(overview::activity))
         .route("/services", get(services::page))
         .route("/services/rows", get(services::rows))
         .route("/services/counts", get(services::counts))

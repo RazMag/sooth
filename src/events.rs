@@ -28,6 +28,8 @@ pub enum DashboardEvent {
     /// a pass, or its settings changed. Drives the list rows' "newer tag"
     /// badge and the Settings card.
     ImageTagsChanged,
+    /// The Activity feed (`crate::activity`) gained an entry.
+    ActivityChanged,
 }
 
 pub type EventSender = tokio::sync::broadcast::Sender<DashboardEvent>;
