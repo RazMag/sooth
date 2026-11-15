@@ -85,6 +85,8 @@ pub struct Overview {
     pub newer_tags: Vec<String>,
     pub sync: SyncSummary,
     pub health: Health,
+    /// Running containers whose podman health check is failing.
+    pub unhealthy: Vec<FailedUnit>,
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
@@ -109,6 +111,14 @@ fn summary(o: &Overview) -> String {
         [] => {}
         [one] => parts.push(format!("{} failed", one.name)),
         many => parts.push(format!("{} failed", plural(many.len(), "unit", "units"))),
+    }
+    match o.unhealthy.as_slice() {
+        [] => {}
+        [one] => parts.push(format!("{} is unhealthy", one.name)),
+        many => parts.push(format!(
+            "{} are unhealthy",
+            plural(many.len(), "container", "containers")
+        )),
     }
     match o.missing_secrets.len() {
         0 => {}
@@ -137,9 +147,8 @@ fn summary(o: &Overview) -> String {
         format!("{} and {last}", parts.join(", "))
     };
     // Sentence case, without touching a unit name that starts it.
-    if o.failed.len() != 1
-        && let Some(first) = sentence.get(..1)
-    {
+    let starts_with_name = o.failed.len() == 1 || (o.failed.is_empty() && o.unhealthy.len() == 1);
+    if !starts_with_name && let Some(first) = sentence.get(..1) {
         sentence = first.to_uppercase() + &sentence[1..];
     }
     format!("{sentence}.")
@@ -223,6 +232,7 @@ fn need(title: Markup, note: Markup, actions: Markup) -> Markup {
 
 fn needs_you(o: &Overview) -> Markup {
     let any = !o.failed.is_empty()
+        || !o.unhealthy.is_empty()
         || !o.missing_secrets.is_empty()
         || !o.newer_tags.is_empty()
         || o.sync.attention > 0
@@ -241,6 +251,15 @@ fn needs_you(o: &Overview) -> Markup {
                             html! {
                                 a.btn.btn-sm href={(f.href) "/logs"} { (icon(Icon::Logs)) span { "Logs" } }
                                 a.btn.btn-sm href=(f.href) { "Open" }
+                            },
+                        ))
+                    }
+                    @for u in &o.unhealthy {
+                        (need(
+                            html! { strong { (u.name) } " is unhealthy" },
+                            html! { "Running, but its health check is failing" },
+                            html! {
+                                a.btn.btn-sm href={(u.href) "#logs"} { (icon(Icon::Logs)) span { "Logs" } }
                             },
                         ))
                     }
@@ -386,6 +405,7 @@ mod tests {
             missing_secrets: vec![],
             newer_tags: vec![],
             sync: SyncSummary::default(),
+            unhealthy: vec![],
             health: Health {
                 podman_generator_found: true,
                 linger_enabled: Some(true),
@@ -420,6 +440,13 @@ mod tests {
             "radarr.container failed, secret db-pass isn't set and linger is off."
         );
         o.failed.clear();
+        o.unhealthy.push(FailedUnit {
+            name: "db.container".into(),
+            href: String::new(),
+            detail: String::new(),
+        });
+        assert!(summary(&o).starts_with("db.container is unhealthy, secret"));
+        o.unhealthy.clear();
         o.missing_secrets.clear();
         assert_eq!(summary(&o), "Linger is off.");
         o.health.linger_enabled = Some(true);

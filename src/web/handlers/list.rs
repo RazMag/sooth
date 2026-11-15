@@ -138,6 +138,7 @@ macro_rules! list_handlers {
                     missing: &missing,
                     tags: &tags,
                     ports: None,
+                    health: None,
                     view,
                 },
                 state.health.get(),
@@ -169,6 +170,7 @@ macro_rules! list_handlers {
                     missing: &missing,
                     tags: &tags,
                     ports: None,
+                    health: None,
                     view,
                 },
             ))

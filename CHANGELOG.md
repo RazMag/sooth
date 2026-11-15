@@ -33,6 +33,9 @@ All notable changes to sooth are documented here. The format follows
 - **Flat layout.** Every list can show its units in one name-sorted list,
   next to Pods and Directories, with chips naming each unit's pod and
   folder.
+- **Health checks show.** A running container with a `HealthCmd=` shows
+  podman's verdict (healthy / unhealthy / starting) beside its status on
+  Services, and an unhealthy one is listed under "Needs you".
 - **Start from a template.** The New container, volume, network and
   image pages offer starter quadlets (a web app, an app with a data
   volume, a database with a secret, a run-once job, a bind-mounted folder,

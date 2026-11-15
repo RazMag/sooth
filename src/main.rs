@@ -7,6 +7,7 @@
 mod activity;
 mod auth;
 mod config;
+mod containerhealth;
 mod error;
 mod events;
 mod health;

@@ -12,6 +12,7 @@ use super::{
     Icon, NavItem, autostart_icon, autoupdate_icon, autoupdate_mode, csrf_input, group_kebab, icon,
     kebab_menu, kind_dot, known_groups_datalist, page_header, shell, status_badge,
 };
+use crate::containerhealth::ContainerHealth;
 use crate::health::Health;
 use crate::quadlet::ports::SplitPorts;
 use crate::quadlet::refs::{self, MissingRefs};
@@ -84,6 +85,9 @@ pub struct ListContext<'a> {
     /// name (`core::split_pod_ports`) -- only for a table with a Ports
     /// column (Services); `None` elsewhere.
     pub ports: Option<&'a HashMap<String, SplitPorts>>,
+    /// Podman health-check results by file name
+    /// (`containerhealth::health_of`) -- only for the Services table.
+    pub health: Option<&'a HashMap<String, ContainerHealth>>,
     pub view: ListView,
 }
 
@@ -290,6 +294,12 @@ fn row(
             td {
                 div.status-cell {
                     (status_badge(&service, status))
+                    @if let Some(h) = lists.health.and_then(|h| h.get(&unit.file_name)) {
+                        @if status.is_active() {
+                            span class={"health-pill health-" (h.as_str())}
+                                title="Podman health check (HealthCmd=)" { (h.as_str()) }
+                        }
+                    }
                     @if !service_columns {
                         (autostart_icon(status.is_autostart_enabled()))
                         (autoupdate_icon(unit))
@@ -1208,6 +1218,7 @@ mod tests {
             missing: &missing,
             tags: &tags,
             ports: None,
+            health: None,
             view,
         };
         list_rows(spec, units, "csrf", all, &lists).into_string()

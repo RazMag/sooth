@@ -1614,6 +1614,11 @@
   .chip.starter:hover { text-decoration: none; border-color: var(--color-line-strong); }
   .chip.starter[aria-current="true"] { color: var(--color-accent-ink); border-color: var(--color-accent); }
 
+  /* Podman health check result beside the status (`list::row`). */
+  .health-pill { font-size: 0.72rem; font-weight: 560; padding: 0.05rem 0.4rem; border-radius: 999px; border: 1px solid var(--color-line); color: var(--color-muted); }
+  .health-healthy { color: var(--color-ok); border-color: color-mix(in srgb, var(--color-ok) 40%, transparent); }
+  .health-unhealthy { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 45%, transparent); }
+
   /* Services bulk bar (`services::bulk_bar`, `frontend/bulk.js`). */
   .bulk-bar {
     display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;

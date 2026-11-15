@@ -54,6 +54,7 @@ pub async fn page(
     let missing = core::missing_refs(&state, &units).await;
     let tags = core::newer_tags(&state, &units, &all);
     let ports = split_ports(&units, &all).await;
+    let health = crate::containerhealth::health_of(units.iter().map(|(u, _)| u)).await;
     let stats = compute_stats(&units);
     let view = resolve_list_view(&session, query.view.as_deref()).await;
     Ok(templates::services::services_page(
@@ -67,6 +68,7 @@ pub async fn page(
             missing: &missing,
             tags: &tags,
             ports: Some(&ports),
+            health: Some(&health),
             view,
         },
         state.health.get(),
@@ -86,6 +88,7 @@ pub async fn rows(
     let missing = core::missing_refs(&state, &units).await;
     let tags = core::newer_tags(&state, &units, &all);
     let ports = split_ports(&units, &all).await;
+    let health = crate::containerhealth::health_of(units.iter().map(|(u, _)| u)).await;
     let view = resolve_list_view(&session, None).await;
     Ok(templates::list::list_rows(
         &templates::services::SPEC,
@@ -98,6 +101,7 @@ pub async fn rows(
             missing: &missing,
             tags: &tags,
             ports: Some(&ports),
+            health: Some(&health),
             view,
         },
     ))

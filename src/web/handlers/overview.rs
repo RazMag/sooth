@@ -44,6 +44,21 @@ async fn gather(state: &AppState) -> Result<Overview, AppError> {
     let mut newer_tags: Vec<String> = core::newer_tags(state, &units, &all).into_keys().collect();
     newer_tags.sort();
 
+    let checks = crate::containerhealth::health_of(units.iter().map(|(u, _)| u)).await;
+    let unhealthy = units
+        .iter()
+        .filter(|(u, s)| {
+            s.is_active()
+                && checks.get(&u.file_name)
+                    == Some(&crate::containerhealth::ContainerHealth::Unhealthy)
+        })
+        .map(|(u, _)| FailedUnit {
+            name: u.file_name.clone(),
+            href: core::unit_url(u),
+            detail: String::new(),
+        })
+        .collect();
+
     let snapshot = state.git_sync.snapshot();
     let sync = SyncSummary {
         repos: snapshot.len(),
@@ -61,6 +76,7 @@ async fn gather(state: &AppState) -> Result<Overview, AppError> {
         newer_tags,
         sync,
         health: state.health.get(),
+        unhealthy,
     })
 }
 
