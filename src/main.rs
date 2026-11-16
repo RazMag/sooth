@@ -59,6 +59,9 @@ fn main() -> anyhow::Result<()> {
     if arg.as_deref() == Some("--fingerprint") {
         return fingerprint_cli();
     }
+    if arg.as_deref() == Some("--ssh-key") {
+        return ssh_key_cli();
+    }
 
     let rt = tokio::runtime::Runtime::new()?;
     match arg.as_deref() {
@@ -111,27 +114,55 @@ fn fingerprint_cli() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `sooth --link-add <name> <address> <code> <fingerprint>`: pairs this hub
-/// with an agent without the browser, for scripts (`just dev-fleet`). The
-/// fingerprint is required, since there's no one to confirm it.
+/// `sooth --ssh-key`: this hub's SSH public key (made now if it doesn't
+/// exist), the line to add to `~/.ssh/authorized_keys` on a machine the hub
+/// reaches over SSH.
+fn ssh_key_cli() -> anyhow::Result<()> {
+    let hub_name = web::templates::overview::MachineInfo::detect().hostname;
+    let key = link::ssh::SshKey::load_or_create(
+        &link::dir_beside(&config_path()),
+        &format!("sooth-hub@{hub_name}"),
+    )?;
+    println!("{}", key.public);
+    Ok(())
+}
+
+/// `sooth --link-add <name> <address> <code> <fingerprint> [agent-port]`:
+/// pairs this hub with an agent without the browser, for scripts
+/// (`just dev-fleet`). The address can be `ssh://user@host`, with the
+/// agent's port behind it last. The fingerprint is required, since there's
+/// no one to confirm it.
 async fn link_add_cli() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(2).collect();
-    let [name, address, code, fingerprint] = args.as_slice() else {
-        anyhow::bail!("usage: sooth --link-add <name> <https://address:port> <code> <fingerprint>");
+    let (name, address, code, fingerprint, agent_port) = match args.as_slice() {
+        [n, a, c, f] => (n, a, c, f, None),
+        [n, a, c, f, p] => (
+            n,
+            a,
+            c,
+            f,
+            Some(
+                p.parse::<u16>()
+                    .map_err(|_| anyhow::anyhow!("'{p}' is not a port"))?,
+            ),
+        ),
+        _ => anyhow::bail!(
+            "usage: sooth --link-add <name> <https://host:port | ssh://user@host> <code> <fingerprint> [agent-port]"
+        ),
     };
     let fingerprint = link::Fingerprint::parse(fingerprint)
         .ok_or_else(|| anyhow::anyhow!("'{fingerprint}' is not a fingerprint"))?;
     let hub_name = web::templates::overview::MachineInfo::detect().hostname;
     let fleet = fleet::Fleet::load(&config_path(), &hub_name)?;
     let (seen, hello) = fleet
-        .probe(address)
+        .probe(address, agent_port)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     if seen != fingerprint {
         anyhow::bail!("{address} shows key {seen}, not {fingerprint}");
     }
     let entry = fleet
-        .add(address, fingerprint, code, name)
+        .add(address, agent_port, fingerprint, code, name)
         .await
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     println!(
@@ -368,6 +399,7 @@ async fn run() -> anyhow::Result<()> {
         systemd_client.clone(),
         health.clone(),
     ));
+    let state_fleet = fleet.clone();
     let state = AppState {
         config: Arc::new(config.clone()),
         quadlet_dir,
@@ -411,6 +443,7 @@ async fn run() -> anyhow::Result<()> {
     fs_watch_task.abort();
     activity_task.abort();
     fleet_task.abort();
+    state_fleet.close_tunnels();
     git_sync.abort_all();
     self_update.abort();
     image_tags.abort();

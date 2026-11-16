@@ -21,6 +21,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::events::{DashboardEvent, EventSender};
+use crate::link::ssh::{
+    self, DEFAULT_AGENT_PORT, SshKey, SshSetup, SshTarget, Tunnel, TunnelState,
+};
 use crate::link::trust::{Permission, now_secs};
 use crate::link::{API_VERSION, Fingerprint, Identity};
 use crate::machine::api::Hello;
@@ -86,8 +89,12 @@ pub struct MachineEntry {
     /// URL-safe, unique among the hub's machines, made from the name.
     pub id: String,
     pub name: String,
-    /// `https://host:port` of its agent.
+    /// `https://host:port` of its agent, or `ssh://user@host[:port]` for a
+    /// machine reached through an SSH tunnel (see `link::ssh`).
     pub address: String,
+    /// The agent's port on that machine, for an SSH link (8421 if unset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_port: Option<u16>,
     pub fingerprint: Fingerprint,
     /// What the agent granted at pairing.
     pub permission: Permission,
@@ -105,6 +112,8 @@ struct MachinesFile {
 pub struct Linked {
     pub entry: MachineEntry,
     pub remote: RemoteMachine,
+    /// The SSH tunnel the client goes through, for an SSH link.
+    pub tunnel: Option<Arc<Tunnel>>,
 }
 
 impl Linked {
@@ -112,7 +121,29 @@ impl Linked {
     pub fn machine(&self) -> Machine {
         Machine::Remote(self.remote.clone())
     }
+
+    /// Why a call failed, in words: what `ssh` last said when the tunnel
+    /// is down, since that's the real cause, otherwise the error itself.
+    fn reason(&self, e: &AppError) -> String {
+        match self.tunnel.as_ref().map(|t| t.state()) {
+            Some(TunnelState::Down(why)) => format!("SSH: {why}"),
+            Some(TunnelState::Starting) => "SSH: still connecting".into(),
+            _ => e.user_message(),
+        }
+    }
+
+    /// How the hub reaches it, for the Machines page.
+    pub fn via(&self) -> &'static str {
+        if self.tunnel.is_some() {
+            "SSH"
+        } else {
+            "HTTPS"
+        }
+    }
 }
+
+/// How long adding a machine over SSH waits for the tunnel.
+const SSH_READY: Duration = Duration::from_secs(15);
 
 #[derive(Clone)]
 pub struct Fleet {
@@ -122,6 +153,10 @@ pub struct Fleet {
 struct Inner {
     identity: Identity,
     path: PathBuf,
+    /// `link/` beside the config file.
+    link_dir: PathBuf,
+    /// The hub's SSH key and known hosts, made the first time they're needed.
+    ssh: Mutex<Option<SshSetup>>,
     /// What this hub calls itself to agents (its hostname).
     hub_name: String,
     machines: RwLock<Vec<Linked>>,
@@ -165,7 +200,8 @@ impl Fleet {
     /// This hub's key (made on first start) and its saved machines, from the
     /// folder holding `config_path`.
     pub fn load(config_path: &Path, hub_name: &str) -> anyhow::Result<Self> {
-        let identity = Identity::load_or_create(&crate::link::dir_beside(config_path))?;
+        let link_dir = crate::link::dir_beside(config_path);
+        let identity = Identity::load_or_create(&link_dir)?;
         let path = config_path
             .parent()
             .unwrap_or_else(|| Path::new("."))
@@ -179,26 +215,114 @@ impl Fleet {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e.into()),
         };
+        let fleet = Self {
+            inner: Arc::new(Inner {
+                identity,
+                path,
+                link_dir,
+                ssh: Mutex::new(None),
+                hub_name: hub_name.to_string(),
+                machines: RwLock::new(Vec::new()),
+                seen: RwLock::new(HashMap::new()),
+                listings: Mutex::new(HashMap::new()),
+                events: OnceLock::new(),
+            }),
+        };
         let mut machines = Vec::new();
         for entry in entries {
-            match RemoteMachine::new(&entry.address, &identity, entry.fingerprint) {
-                Ok(remote) => machines.push(Linked { entry, remote }),
+            match fleet.connect(entry.clone()) {
+                Ok(linked) => machines.push(linked),
                 Err(e) => {
                     tracing::warn!(machine = %entry.name, error = %e, "skipping a saved machine")
                 }
             }
         }
-        Ok(Self {
-            inner: Arc::new(Inner {
-                identity,
-                path,
-                hub_name: hub_name.to_string(),
-                machines: RwLock::new(machines),
-                seen: RwLock::new(HashMap::new()),
-                listings: Mutex::new(HashMap::new()),
-                events: OnceLock::new(),
-            }),
+        *fleet
+            .inner
+            .machines
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = machines;
+        Ok(fleet)
+    }
+
+    /// The hub's SSH key and known-hosts file, making the key with
+    /// `ssh-keygen` the first time.
+    pub fn ssh_setup(&self) -> Result<SshSetup, AppError> {
+        let mut slot = self.inner.ssh.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(setup) = slot.as_ref() {
+            return Ok(setup.clone());
+        }
+        let key = SshKey::load_or_create(
+            &self.inner.link_dir,
+            &format!("sooth-hub@{}", self.inner.hub_name),
+        )
+        .map_err(|e| AppError::Remote(format!("couldn't make this hub's SSH key: {e:#}")))?;
+        let setup = SshSetup {
+            key,
+            known_hosts: self.inner.link_dir.join("known_hosts"),
+        };
+        *slot = Some(setup.clone());
+        Ok(setup)
+    }
+
+    /// Starts an SSH tunnel to the agent behind `target`.
+    fn tunnel(&self, target: SshTarget, agent_port: u16) -> Result<Tunnel, AppError> {
+        Tunnel::start(&self.ssh_setup()?, target, agent_port)
+            .map_err(|e| AppError::Remote(format!("couldn't start ssh: {e}")))
+    }
+
+    /// A client for a saved machine, over its SSH tunnel when it has one.
+    fn connect(&self, entry: MachineEntry) -> Result<Linked, AppError> {
+        let (base, tunnel) = if ssh::is_ssh(&entry.address) {
+            let target = SshTarget::parse(&entry.address)
+                .ok_or_else(|| invalid(format!("'{}' isn't an SSH address", entry.address)))?;
+            let tunnel = self.tunnel(target, entry.agent_port.unwrap_or(DEFAULT_AGENT_PORT))?;
+            (tunnel.url(), Some(Arc::new(tunnel)))
+        } else {
+            (entry.address.clone(), None)
+        };
+        let remote = RemoteMachine::new(&base, &self.inner.identity, entry.fingerprint)?;
+        Ok(Linked {
+            entry,
+            remote,
+            tunnel,
         })
+    }
+
+    /// Where the agent at `address` is reached from here: the address
+    /// itself, or a fresh SSH tunnel's local end (kept open by the returned
+    /// tunnel). Also `address` as it's saved.
+    async fn reach(
+        &self,
+        address: &str,
+        agent_port: Option<u16>,
+    ) -> Result<(String, String, Option<Tunnel>), AppError> {
+        let address = address.trim();
+        if !ssh::is_ssh(address) {
+            return Ok((address.to_string(), address.to_string(), None));
+        }
+        let target = SshTarget::parse(address).ok_or_else(|| {
+            invalid("write an SSH address as ssh://user@host, or ssh://user@host:port")
+        })?;
+        let saved = target.address();
+        let tunnel = self.tunnel(target, agent_port.unwrap_or(DEFAULT_AGENT_PORT))?;
+        tunnel.ready(SSH_READY).await.map_err(|why| {
+            AppError::Remote(format!(
+                "couldn't open an SSH tunnel to {saved}: {why}. Check that this hub's \
+                 SSH key is in that user's ~/.ssh/authorized_keys."
+            ))
+        })?;
+        Ok((tunnel.url(), saved, Some(tunnel)))
+    }
+
+    /// Kills every SSH tunnel at once -- before the hub re-executes itself,
+    /// which would otherwise leave them running.
+    pub fn close_tunnels(&self) {
+        for m in self.machines() {
+            if let Some(t) = &m.tunnel {
+                t.close();
+            }
+        }
     }
 
     /// Where to announce a machine coming online or dropping off
@@ -255,7 +379,7 @@ impl Fleet {
                 millis: started.elapsed().as_millis(),
             },
             Ok(Err(e)) => Reach::Offline {
-                reason: e.user_message(),
+                reason: linked.reason(&e),
             },
             Err(_) => Reach::Offline {
                 reason: no_answer(),
@@ -305,7 +429,7 @@ impl Fleet {
                 }
                 return Listing::Live(listing);
             }
-            Ok(Err(e)) => e.user_message(),
+            Ok(Err(e)) => linked.reason(&e),
             Err(_) => no_answer(),
         };
         self.record(
@@ -358,14 +482,17 @@ impl Fleet {
 
     /// The first look at a machine being added: its key's fingerprint and
     /// what it says about itself. Refuses an agent on another API version.
-    pub async fn probe(&self, address: &str) -> Result<(Fingerprint, Hello), AppError> {
-        let address = address.trim();
-        if self.machines().iter().any(|m| m.entry.address == address) {
-            return Err(invalid(format!(
-                "{address} is already one of your machines"
-            )));
+    /// `agent_port` is the agent's port behind an SSH address.
+    pub async fn probe(
+        &self,
+        address: &str,
+        agent_port: Option<u16>,
+    ) -> Result<(Fingerprint, Hello), AppError> {
+        let (url, saved, _tunnel) = self.reach(address, agent_port).await?;
+        if self.machines().iter().any(|m| m.entry.address == saved) {
+            return Err(invalid(format!("{saved} is already one of your machines")));
         }
-        let (fingerprint, hello) = remote::probe(address, &self.inner.identity).await?;
+        let (fingerprint, hello) = remote::probe(&url, &self.inner.identity).await?;
         if hello.api_version != API_VERSION {
             return Err(invalid(format!(
                 "{} runs sooth {} (agent API v{}); this hub speaks v{API_VERSION}. \
@@ -384,21 +511,25 @@ impl Fleet {
     pub async fn add(
         &self,
         address: &str,
+        agent_port: Option<u16>,
         fingerprint: Fingerprint,
         code: &str,
         name: &str,
     ) -> Result<MachineEntry, AppError> {
-        let address = address.trim();
         let name = valid_name(name)?;
+        let (url, saved, tunnel) = self.reach(address, agent_port).await?;
         let paired = remote::pair(
-            address,
+            &url,
             &self.inner.identity,
             fingerprint,
             code,
             &self.inner.hub_name,
         )
         .await?;
-        let remote = RemoteMachine::new(address, &self.inner.identity, fingerprint)?;
+        let remote = RemoteMachine::new(&url, &self.inner.identity, fingerprint)?;
+        let agent_port = tunnel
+            .as_ref()
+            .map(|_| agent_port.unwrap_or(DEFAULT_AGENT_PORT));
 
         let mut machines = self
             .inner
@@ -415,7 +546,8 @@ impl Fleet {
         let entry = MachineEntry {
             id,
             name: name.to_string(),
-            address: address.to_string(),
+            address: saved,
+            agent_port,
             fingerprint,
             permission: paired.permission,
             added_at: now_secs(),
@@ -424,6 +556,7 @@ impl Fleet {
         machines.push(Linked {
             entry: entry.clone(),
             remote,
+            tunnel: tunnel.map(Arc::new),
         });
         self.save(&machines)?;
         drop(machines);
@@ -454,6 +587,9 @@ impl Fleet {
         machines.retain(|m| m.entry.id != id);
         self.save(&machines)?;
         drop(machines);
+        if let Some(t) = &linked.tunnel {
+            t.close();
+        }
         self.forget(id);
         tracing::info!(machine = %linked.entry.name, confirmed, "machine unpaired");
         Ok(confirmed)
@@ -520,8 +656,8 @@ mod tests {
         fleet.notify_on(tx);
         let agent = spawn_agent(fake()).await;
         let code = agent.hubs.issue_code(Permission::Full).unwrap();
-        let (fp, _) = fleet.probe(&agent.url).await.unwrap();
-        fleet.add(&agent.url, fp, &code, "Pi").await.unwrap();
+        let (fp, _) = fleet.probe(&agent.url, None).await.unwrap();
+        fleet.add(&agent.url, None, fp, &code, "Pi").await.unwrap();
         let linked = fleet.get("pi").unwrap();
         let kinds = [UnitKind::Container];
 
@@ -573,6 +709,137 @@ mod tests {
         assert!(fleet.cached("pi", &kinds).is_none());
     }
 
+    /// A throwaway `sshd` on a loopback port that lets in `key` for the
+    /// current user, or `None` when OpenSSH's server isn't installed.
+    fn spawn_sshd(dir: &Path, key: &str) -> Option<(std::process::Child, u16)> {
+        let sshd = ["/usr/sbin/sshd", "/usr/bin/sshd", "/sbin/sshd"]
+            .into_iter()
+            .find(|p| Path::new(p).exists())?;
+        let host_key = dir.join("host_ed25519");
+        let made = std::process::Command::new("ssh-keygen")
+            .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+            .arg(&host_key)
+            .status()
+            .ok()?;
+        assert!(made.success());
+        let authorized = dir.join("authorized_keys");
+        std::fs::write(&authorized, format!("{key}\n")).unwrap();
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let config = dir.join("sshd_config");
+        std::fs::write(
+            &config,
+            format!(
+                "Port {port}\nListenAddress 127.0.0.1\nHostKey {}\nAuthorizedKeysFile {}\n\
+                 PasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\n\
+                 StrictModes no\nPidFile {}\nAllowTcpForwarding yes\n",
+                host_key.display(),
+                authorized.display(),
+                dir.join("sshd.pid").display()
+            ),
+        )
+        .unwrap();
+        let mut child = std::process::Command::new(sshd)
+            .args(["-D", "-e", "-f"])
+            .arg(&config)
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .ok()?;
+        // Wait for it to listen; one that can't start here (e.g. as root
+        // without /run/sshd) means the test is skipped.
+        for _ in 0..50 {
+            if let Ok(Some(_)) = child.try_wait() {
+                return None;
+            }
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                return Some((child, port));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = child.kill();
+        None
+    }
+
+    #[tokio::test]
+    async fn a_machine_is_added_and_reached_through_an_ssh_tunnel() {
+        let dir = tempfile::tempdir().unwrap();
+        let fleet = Fleet::load(&dir.path().join("config.toml"), "hub01").unwrap();
+        let Ok(setup) = fleet.ssh_setup() else {
+            eprintln!("skipped: no ssh-keygen");
+            return;
+        };
+        let sshd_dir = tempfile::tempdir().unwrap();
+        let Some((mut sshd, ssh_port)) = spawn_sshd(sshd_dir.path(), &setup.key.public) else {
+            eprintln!("skipped: no sshd");
+            return;
+        };
+        let user = std::process::Command::new("id")
+            .arg("-un")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap();
+        let agent = spawn_agent(fake()).await;
+        let agent_port: u16 = agent.url.rsplit(':').next().unwrap().parse().unwrap();
+        let address = format!("{user}@127.0.0.1:{ssh_port}");
+
+        let (fp, hello) = fleet.probe(&address, Some(agent_port)).await.unwrap();
+        assert_eq!(fp, agent.identity.fingerprint);
+        assert_eq!(hello.hostname, "fake01");
+
+        let code = agent.hubs.issue_code(Permission::Full).unwrap();
+        let entry = fleet
+            .add(&address, Some(agent_port), fp, &code, "Tunnelled")
+            .await
+            .unwrap();
+        assert_eq!(entry.address, format!("ssh://{user}@127.0.0.1:{ssh_port}"));
+        assert_eq!(entry.agent_port, Some(agent_port));
+        let linked = fleet.get("tunnelled").unwrap();
+        assert_eq!(linked.via(), "SSH");
+        assert!(linked.machine().units(&[UnitKind::Container]).await.is_ok());
+
+        // A restart brings the tunnel back from machines.toml.
+        let reloaded = Fleet::load(&dir.path().join("config.toml"), "hub01").unwrap();
+        let again = reloaded.get("tunnelled").unwrap();
+        again
+            .tunnel
+            .as_ref()
+            .unwrap()
+            .ready(Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert!(reloaded.check(&again).await.is_online());
+
+        // sshd goes away, then the connection drops: the tunnel can't come
+        // back, and the reason is what ssh says.
+        let _ = sshd.kill();
+        let _ = sshd.wait();
+        let tunnel = again.tunnel.as_ref().unwrap();
+        let pid = tunnel.pid().expect("ssh is running");
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+        for _ in 0..100 {
+            if matches!(tunnel.state(), TunnelState::Down(_)) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(
+            matches!(tunnel.state(), TunnelState::Down(_)),
+            "{:?}",
+            tunnel.state()
+        );
+        match reloaded.check(&again).await {
+            Reach::Offline { reason } => assert!(reason.starts_with("SSH: "), "{reason}"),
+            Reach::Online { .. } => panic!("still online without sshd"),
+        }
+        fleet.close_tunnels();
+        reloaded.close_tunnels();
+    }
+
     #[test]
     fn slugs_are_url_safe() {
         assert_eq!(slug("Pi in the garage"), "pi-in-the-garage");
@@ -590,12 +857,18 @@ mod tests {
         let agent = spawn_agent(fake()).await;
         let code = agent.hubs.issue_code(Permission::Full).unwrap();
 
-        let (fp, hello) = fleet.probe(&agent.url).await.unwrap();
+        let (fp, hello) = fleet.probe(&agent.url, None).await.unwrap();
         assert_eq!(hello.hostname, "fake01");
-        let entry = fleet.add(&agent.url, fp, &code, "Pi garage").await.unwrap();
+        let entry = fleet
+            .add(&agent.url, None, fp, &code, "Pi garage")
+            .await
+            .unwrap();
         assert_eq!(entry.id, "pi-garage");
         assert_eq!(agent.hubs.hubs()[0].name, "hub01");
-        assert!(fleet.probe(&agent.url).await.is_err(), "already added");
+        assert!(
+            fleet.probe(&agent.url, None).await.is_err(),
+            "already added"
+        );
 
         // A restart reads the same machines and the same key.
         let reloaded = Fleet::load(&config, "hub01").unwrap();

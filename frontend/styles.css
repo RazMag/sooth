@@ -1750,6 +1750,19 @@
   .inline-rename > summary::-webkit-details-marker { display: none; }
   .inline-rename[open] { display: flex; gap: 0.35rem; align-items: center; }
   .machine-link { color: inherit; }
+  .ssh-setup > summary { cursor: pointer; font-size: 0.85rem; color: var(--color-muted); margin-bottom: 0.4rem; }
+  .ssh-setup label { display: block; margin-top: 0.6rem; }
+  .ssh-setup .input-sm { max-width: 8rem; }
+  .ssh-key {
+    margin: 0.4rem 0 0;
+    padding: 0.6rem 0.75rem;
+    background: var(--color-raised);
+    border-radius: 0.5rem;
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    user-select: all;
+  }
 
   /* Machines across pages: a status dot (online / offline / not checked
      yet), the sidebar's monograms, the Services scope switcher and the

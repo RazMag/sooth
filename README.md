@@ -334,6 +334,16 @@ machine that stops answering keeps showing what it last reported, marked
 offline, with its actions turned off and a Retry. Editing, moving and
 deleting units on other machines come in a later 2.0 update.
 
+**Over SSH.** For a machine the hub can reach over SSH but not on the
+agent's port, leave the agent on its default `127.0.0.1:8421` and enter
+`ssh://user@host` (or `ssh://user@host:2222`) as the address. First add
+the hub's SSH key, shown under *Adding over SSH* on the Machines page (or
+printed by `sooth --ssh-key`), to that user's `~/.ssh/authorized_keys`.
+The hub keeps an `ssh -N -L` tunnel open to the agent, reconnecting with
+backoff when it drops, and talks to the agent through it with the same
+pinned keys. It uses your `~/.ssh/config`, so host aliases and jump hosts
+work; the SSH host key is trusted on first use and kept in `link/known_hosts`.
+
 Hub and agent talk over HTTPS with mutual TLS, and each accepts only the
 key it pinned at pairing: there's no certificate authority and no password
 on the wire. The agent listens on `127.0.0.1:8421` by default; set
@@ -347,7 +357,8 @@ you). The hub's paired machines are in `~/.config/sooth/machines.toml`; an
 agent's paired hubs are in its `link/hubs.toml`. **To move the hub** to
 another machine, stop it, copy the whole `~/.config/sooth/` folder over,
 and start sooth there: it keeps its key, so every agent still recognises it.
-Keep that folder private, since the key in it is what the agents trust.
+Keep that folder private, since the keys in it (including the hub's SSH key,
+`link/ssh_ed25519`) are what the agents trust.
 
 To try it on one machine, `just dev-fleet` runs a dashboard on 8420 and an
 agent on 8421 against one scratch directory and pairs them as "Dev agent",

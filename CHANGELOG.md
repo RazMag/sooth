@@ -40,6 +40,11 @@ All notable changes to sooth are documented here. The format follows
   access; the bulk bar works across machines too. A machine that stops
   answering keeps showing what it last reported, marked offline, with its
   actions off and a Retry.
+- **SSH links (v2 work in progress).** A machine can be added as
+  `ssh://user@host` when the hub reaches it over SSH but not on the agent's
+  port. The hub keeps an SSH tunnel to the agent's loopback port, with its
+  own key (shown on the Machines page and by `sooth --ssh-key`), and
+  reconnects when it drops; an offline SSH machine says what `ssh` reported.
 - **Overview page.** The home page now says how many services are up,
   with tiles for running, failed, newer image tags and Git Sync, a card for
   this machine, and a "Needs you" list of problems with the action that

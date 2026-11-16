@@ -54,6 +54,7 @@ async fn reach_all(state: &AppState) -> Vec<Row> {
         .await
         .into_iter()
         .map(|(m, reach)| Row {
+            via: m.via(),
             entry: m.entry,
             reach,
         })
@@ -99,6 +100,7 @@ async fn render_list(
             address,
             notice,
             error,
+            ssh_key: state.fleet.ssh_setup().map(|s| s.key.public).ok(),
             health: state.health.get(),
         }),
     )
@@ -131,6 +133,25 @@ pub struct AddForm {
     csrf_token: String,
     address: String,
     code: String,
+    /// The agent's port behind an SSH address; blank for the default.
+    #[serde(default)]
+    agent_port: String,
+}
+
+/// The agent port field: blank is the default, anything else a port.
+fn agent_port(field: &str) -> Result<Option<u16>, AppError> {
+    let field = field.trim();
+    if field.is_empty() {
+        return Ok(None);
+    }
+    field
+        .parse::<u16>()
+        .ok()
+        .filter(|p| *p > 0)
+        .map(Some)
+        .ok_or_else(|| {
+            crate::quadlet::QuadletError::Validation(format!("'{field}' isn't a port")).into()
+        })
 }
 
 /// Step one: reach the agent without trusting it yet, and show its key.
@@ -141,12 +162,17 @@ pub async fn add(
 ) -> Result<Response, PageError> {
     check_csrf(&session, &form.csrf_token).await?;
     let address = form.address.trim();
-    match state.fleet.probe(address).await {
-        Ok((fingerprint, hello)) => {
+    let probed = match agent_port(&form.agent_port) {
+        Ok(port) => state.fleet.probe(address, port).await.map(|p| (p, port)),
+        Err(e) => Err(e),
+    };
+    match probed {
+        Ok(((fingerprint, hello), port)) => {
             let csrf = csrf(&session).await;
             Ok(confirm_page(ConfirmPage {
                 csrf: &csrf,
                 address,
+                agent_port: port,
                 code: form.code.trim(),
                 fingerprint: fingerprint.to_string(),
                 hello: &hello,
@@ -174,6 +200,8 @@ pub struct PairForm {
     code: String,
     fingerprint: String,
     name: String,
+    #[serde(default)]
+    agent_port: String,
 }
 
 /// Step two: pair over a connection pinned to the key the person confirmed.
@@ -185,11 +213,16 @@ pub async fn pair(
     check_csrf(&session, &form.csrf_token).await?;
     let fingerprint = Fingerprint::parse(&form.fingerprint)
         .ok_or_else(|| AppError::NotFound("fingerprint".into()))?;
-    match state
-        .fleet
-        .add(&form.address, fingerprint, &form.code, &form.name)
-        .await
-    {
+    let added = match agent_port(&form.agent_port) {
+        Ok(port) => {
+            state
+                .fleet
+                .add(&form.address, port, fingerprint, &form.code, &form.name)
+                .await
+        }
+        Err(e) => Err(e),
+    };
+    match added {
         Ok(entry) => {
             stash(
                 &session,
