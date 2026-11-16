@@ -56,13 +56,27 @@
 # dashboard does.
 #
 #   scripts/run-dev.sh --with-agent
+#
+# --ssh (with --with-agent, which it implies; `just dev-fleet --ssh`) puts
+# an SSH hop in between: it runs a throwaway `sshd` on port+2, bound to
+# 127.0.0.1, running as you, with its own host key and an authorized_keys
+# holding only the dashboard's SSH key (`sooth --ssh-key`), all under
+# <dir>/.sooth-dev/agent/sshd. The agent stays on 127.0.0.1, and the
+# dashboard is paired with it as "Dev agent (SSH)" at
+# ssh://<you>@127.0.0.1:<port+2>, so every call goes through the dashboard's
+# SSH tunnel. Its log lines are prefixed [sshd]. Needs OpenSSH's server
+# (sshd) installed; nothing is changed in your real ~/.ssh or system sshd.
+# Switching between --ssh and plain --with-agent re-pairs the same agent
+# the other way.
+#
+#   scripts/run-dev.sh --with-agent --ssh
 
 set -u
 
 usage() {
     echo "Usage: run-dev.sh [--dir <path>] [--port <n>] [--hash <argon2-hash>] [--release] [--no-seed]"
     echo "                  [--config <path>] [--fake-no-podman] [--fake-linger-disabled]"
-    echo "                  [--with-agent]"
+    echo "                  [--with-agent] [--ssh]"
     echo ""
     echo "  --config <path>         Use this sooth config file instead of the scratch dir's"
     echo "                          own empty one (<dir>/.sooth-dev/config.toml)."
@@ -73,6 +87,8 @@ usage() {
     echo "                          \"Disabled\" regardless of your real linger state."
     echo "  --with-agent            Also run \`sooth --agent\` on port+1 over the same"
     echo "                          scratch dir, and have the dashboard go through it."
+    echo "  --ssh                   With --with-agent: reach that agent through a"
+    echo "                          throwaway sshd on port+2 (an SSH link)."
 }
 
 dir_flag=
@@ -84,6 +100,7 @@ no_seed_flag=
 fake_no_podman_flag=
 fake_linger_disabled_flag=
 with_agent_flag=
+ssh_flag=
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -140,6 +157,11 @@ while [ $# -gt 0 ]; do
             shift
             ;;
         --with-agent)
+            with_agent_flag=1
+            shift
+            ;;
+        --ssh)
+            ssh_flag=1
             with_agent_flag=1
             shift
             ;;
@@ -270,20 +292,88 @@ if [ -n "$with_agent_flag" ]; then
     agent_pid=$!
     tail -n +1 -f "$agent_log" | sed -u 's/^/[agent] /' &
     tail_pid=$!
-    trap 'kill "$agent_pid" "$tail_pid" 2>/dev/null' EXIT
+    sshd_pid=
+    sshd_tail_pid=
+    trap 'kill "$agent_pid" "$tail_pid" $sshd_pid $sshd_tail_pid 2>/dev/null' EXIT
     trap 'exit 130' INT TERM
     sleep 1
     if ! kill -0 "$agent_pid" 2>/dev/null; then
         echo "error: the agent exited at startup (log above, also in $agent_log)" >&2
         exit 1
     fi
-    # Pair the dashboard with the agent once per scratch dir, the way the Add
-    # machine form would (a fresh code, the agent's fingerprint checked).
-    if ! grep -qs 'id = "dev-agent"' "$(dirname -- "$config")/machines.toml"; then
-        echo "==> pairing the dashboard with the agent"
+
+    # The way the dashboard reaches the agent: straight over HTTPS, or (with
+    # --ssh) through a throwaway sshd in front of the agent's loopback port.
+    if [ -n "$ssh_flag" ]; then
+        sshd_bin=
+        for candidate in /usr/sbin/sshd /usr/bin/sshd /sbin/sshd /usr/local/sbin/sshd; do
+            if [ -x "$candidate" ]; then
+                sshd_bin=$candidate
+                break
+            fi
+        done
+        if [ -z "$sshd_bin" ]; then
+            echo "error: --ssh needs OpenSSH's server (sshd) installed" >&2
+            exit 1
+        fi
+        if [ "$(id -u)" = 0 ] && [ ! -d /run/sshd ]; then
+            echo "error: sshd running as root needs /run/sshd (mkdir /run/sshd), or run this as a normal user" >&2
+            exit 1
+        fi
+        ssh_port=$((port + 2))
+        ssh_user=$(id -un) || exit 1
+        sshd_dir=$agent_dir/sshd
+        sshd_log=$sshd_dir/sshd.log
+        mkdir -p -- "$sshd_dir" || exit 1
+        chmod 700 "$sshd_dir" || exit 1
+        [ -e "$sshd_dir/host_ed25519" ] || ssh-keygen -q -t ed25519 -N "" -f "$sshd_dir/host_ed25519" || exit 1
+        # The dashboard's own SSH key (made now if needed) is the only one let in.
+        SOOTH_CONFIG="$config" "$bin" --ssh-key > "$sshd_dir/authorized_keys" || exit 1
+        cat > "$sshd_dir/sshd_config" <<EOF
+Port $ssh_port
+ListenAddress 127.0.0.1
+HostKey $sshd_dir/host_ed25519
+AuthorizedKeysFile $sshd_dir/authorized_keys
+AllowUsers $ssh_user
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM no
+StrictModes no
+AllowTcpForwarding local
+PermitTTY no
+X11Forwarding no
+PidFile $sshd_dir/sshd.pid
+LogLevel VERBOSE
+EOF
+        : > "$sshd_log" || exit 1
+        echo "==> starting a throwaway sshd on 127.0.0.1:$ssh_port  (for $ssh_user, the dashboard's key only)"
+        "$sshd_bin" -D -e -f "$sshd_dir/sshd_config" >> "$sshd_log" 2>&1 &
+        sshd_pid=$!
+        tail -n +1 -f "$sshd_log" | sed -u 's/^/[sshd] /' &
+        sshd_tail_pid=$!
+        sleep 1
+        if ! kill -0 "$sshd_pid" 2>/dev/null; then
+            echo "error: sshd exited at startup (log above, also in $sshd_log)" >&2
+            exit 1
+        fi
+        link_id=dev-agent-ssh
+        link_name="Dev agent (SSH)"
+        link_address="ssh://$ssh_user@127.0.0.1:$ssh_port"
+    else
+        link_id=dev-agent
+        link_name="Dev agent"
+        link_address="https://127.0.0.1:$agent_port"
+    fi
+
+    # Pair the dashboard with the agent once per scratch dir and link type,
+    # the way the Add machine form would (a fresh code, the agent's
+    # fingerprint checked). Pairing the same agent the other way replaces
+    # the earlier entry.
+    if ! grep -qs "id = \"$link_id\"" "$(dirname -- "$config")/machines.toml"; then
+        echo "==> pairing the dashboard with the agent at $link_address"
         code=$(SOOTH_CONFIG="$agent_config" "$bin" --pair-code | sed -n 's/^Pairing code: *//p') || exit 1
         fingerprint=$(SOOTH_CONFIG="$agent_config" "$bin" --fingerprint) || exit 1
-        SOOTH_CONFIG="$config" "$bin" --link-add "Dev agent" "https://127.0.0.1:$agent_port" "$code" "$fingerprint" || exit 1
+        SOOTH_CONFIG="$config" "$bin" --link-add "$link_name" "$link_address" "$code" "$fingerprint" "$agent_port" || exit 1
     fi
 fi
 

@@ -29,7 +29,7 @@ scripts/run-dev.sh      # run against a throwaway scratch quadlet dir + its own 
 ```
 
 `justfile` wraps these as `just build|release|test|fmt|fmt-check|lint|check`,
-`just frontend|watch-frontend`, `just dev [args...]` and `just dev-fleet [args...]` (`--with-agent`: a `sooth --agent` over the same scratch dir with its own config in `.sooth-dev/agent/`, paired once via `--pair-code`/`--link-add` as "Dev agent", so Services lists each unit twice) (forward to
+`just frontend|watch-frontend`, `just dev [args...]` and `just dev-fleet [args...]` (`--with-agent`: a `sooth --agent` over the same scratch dir with its own config in `.sooth-dev/agent/`, paired once via `--pair-code`/`--link-add` as "Dev agent", so Services lists each unit twice; `--ssh` adds a throwaway `sshd` on port+2 under `.sooth-dev/agent/sshd` that lets in only `sooth --ssh-key`, and pairs "Dev agent (SSH)" at `ssh://<you>@127.0.0.1:<port+2>` instead) (forward to
 `scripts/run-dev.sh`), and `just ci` (reproduces
 `.github/workflows/ci.yml` locally). `just --list` shows them all. It's a
 convenience wrapper only — the raw commands above are still what actually

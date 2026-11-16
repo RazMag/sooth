@@ -364,6 +364,12 @@ To try it on one machine, `just dev-fleet` runs a dashboard on 8420 and an
 agent on 8421 against one scratch directory and pairs them as "Dev agent",
 so Services lists every unit twice: once on the hub, and once read through
 the agent. The agent's requests show in the output, prefixed `[agent]`.
+`just dev-fleet --ssh` pairs it as an SSH link instead: it starts a
+throwaway `sshd` on 8422 (bound to 127.0.0.1, running as you, letting in
+only the dashboard's SSH key) and pairs "Dev agent (SSH)" at
+`ssh://you@127.0.0.1:8422`, so every call goes through the dashboard's SSH
+tunnel. It needs OpenSSH's server installed and leaves your real `~/.ssh`
+and system sshd alone.
 
 ### Run as a systemd user service
 
