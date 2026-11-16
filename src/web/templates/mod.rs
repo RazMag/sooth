@@ -13,6 +13,7 @@ pub mod imagetags;
 pub mod list;
 pub mod logs;
 pub mod machine;
+pub mod machines;
 pub mod networks;
 pub mod overview;
 pub mod pods;
@@ -49,6 +50,7 @@ pub enum NavItem {
     Overview,
     Services,
     Machine,
+    Machines,
     ImageTags,
     Volumes,
     Networks,
@@ -69,6 +71,7 @@ impl NavItem {
             NavItem::Overview => "/",
             NavItem::Services => "/services",
             NavItem::Machine => "/machine",
+            NavItem::Machines => "/machines",
             NavItem::ImageTags => "/tags",
             NavItem::Volumes => "/volumes",
             NavItem::Networks => "/networks",
@@ -87,6 +90,7 @@ impl NavItem {
             NavItem::Overview => "Overview",
             NavItem::Services => "Services",
             NavItem::Machine => "Machine",
+            NavItem::Machines => "Machines",
             NavItem::ImageTags => "Images & tags",
             NavItem::Volumes => "Volumes",
             NavItem::Networks => "Networks",
@@ -105,6 +109,7 @@ impl NavItem {
             NavItem::Overview => Icon::Overview,
             NavItem::Services => Icon::Services,
             NavItem::Machine => Icon::Monitor,
+            NavItem::Machines => Icon::Link,
             NavItem::ImageTags => Icon::Images,
             NavItem::Volumes => Icon::Volumes,
             NavItem::Networks => Icon::Networks,
@@ -129,6 +134,7 @@ impl NavItem {
                 &[
                     NavItem::Overview,
                     NavItem::Services,
+                    NavItem::Machines,
                     NavItem::Ports,
                     NavItem::ImageTags,
                 ],

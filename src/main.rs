@@ -10,11 +10,13 @@ mod config;
 mod containerhealth;
 mod error;
 mod events;
+mod fleet;
 mod health;
 mod hostenv;
 mod imageinfo;
 mod imagetags;
 mod journal;
+mod link;
 mod logging;
 mod machine;
 mod quadlet;
@@ -50,49 +52,126 @@ fn main() -> anyhow::Result<()> {
         return git_askpass_cli();
     }
 
-    if std::env::args().nth(1).as_deref() == Some("--agent-token") {
-        let token: String = rand::random::<[u8; 32]>()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        println!("{token}");
-        return Ok(());
+    let arg = std::env::args().nth(1);
+    if arg.as_deref() == Some("--pair-code") {
+        return pair_code_cli();
+    }
+    if arg.as_deref() == Some("--fingerprint") {
+        return fingerprint_cli();
     }
 
     let rt = tokio::runtime::Runtime::new()?;
-    if std::env::args().nth(1).as_deref() == Some("--agent") {
-        return rt.block_on(run_agent());
+    match arg.as_deref() {
+        Some("--agent") => rt.block_on(run_agent()),
+        Some("--link-add") => rt.block_on(link_add_cli()),
+        _ => rt.block_on(run()),
     }
-    rt.block_on(run())
 }
 
-/// A dev-only stand-in for linking machines, which doesn't exist yet: with
-/// `SOOTH_DEV_AGENT_URL` and `SOOTH_DEV_AGENT_TOKEN` set, the pages read
-/// units, status and logs (and run start/stop/restart) through that agent's
-/// API instead of this host. Everything else -- detail pages, edits, the live
-/// log follow -- still uses this host's quadlet directory, so the agent must
-/// serve the same one (`just dev-fleet` sets that up).
-fn dev_agent() -> anyhow::Result<Option<machine::Machine>> {
-    let Ok(url) = std::env::var("SOOTH_DEV_AGENT_URL") else {
+fn config_path() -> std::path::PathBuf {
+    std::env::var_os("SOOTH_CONFIG")
+        .map(Into::into)
+        .unwrap_or_else(config::default_config_path)
+}
+
+/// `sooth --pair-code [--read-only]`: makes a new pairing code for this
+/// machine's agent (replacing any earlier one) and prints it with this
+/// machine's fingerprint, for the hub's Add machine form.
+fn pair_code_cli() -> anyhow::Result<()> {
+    let read_only = std::env::args().any(|a| a == "--read-only");
+    let dir = link::dir_beside(&config_path());
+    let identity = link::Identity::load_or_create(&dir)?;
+    let permission = if read_only {
+        link::trust::Permission::ReadOnly
+    } else {
+        link::trust::Permission::Full
+    };
+    let code = link::trust::issue_code(&dir, permission)?;
+    print_pairing(&code, &identity.fingerprint, permission);
+    Ok(())
+}
+
+fn print_pairing(code: &str, fingerprint: &link::Fingerprint, permission: link::trust::Permission) {
+    println!("Pairing code:  {code}");
+    println!(
+        "Valid for:     {} minutes, once",
+        link::trust::CODE_LIFETIME_SECS / 60
+    );
+    println!("Access:        {}", permission.label());
+    println!("Fingerprint:   {fingerprint}");
+    println!();
+    println!("In the hub, open Machines > Add machine, enter this machine's address");
+    println!("and the code, and check that the fingerprint it shows matches the one above.");
+}
+
+/// `sooth --fingerprint`: this machine's link key fingerprint.
+fn fingerprint_cli() -> anyhow::Result<()> {
+    let identity = link::Identity::load_or_create(&link::dir_beside(&config_path()))?;
+    println!("{}", identity.fingerprint);
+    Ok(())
+}
+
+/// `sooth --link-add <name> <address> <code> <fingerprint>`: pairs this hub
+/// with an agent without the browser, for scripts (`just dev-fleet`). The
+/// fingerprint is required, since there's no one to confirm it.
+async fn link_add_cli() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(2).collect();
+    let [name, address, code, fingerprint] = args.as_slice() else {
+        anyhow::bail!("usage: sooth --link-add <name> <https://address:port> <code> <fingerprint>");
+    };
+    let fingerprint = link::Fingerprint::parse(fingerprint)
+        .ok_or_else(|| anyhow::anyhow!("'{fingerprint}' is not a fingerprint"))?;
+    let hub_name = web::templates::overview::MachineInfo::detect().hostname;
+    let fleet = fleet::Fleet::load(&config_path(), &hub_name)?;
+    let (seen, hello) = fleet
+        .probe(address)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if seen != fingerprint {
+        anyhow::bail!("{address} shows key {seen}, not {fingerprint}");
+    }
+    let entry = fleet
+        .add(address, fingerprint, code, name)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!(
+        "Paired with {} ({}) as '{}', access {}.",
+        hello.hostname,
+        entry.address,
+        entry.name,
+        entry.permission.label()
+    );
+    Ok(())
+}
+
+/// A dev-only way to look at a linked machine before the fleet pages merge
+/// machines: with `SOOTH_DEV_VIEW_MACHINE=<id>`, the pages read units,
+/// status and logs (and run start/stop/restart) through that machine's
+/// agent instead of this host. Detail pages, edits and the live log follow
+/// still use this host's quadlet directory, so the agent must serve the same
+/// one (`just dev-fleet` sets that up).
+fn dev_view(fleet: &fleet::Fleet) -> anyhow::Result<Option<machine::Machine>> {
+    let Ok(id) = std::env::var("SOOTH_DEV_VIEW_MACHINE") else {
         return Ok(None);
     };
-    let token = std::env::var("SOOTH_DEV_AGENT_TOKEN").unwrap_or_default();
-    let remote = machine::remote::RemoteMachine::new(&url, &token)
-        .map_err(|e| anyhow::anyhow!("SOOTH_DEV_AGENT_URL: {e}"))?;
-    tracing::warn!(%url, "dev: pages read units through the agent at this address");
-    Ok(Some(machine::Machine::Remote(remote)))
+    let linked = fleet
+        .get(&id)
+        .ok_or_else(|| anyhow::anyhow!("SOOTH_DEV_VIEW_MACHINE: no machine '{id}'"))?;
+    tracing::warn!(machine = %linked.entry.name, "dev: pages read units through this machine's agent");
+    Ok(Some(machine::Machine::Remote(linked.remote)))
 }
 
 /// `sooth --agent`: serves this host's machine API (`machine::api`) for a
 /// hub to call, and nothing else -- no UI, no sessions, no background tasks.
 /// Everything it answers is read fresh from disk and systemd per request.
 async fn run_agent() -> anyhow::Result<()> {
-    let config_path = std::env::var_os("SOOTH_CONFIG")
-        .map(Into::into)
-        .unwrap_or_else(config::default_config_path);
-    let config = Config::load(Some(config_path))?;
+    let config_path = config_path();
+    let config = Config::load(Some(config_path.clone()))?;
     logging::init(config.log_filter.as_deref());
-    config.validate_agent()?;
+
+    let link_dir = link::dir_beside(&config_path);
+    let identity = link::Identity::load_or_create(&link_dir)?;
+    let hubs = Arc::new(link::trust::HubStore::load(&link_dir)?);
 
     let quadlet_dir = config.resolved_quadlet_dir()?;
     quadlet::discovery::ensure_dir(&quadlet_dir)?;
@@ -107,27 +186,37 @@ async fn run_agent() -> anyhow::Result<()> {
     ));
     let app = machine::api::router(machine::api::ApiState {
         machine,
-        token: Arc::from(config.agent_token.trim()),
+        hubs: hubs.clone(),
     });
 
     let addr = config.agent_bind_addr;
-    if !addr.ip().is_loopback() {
-        tracing::warn!(
-            %addr,
-            "the agent API is plain HTTP for now -- serve it only on a trusted network"
+    let tcp = tokio::net::TcpListener::bind(addr).await?;
+    let listener = link::listener::TlsListener::new(tcp, identity.server_config()?)?;
+    info!(%addr, url = %format!("https://{addr}"), fingerprint = %identity.fingerprint, "sooth agent listening");
+    if hubs.hubs().is_empty() {
+        let code = hubs.issue_code(link::trust::Permission::Full)?;
+        info!(
+            code = %code,
+            "no hub is paired yet: add this machine in the hub with this code (valid 10 minutes; \
+             `sooth --pair-code` makes a new one)"
         );
+    } else {
+        for hub in hubs.hubs() {
+            info!(hub = %hub.name, access = hub.permission.label(), "paired hub");
+        }
     }
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    info!(%addr, "sooth agent listening");
 
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal(
-            shutdown_tx,
-            Arc::new(Notify::new()),
-            Arc::new(AtomicBool::new(false)),
-        ))
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<link::listener::Peer>(),
+    )
+    .with_graceful_shutdown(shutdown_signal(
+        shutdown_tx,
+        Arc::new(Notify::new()),
+        Arc::new(AtomicBool::new(false)),
+    ))
+    .await?;
     info!("agent shut down cleanly");
     Ok(())
 }
@@ -284,7 +373,12 @@ async fn run() -> anyhow::Result<()> {
     let activity_log = activity::ActivityLog::beside_config(&config_path);
     let quadlet_dir = Arc::new(quadlet_dir);
     let systemd_client = Arc::new(systemd_client);
-    let machine = match dev_agent()? {
+    let fleet = fleet::Fleet::load(
+        &config_path,
+        &web::templates::overview::MachineInfo::detect().hostname,
+    )?;
+    info!(fingerprint = %fleet.fingerprint(), machines = fleet.machines().len(), "hub link key");
+    let machine = match dev_view(&fleet)? {
         Some(remote) => remote,
         None => machine::Machine::Local(machine::local::LocalMachine::new(
             quadlet_dir.clone(),
@@ -306,6 +400,7 @@ async fn run() -> anyhow::Result<()> {
         image_tags: image_tags.clone(),
         activity: activity_log,
         machine,
+        fleet,
     };
     let activity_task = activity::spawn(state.clone());
 

@@ -1737,6 +1737,19 @@
   .muted { color: var(--color-muted); }
   .empty { color: var(--color-muted); padding: 1.5rem 0; }
 
+  /* Machines page */
+  .fingerprint { font-size: 0.8rem; word-break: break-word; }
+  .fingerprint-big { margin: 0.75rem 0; }
+  .fingerprint-card { margin-bottom: 1rem; }
+  .machines-table .nowrap { white-space: nowrap; }
+  .fingerprint-big code { font-size: 1rem; line-height: 1.7; word-spacing: 0.3em; word-break: break-word; }
+  .machine-sub { color: var(--color-muted); font-size: 0.8rem; }
+  .form-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .inline-rename { display: inline-block; }
+  .inline-rename > summary { list-style: none; cursor: pointer; }
+  .inline-rename > summary::-webkit-details-marker { display: none; }
+  .inline-rename[open] { display: flex; gap: 0.35rem; align-items: center; }
+
   #log-output {
     background: var(--color-surface);
     border: 1px solid var(--color-line);

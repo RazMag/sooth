@@ -46,11 +46,13 @@
 #   scripts/run-dev.sh --fake-no-podman --fake-linger-disabled   # both checklist items fail at once
 #
 # --with-agent (what `just dev-fleet` runs) also starts `sooth --agent` on
-# the next port up, against the same scratch dir and with a fresh token, and
-# points the dashboard at it (SOOTH_DEV_AGENT_URL / SOOTH_DEV_AGENT_TOKEN,
-# see main::dev_agent): lists, status, start/stop/restart and log tails then
-# travel over the agent API. Its log lines are prefixed [agent]; it stops
-# when the dashboard does.
+# the next port up, against the same scratch dir but with its own config and
+# key (<dir>/.sooth-dev/agent), pairs the dashboard with it as "Dev agent"
+# (once per scratch dir, through `sooth --pair-code` and `--link-add`), and
+# points the dashboard's pages at it (SOOTH_DEV_VIEW_MACHINE, see
+# main::dev_view): lists, status, start/stop/restart and log tails then travel
+# over the agent API, with mutual TLS. Its log lines are prefixed [agent]; it
+# stops when the dashboard does.
 #
 #   scripts/run-dev.sh --with-agent
 
@@ -254,15 +256,15 @@ fi
 agent_env=
 if [ -n "$with_agent_flag" ]; then
     agent_port=$((port + 1))
-    agent_token=$("$bin" --agent-token) || exit 1
-    agent_log=$scratch/.sooth-dev/agent.log
-    mkdir -p -- "$scratch/.sooth-dev" || exit 1
-    : > "$scratch/.sooth-dev/agent.toml" || exit 1
+    agent_dir=$scratch/.sooth-dev/agent
+    agent_config=$agent_dir/config.toml
+    agent_log=$agent_dir/agent.log
+    mkdir -p -- "$agent_dir" || exit 1
+    [ -e "$agent_config" ] || : > "$agent_config" || exit 1
     : > "$agent_log" || exit 1
-    echo "==> starting sooth --agent on http://127.0.0.1:$agent_port  (same quadlet dir)"
-    env SOOTH_CONFIG="$scratch/.sooth-dev/agent.toml" \
+    echo "==> starting sooth --agent on https://127.0.0.1:$agent_port  (same quadlet dir, own config in $agent_dir)"
+    env SOOTH_CONFIG="$agent_config" \
         SOOTH_QUADLET_DIR="$scratch" \
-        SOOTH_AGENT_TOKEN="$agent_token" \
         SOOTH_AGENT_BIND_ADDR="127.0.0.1:$agent_port" \
         "$bin" --agent >> "$agent_log" 2>&1 &
     agent_pid=$!
@@ -275,7 +277,15 @@ if [ -n "$with_agent_flag" ]; then
         echo "error: the agent exited at startup (log above, also in $agent_log)" >&2
         exit 1
     fi
-    agent_env="SOOTH_DEV_AGENT_URL=http://127.0.0.1:$agent_port SOOTH_DEV_AGENT_TOKEN=$agent_token"
+    # Pair the dashboard with the agent once per scratch dir, the way the Add
+    # machine form would (a fresh code, the agent's fingerprint checked).
+    if ! grep -qs 'id = "dev-agent"' "$(dirname -- "$config")/machines.toml"; then
+        echo "==> pairing the dashboard with the agent"
+        code=$(SOOTH_CONFIG="$agent_config" "$bin" --pair-code | sed -n 's/^Pairing code: *//p') || exit 1
+        fingerprint=$(SOOTH_CONFIG="$agent_config" "$bin" --fingerprint) || exit 1
+        SOOTH_CONFIG="$config" "$bin" --link-add "Dev agent" "https://127.0.0.1:$agent_port" "$code" "$fingerprint" || exit 1
+    fi
+    agent_env="SOOTH_DEV_VIEW_MACHINE=dev-agent"
 fi
 
 echo "==> starting sooth on http://127.0.0.1:$port  (quadlet dir: $scratch)"

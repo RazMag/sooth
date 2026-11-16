@@ -7,6 +7,7 @@ pub mod imagetags;
 pub mod list;
 pub mod logs;
 pub mod machine;
+pub mod machines;
 pub mod overview;
 pub mod pods;
 pub mod ports;

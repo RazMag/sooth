@@ -22,11 +22,15 @@ All notable changes to sooth are documented here. The format follows
 
 ### Added
 
-- **Agent mode (v2 work in progress).** `sooth --agent` serves only this
-  machine's API (facts, units with status, start/stop/restart, log tails)
-  under `/api/v1`, behind a bearer token from `SOOTH_AGENT_TOKEN`, on
-  `SOOTH_AGENT_BIND_ADDR` (loopback by default). `sooth --agent-token`
-  prints a fresh token. The hub doesn't link to agents yet.
+- **Machines and agents (v2 work in progress).** `sooth --agent` serves
+  only this machine's API (facts, units with status, start/stop/restart,
+  log tails) on `SOOTH_AGENT_BIND_ADDR`, over HTTPS with mutual TLS. Each
+  sooth makes its own key on first start. The new Machines page pairs the
+  hub with an agent: enter its address and the code from
+  `sooth --pair-code`, check its key's fingerprint, and name it. A code
+  works once for 10 minutes and can grant read-only access. Machines can be
+  renamed and unpaired. The hub's pairings live in its config folder, so
+  copying that folder moves the hub.
 - **Overview page.** The home page now says how many services are up,
   with tiles for running, failed, newer image tags and Git Sync, a card for
   this machine, and a "Needs you" list of problems with the action that

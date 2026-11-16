@@ -296,8 +296,7 @@ secrets in an `EnvironmentFile=`.
 | `SOOTH_COOKIE_SECURE` | `false` | Require HTTPS for the session cookie. Set `true` when reachable off-box, behind a TLS-terminating reverse proxy. |
 | `SOOTH_LOG_FILTER` | `sooth=info,tower_http=info,zbus=warn` | A `tracing-subscriber` `EnvFilter` string; `RUST_LOG` also works. |
 | `SOOTH_SESSION_IDLE_TIMEOUT_SECS` | `43200` (12h) | Session idle expiry. |
-| `SOOTH_AGENT_TOKEN` | *(empty)* | Agent mode only: the bearer token the machine API requires (16+ characters; `sooth --agent-token` prints one). |
-| `SOOTH_AGENT_BIND_ADDR` | `127.0.0.1:8421` | Agent mode only: where the machine API listens. |
+| `SOOTH_AGENT_BIND_ADDR` | `127.0.0.1:8421` | Agent mode only: where the machine API listens (HTTPS, mutual TLS). |
 
 All of these are also editable from the in-app Settings page, which writes
 back to the resolved TOML file; changes there take effect on the next
@@ -309,19 +308,40 @@ button on the same page winds the server down and re-execs the binary in
 place (same argv and environment) so those saved changes take effect without
 shell access — it doesn't rely on a systemd `Restart=` or a known unit name.
 
-### Agent mode (v2 work in progress)
+### Machines and agents (v2 work in progress)
 
-`sooth --agent` serves only this machine's API, for a hub to manage it: no
-web UI and no password, just JSON under `/api/v1` behind
-`SOOTH_AGENT_TOKEN`. It answers with the machine's facts, its units with
-their live status, start/stop/restart, and log tails. The API is plain HTTP
-for now, so it listens on loopback by default; pairing over HTTPS or SSH
-comes with linking machines to a hub.
+The dashboard you log in to is the **hub**. Another machine joins it by
+running sooth as an **agent**, which serves only that machine's API: no web
+UI and no password.
 
-To try it with a dashboard, `just dev-fleet` runs both against one scratch
-directory: the agent on port 8421, and a dashboard on 8420 that reads its
-lists, status and logs (and runs start/stop/restart) through the agent. The
-agent's requests show in the output, prefixed `[agent]`.
+1. On the new machine, run `sooth --agent` (as a user service, like the
+   dashboard). On its first start it makes a key and prints a pairing code
+   and the key's fingerprint. `sooth --pair-code` makes a fresh code at any
+   time; add `--read-only` to let the hub look at the machine but not act on
+   it. A code works once, for 10 minutes.
+2. In the hub, open **Machines → Add machine**, enter the agent's address
+   (`https://host:8421`) and the code, and check that the fingerprint shown
+   matches the one the machine printed. Name it, and it's paired.
+
+Hub and agent talk over HTTPS with mutual TLS, and each accepts only the
+key it pinned at pairing: there's no certificate authority and no password
+on the wire. The agent listens on `127.0.0.1:8421` by default; set
+`SOOTH_AGENT_BIND_ADDR` (e.g. `0.0.0.0:8421`) for a hub on another machine
+to reach it. Unpairing from the Machines page also makes the agent forget
+the hub.
+
+**Where this lives.** Each sooth keeps its key in `link/` beside its config
+file (`~/.config/sooth/link/`: `cert.pem`, and `key.pem` readable only by
+you). The hub's paired machines are in `~/.config/sooth/machines.toml`; an
+agent's paired hubs are in its `link/hubs.toml`. **To move the hub** to
+another machine, stop it, copy the whole `~/.config/sooth/` folder over,
+and start sooth there: it keeps its key, so every agent still recognises it.
+Keep that folder private, since the key in it is what the agents trust.
+
+To try it on one machine, `just dev-fleet` runs a dashboard on 8420 and an
+agent on 8421 against one scratch directory, pairs them, and has the
+dashboard's lists, status and logs go through the agent. The agent's
+requests show in the output, prefixed `[agent]`.
 
 ### Run as a systemd user service
 
