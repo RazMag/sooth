@@ -7,7 +7,7 @@ use axum::response::IntoResponse;
 
 use crate::config::AppState;
 use crate::error::PageError;
-use crate::quadlet::{UnitKind, discovery};
+use crate::quadlet::UnitKind;
 use crate::web::templates::machine::{Counts, MachinePage, Tool, parse_version};
 use crate::web::templates::overview::MachineInfo;
 use crate::web::templates::{self};
@@ -29,7 +29,8 @@ async fn version_of(program: &str) -> Option<String> {
 }
 
 pub async fn page(State(state): State<AppState>) -> Result<impl IntoResponse, PageError> {
-    let all = discovery::load_all(&state.quadlet_dir)?;
+    let (_, all) = state.machine.units(&[]).await?;
+    let facts = state.machine.facts().await?;
     let count = |kinds: &[UnitKind]| all.iter().filter(|u| kinds.contains(&u.kind)).count();
     let counts = Counts {
         services: count(&[UnitKind::Container, UnitKind::Pod]),
@@ -52,10 +53,10 @@ pub async fn page(State(state): State<AppState>) -> Result<impl IntoResponse, Pa
         },
     ];
     Ok(templates::machine::machine_page(&MachinePage {
-        machine: MachineInfo::detect(),
-        quadlet_dir: state.quadlet_dir.display().to_string(),
+        machine: MachineInfo::from(&facts),
+        quadlet_dir: facts.quadlet_dir.clone(),
         tools,
         counts,
-        health: state.health.get(),
+        health: facts.health,
     }))
 }

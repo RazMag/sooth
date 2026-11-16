@@ -128,6 +128,8 @@ pub type UnitListing = (Vec<(QuadletUnit, UnitStatus)>, Vec<QuadletUnit>);
 #[derive(Clone)]
 pub enum Machine {
     Local(local::LocalMachine),
+    // Reached once the hub links machines; until then only tests build one.
+    #[cfg_attr(not(test), allow(dead_code))]
     Remote(remote::RemoteMachine),
     #[cfg(test)]
     Fake(fake::FakeMachine),

@@ -1,6 +1,9 @@
 //! A machine reached over its agent's API (see [`super::api`]). Plain HTTP
 //! with a bearer token for now; pairing with pinned keys over HTTPS or SSH
 //! replaces the shared token in the next phase.
+//!
+//! Nothing outside tests builds one until the hub links machines.
+#![cfg_attr(not(test), allow(dead_code))]
 
 use std::sync::Arc;
 use std::time::Duration;
