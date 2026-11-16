@@ -66,6 +66,23 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(run())
 }
 
+/// A dev-only stand-in for linking machines, which doesn't exist yet: with
+/// `SOOTH_DEV_AGENT_URL` and `SOOTH_DEV_AGENT_TOKEN` set, the pages read
+/// units, status and logs (and run start/stop/restart) through that agent's
+/// API instead of this host. Everything else -- detail pages, edits, the live
+/// log follow -- still uses this host's quadlet directory, so the agent must
+/// serve the same one (`just dev-fleet` sets that up).
+fn dev_agent() -> anyhow::Result<Option<machine::Machine>> {
+    let Ok(url) = std::env::var("SOOTH_DEV_AGENT_URL") else {
+        return Ok(None);
+    };
+    let token = std::env::var("SOOTH_DEV_AGENT_TOKEN").unwrap_or_default();
+    let remote = machine::remote::RemoteMachine::new(&url, &token)
+        .map_err(|e| anyhow::anyhow!("SOOTH_DEV_AGENT_URL: {e}"))?;
+    tracing::warn!(%url, "dev: pages read units through the agent at this address");
+    Ok(Some(machine::Machine::Remote(remote)))
+}
+
 /// `sooth --agent`: serves this host's machine API (`machine::api`) for a
 /// hub to call, and nothing else -- no UI, no sessions, no background tasks.
 /// Everything it answers is read fresh from disk and systemd per request.
@@ -267,11 +284,14 @@ async fn run() -> anyhow::Result<()> {
     let activity_log = activity::ActivityLog::beside_config(&config_path);
     let quadlet_dir = Arc::new(quadlet_dir);
     let systemd_client = Arc::new(systemd_client);
-    let machine = machine::Machine::Local(machine::local::LocalMachine::new(
-        quadlet_dir.clone(),
-        systemd_client.clone(),
-        health.clone(),
-    ));
+    let machine = match dev_agent()? {
+        Some(remote) => remote,
+        None => machine::Machine::Local(machine::local::LocalMachine::new(
+            quadlet_dir.clone(),
+            systemd_client.clone(),
+            health.clone(),
+        )),
+    };
     let state = AppState {
         config: Arc::new(config.clone()),
         quadlet_dir,

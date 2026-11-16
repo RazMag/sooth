@@ -21,6 +21,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
 
 use super::{Action, MAX_LOG_LINES, Machine};
 use crate::error::AppError;
@@ -52,6 +53,10 @@ pub fn router(state: ApiState) -> Router {
         .nest(
             PREFIX,
             api.layer(middleware::from_fn_with_state(state.clone(), require_token)),
+        )
+        .layer(
+            TraceLayer::new_for_http()
+                .on_response(DefaultOnResponse::new().level(tracing::Level::INFO)),
         )
         .with_state(state)
 }

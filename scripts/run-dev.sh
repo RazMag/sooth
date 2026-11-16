@@ -44,12 +44,22 @@
 #   scripts/run-dev.sh --fake-no-podman
 #   scripts/run-dev.sh --fake-linger-disabled
 #   scripts/run-dev.sh --fake-no-podman --fake-linger-disabled   # both checklist items fail at once
+#
+# --with-agent (what `just dev-fleet` runs) also starts `sooth --agent` on
+# the next port up, against the same scratch dir and with a fresh token, and
+# points the dashboard at it (SOOTH_DEV_AGENT_URL / SOOTH_DEV_AGENT_TOKEN,
+# see main::dev_agent): lists, status, start/stop/restart and log tails then
+# travel over the agent API. Its log lines are prefixed [agent]; it stops
+# when the dashboard does.
+#
+#   scripts/run-dev.sh --with-agent
 
 set -u
 
 usage() {
     echo "Usage: run-dev.sh [--dir <path>] [--port <n>] [--hash <argon2-hash>] [--release] [--no-seed]"
     echo "                  [--config <path>] [--fake-no-podman] [--fake-linger-disabled]"
+    echo "                  [--with-agent]"
     echo ""
     echo "  --config <path>         Use this sooth config file instead of the scratch dir's"
     echo "                          own empty one (<dir>/.sooth-dev/config.toml)."
@@ -58,6 +68,8 @@ usage() {
     echo "                          \"Not found\"."
     echo "  --fake-linger-disabled  Same idea for the linger marker, so it reads"
     echo "                          \"Disabled\" regardless of your real linger state."
+    echo "  --with-agent            Also run \`sooth --agent\` on port+1 over the same"
+    echo "                          scratch dir, and have the dashboard go through it."
 }
 
 dir_flag=
@@ -68,6 +80,7 @@ release_flag=
 no_seed_flag=
 fake_no_podman_flag=
 fake_linger_disabled_flag=
+with_agent_flag=
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -121,6 +134,10 @@ while [ $# -gt 0 ]; do
             ;;
         --fake-linger-disabled)
             fake_linger_disabled_flag=1
+            shift
+            ;;
+        --with-agent)
+            with_agent_flag=1
             shift
             ;;
         -h|--help)
@@ -234,8 +251,36 @@ if [ -n "$fake_no_podman_flag" ] || [ -n "$fake_linger_disabled_flag" ]; then
     fi
 fi
 
+agent_env=
+if [ -n "$with_agent_flag" ]; then
+    agent_port=$((port + 1))
+    agent_token=$("$bin" --agent-token) || exit 1
+    agent_log=$scratch/.sooth-dev/agent.log
+    mkdir -p -- "$scratch/.sooth-dev" || exit 1
+    : > "$scratch/.sooth-dev/agent.toml" || exit 1
+    : > "$agent_log" || exit 1
+    echo "==> starting sooth --agent on http://127.0.0.1:$agent_port  (same quadlet dir)"
+    env SOOTH_CONFIG="$scratch/.sooth-dev/agent.toml" \
+        SOOTH_QUADLET_DIR="$scratch" \
+        SOOTH_AGENT_TOKEN="$agent_token" \
+        SOOTH_AGENT_BIND_ADDR="127.0.0.1:$agent_port" \
+        "$bin" --agent >> "$agent_log" 2>&1 &
+    agent_pid=$!
+    tail -n +1 -f "$agent_log" | sed -u 's/^/[agent] /' &
+    tail_pid=$!
+    trap 'kill "$agent_pid" "$tail_pid" 2>/dev/null' EXIT
+    trap 'exit 130' INT TERM
+    sleep 1
+    if ! kill -0 "$agent_pid" 2>/dev/null; then
+        echo "error: the agent exited at startup (log above, also in $agent_log)" >&2
+        exit 1
+    fi
+    agent_env="SOOTH_DEV_AGENT_URL=http://127.0.0.1:$agent_port SOOTH_DEV_AGENT_TOKEN=$agent_token"
+fi
+
 echo "==> starting sooth on http://127.0.0.1:$port  (quadlet dir: $scratch)"
-env SOOTH_CONFIG="$config" \
+env $agent_env \
+    SOOTH_CONFIG="$config" \
     SOOTH_QUADLET_DIR="$scratch" \
     SOOTH_AUTH_PASSWORD_HASH="$hash" \
     SOOTH_BIND_ADDR="127.0.0.1:$port" \

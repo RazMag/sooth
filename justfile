@@ -51,6 +51,10 @@ watch-frontend:
 dev *ARGS:
     scripts/run-dev.sh {{ARGS}}
 
+# Like `dev`, plus a `sooth --agent` on the next port that the dashboard reads units through; e.g. `just dev-fleet --port 8123`.
+dev-fleet *ARGS:
+    scripts/run-dev.sh --with-agent {{ARGS}}
+
 # Mirrors .github/workflows/ci.yml locally: rebuild frontend (fail if static/ is stale), then fmt/clippy/test.
 ci: frontend
     git diff --exit-code -- static/style.css static/app.js

@@ -318,6 +318,11 @@ their live status, start/stop/restart, and log tails. The API is plain HTTP
 for now, so it listens on loopback by default; pairing over HTTPS or SSH
 comes with linking machines to a hub.
 
+To try it with a dashboard, `just dev-fleet` runs both against one scratch
+directory: the agent on port 8421, and a dashboard on 8420 that reads its
+lists, status and logs (and runs start/stop/restart) through the agent. The
+agent's requests show in the output, prefixed `[agent]`.
+
 ### Run as a systemd user service
 
 The [quick install](#quick-install) script sets this up for you automatically
@@ -371,6 +376,7 @@ section, and `cargo`/`npm`/`scripts/run-dev.sh` still work directly with no
 | `just frontend` | `npm ci && npm run build` |
 | `just watch-frontend` | `npm run watch` |
 | `just dev [args...]` | `scripts/run-dev.sh [args...]` (args are forwarded) |
+| `just dev-fleet [args...]` | `scripts/run-dev.sh --with-agent [args...]`: also runs `sooth --agent` on the next port and has the dashboard read units through it |
 | `just ci` | reproduces `.github/workflows/ci.yml` locally, end to end |
 
 `just dev` forwards arguments as-is, e.g. `just dev --port 8123

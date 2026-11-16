@@ -2,8 +2,8 @@
 //! with a bearer token for now; pairing with pinned keys over HTTPS or SSH
 //! replaces the shared token in the next phase.
 //!
-//! Nothing outside tests builds one until the hub links machines.
-#![cfg_attr(not(test), allow(dead_code))]
+//! Until the hub links machines, only tests and the dev hook
+//! (`SOOTH_DEV_AGENT_URL`, see `main::dev_agent`) build one.
 
 use std::sync::Arc;
 use std::time::Duration;
