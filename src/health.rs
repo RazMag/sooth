@@ -18,7 +18,7 @@ use std::sync::{Arc, RwLock};
 /// create/edit validation, see `quadlet::writer`) and linger (whether this
 /// user's systemd session, and therefore sooth itself when run as its
 /// service, survives logout).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Health {
     pub podman_generator_found: bool,
     /// `None` when it couldn't be determined (rather than guessing) -- see

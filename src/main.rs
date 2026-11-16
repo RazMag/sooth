@@ -16,6 +16,7 @@ mod imageinfo;
 mod imagetags;
 mod journal;
 mod logging;
+mod machine;
 mod quadlet;
 mod registries;
 mod secrets;

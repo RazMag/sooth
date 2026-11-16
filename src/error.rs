@@ -39,12 +39,15 @@ pub enum AppError {
     Registry(#[from] RegistryError),
     #[error(transparent)]
     Systemd(#[from] SystemdError),
+    /// Another machine (an agent) couldn't be reached or refused a call.
+    #[error("remote machine: {0}")]
+    Remote(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
 
 impl AppError {
-    fn status(&self) -> StatusCode {
+    pub(crate) fn status(&self) -> StatusCode {
         match self {
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::Csrf | AppError::Auth(_) => StatusCode::FORBIDDEN,
@@ -61,7 +64,7 @@ impl AppError {
             AppError::Secrets(_) => StatusCode::BAD_GATEWAY,
             AppError::Registry(e) if e.is_client_error() => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::Registry(_) => StatusCode::BAD_GATEWAY,
-            AppError::Systemd(_) => StatusCode::BAD_GATEWAY,
+            AppError::Systemd(_) | AppError::Remote(_) => StatusCode::BAD_GATEWAY,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -98,7 +101,7 @@ impl AppError {
         id
     }
 
-    fn user_message(&self) -> String {
+    pub(crate) fn user_message(&self) -> String {
         match self {
             AppError::NotFound(what) => format!("Not found: {what}"),
             AppError::Csrf => {
@@ -119,6 +122,7 @@ impl AppError {
             AppError::Secrets(e) => e.to_string(),
             AppError::Registry(e) => e.to_string(),
             AppError::Systemd(_) => "systemd did not accept that action.".into(),
+            AppError::Remote(msg) => msg.clone(),
             AppError::Internal(_) => "Something went wrong.".into(),
         }
     }

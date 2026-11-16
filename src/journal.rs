@@ -19,7 +19,7 @@ use tokio::process::{Child, ChildStdout, Command};
 use crate::systemd::SystemdError;
 
 /// One journal entry, reduced to what the logs page renders.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LogLine {
     /// `__REALTIME_TIMESTAMP`: microseconds since the Unix epoch.
     pub realtime_us: i64,
