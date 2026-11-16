@@ -21,16 +21,31 @@ CSS/JS embedded, so it runs from any directory.
 
 ## Features
 
-- **Services** landing page — Containers and Pods combined, with a
-  total/running/failed stat bar. A pod's published ports show on the member
+- **Overview** home page — how many services are up, tiles for running,
+  failed, newer image tags and Git Sync, this machine's card, and a "Needs
+  you" list of problems with the action that fixes each, plus an Activity
+  feed of units failing, recovering, starting and stopping and Git Sync
+  updates (kept in `activity.jsonl` beside the config file).
+- **Services** page — Containers and Pods combined, with a
+  total/running/failed stat bar and an All / Running / Stopped / Failed
+  filter, Boot and Auto-update columns, a health-check verdict for
+  containers with a `HealthCmd=`, and a bulk bar to restart, start or stop
+  ticked rows. Unit pages have Overview, Config and Logs tabs. A pod's
+  published ports show on the member
   container that serves them (the one you assigned it to on the Ports
   screen, else by its `ExposeHostPort=` or its image's `EXPOSE`); only ports
   none of them serve stay on the pod row.
-- Dedicated **Volumes**, **Networks**, and **Images** (Image + Build units)
-  sections, plus a generic `/units` listing that covers every kind and is the
-  only home for `.kube` units.
+- A **Machine** page with this host's facts, health checks and tool
+  versions, whose tabs are the **Volumes**, **Networks**, and **Images**
+  (Image + Build units) lists, plus a generic `/units` listing that covers
+  every kind and is the only home for `.kube` units.
+- **Images & tags** — every container pinned to a version tag that has a
+  newer one, with a Switch menu.
+- **New unit templates** — the New pages offer starter quadlets to open
+  the editor with.
 - **Ports** — every declared `PublishPort=` across Containers and Pods, with
-  conflicting host ports flagged. A pod's port can be assigned to the member
+  a card up top for each host port claimed twice (who holds it, who would
+  fail to bind). A pod's port can be assigned to the member
   container behind it (hover a port's container to see why it's matched
   where it is). A pod member's detail page lists the pod ports that reach
   it. A `Network=host` container has no `PublishPort=` to read, so the
@@ -40,15 +55,17 @@ CSS/JS embedded, so it runs from any directory.
   `.sooth/port-notes.toml` in the quadlet directory, not in the quadlet
   files, so they only change what sooth displays, and a git sync never
   overwrites them.
-- **Pods and Directories layouts** — every list table is a branch tree you
-  can switch between two layouts (remembered per browser).
+- **Pods, Directories and Flat layouts** — every list table can switch
+  between three layouts (remembered per browser). Flat is one name-sorted
+  list with chips for each unit's pod and folder.
   - **Pods** nests a pod's units under its row: its member containers
     (`Pod=`), plus any volume, network, image, or build used only by that
     pod. A resource several pods share appears as a linked leaf under each
     of them, and everything else sits under "Standalone". Each pod
     collapses on its own.
   - **Directories** shows your group folders, with drag-and-drop filing.
-- **Environment** — the host `${NAME}` variables a quadlet file can
+- **Secrets & env** — Secrets, Registries and Host variables as one page
+  with three tabs. Host variables are the `${NAME}` variables a quadlet file can
   interpolate. sooth manages its own set through an `environment.d` drop-in
   (`~/.config/environment.d/50-sooth.conf`) and also pushes each change to
   the running user manager over D-Bus, so it applies without a re-login.

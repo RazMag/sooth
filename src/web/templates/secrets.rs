@@ -42,6 +42,7 @@ pub fn page(p: SecretsPage<'_>) -> Markup {
 
     let body = html! {
         (page_header("Secrets", html! {}))
+        (super::config_tabs(NavItem::Secrets))
         p.page-meta {
             "Values stored in podman's secret store. Reference one from a container quadlet as "
             code { "Secret=NAME,type=env,target=VAR" } " (or " code { "type=mount" }

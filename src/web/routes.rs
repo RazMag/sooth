@@ -9,8 +9,9 @@ use crate::auth;
 use crate::config::AppState;
 
 use super::handlers::{
-    detail, edit_delete, environment, gitsync, groups, imagetags, list, logs, pods, ports,
-    raw_create, registries, secrets, selfupdate, services, settings, unit_ops, validate,
+    detail, edit_delete, environment, gitsync, groups, imagetags, list, logs, machine, overview,
+    pods, ports, raw_create, registries, secrets, selfupdate, services, settings, tags, unit_ops,
+    validate,
 };
 
 /// Registers the routes every section shares -- detail, status fragment,
@@ -89,6 +90,10 @@ fn mount_unit_routes(
             get(logs::logs_page),
         )
         .route(
+            &format!("{prefix}/{{file_name}}/logs/panel"),
+            get(logs::logs_panel),
+        )
+        .route(
             &format!("{prefix}/{{file_name}}/logs/stream"),
             get(logs::logs_stream),
         );
@@ -105,9 +110,16 @@ fn mount_unit_routes(
 pub fn build_router(state: AppState) -> Router {
     let mut protected = Router::new()
         // Services: the home page, combining Containers + Pods.
-        .route("/", get(services::page))
+        .route("/", get(overview::page))
+        .route("/overview/body", get(overview::body))
+        .route("/overview/activity", get(overview::activity))
+        .route("/services", get(services::page))
+        .route("/machine", get(machine::page))
+        .route("/tags", get(tags::page))
+        .route("/tags/rows", get(tags::rows_fragment))
         .route("/services/rows", get(services::rows))
         .route("/services/counts", get(services::counts))
+        .route("/services/bulk", post(services::bulk))
         // Containers/Pods: no standalone list page (that's Services above),
         // but they still need a create entry point and POST target.
         .route("/containers", post(raw_create::create))
@@ -137,6 +149,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/groups/delete", post(groups::delete))
         .route("/ports", get(ports::index))
         .route("/ports/rows", get(ports::rows))
+        .route("/ports/conflicts", get(ports::conflicts))
         .route("/ports/pull", post(ports::pull))
         .route("/ports/assign", post(ports::assign))
         .route("/ports/host", post(ports::host_port))

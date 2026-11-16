@@ -164,7 +164,7 @@ pub fn new_page(p: NewPodPage<'_>) -> Markup {
         suffix: ".pod",
     };
     let body = html! {
-        (back_link("/", "Services"))
+        (back_link("/services", "Services"))
         (page_header("New pod", html! {}))
         @if let Some(msg) = p.error { (banner(BannerKind::Error, msg)) }
         form method="post" action="/pods" {

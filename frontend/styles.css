@@ -4,8 +4,14 @@
 @source "../src/web/templates";
 
 /* ------------------------------------------------------------------ *
- *  Design tokens
+ *  Design tokens -- "Deep Moss"
  * ------------------------------------------------------------------ *
+ *  Neutral grey surfaces with one deep moss accent. Green never fills a
+ *  surface: the accent lives in buttons, the active nav item, links,
+ *  focus rings and thin edges, and a light-to-deep moss gradient is used
+ *  on those accent pieces only. Healthy status is teal, so it never reads
+ *  as a button.
+ *
  *  Light values are the @theme defaults (also the SSR / no-JS default).
  *  The pre-paint <head> script always resolves an effective theme and
  *  stamps `data-theme` on <html>, so the dark palette needs to exist in
@@ -14,42 +20,53 @@
  * ------------------------------------------------------------------ */
 
 @theme {
-  --font-sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: "Plus Jakarta Sans", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  --color-canvas: #f6f7f9;
+  --color-canvas: #f5f6f8;
   --color-surface: #ffffff;
   --color-raised: #eef0f3;
   --color-line: #e4e7eb;
   --color-line-strong: #d3d8de;
-  --color-ink: #1b1e24;
-  --color-muted: #616772;
-  --color-faint: #9096a0;
+  --color-ink: #14171d;
+  --color-muted: #49505b;
+  --color-faint: #6b7280;
 
-  --color-accent: #3d6fdd;
+  /* Accent: text/links/focus (`accent`), primary fills (`accent-btn`),
+     text on accent-highlighted controls (`accent-ink`), accent borders
+     and edges (`accent-line`). `accent-soft` is deliberately neutral --
+     a selected control is marked by a moss edge or text, not a green fill. */
+  --color-accent: #3f6212;
+  --color-accent-btn: #2f4a0e;
+  --color-accent-ink: #2f4a0e;
+  --color-accent-line: rgb(63 98 18 / 0.38);
   --color-on-accent: #ffffff;
-  --color-accent-soft: #eef2fd;
+  --color-accent-soft: #eef0f3;
 
-  --color-danger: #d13c46;
+  --color-danger: #c62f38;
   --color-danger-soft: #fbebec;
-  --color-warn: #b6791d;
-  --color-warn-soft: #f9f1e3;
-  --color-ok: #1c9d5d;
-  --color-ok-soft: #e7f5ec;
+  --color-warn: #b45309;
+  --color-warn-soft: #fbf3e4;
+  --color-ok: #0d9488;
+  --color-ok-soft: #e6f6f4;
 
   /* Unit kinds -- the list tables' kind dots and resource chips. */
-  --color-kind-pod: #7552d1;
-  --color-kind-pod-soft: #f0ecfb;
-  --color-kind-container: #3d6fdd;
+  --color-kind-pod: #7c5cf0;
+  --color-kind-pod-soft: #f0ecfd;
+  --color-kind-container: #2f6fe8;
   --color-kind-container-soft: #eaf0fd;
-  --color-kind-volume: #0f8783;
+  --color-kind-volume: #0d9488;
   --color-kind-volume-soft: #e2f3f2;
-  --color-kind-network: #c0621c;
-  --color-kind-network-soft: #fbeee3;
-  --color-kind-image: #b0428a;
-  --color-kind-image-soft: #f8e9f2;
-  --color-kind-kube: #56677f;
+  --color-kind-network: #ea580c;
+  --color-kind-network-soft: #fdeee3;
+  --color-kind-image: #db2777;
+  --color-kind-image-soft: #fbe9f2;
+  --color-kind-kube: #64748b;
   --color-kind-kube-soft: #eceff3;
+
+  /* The moss gradient, light to deep. Accent pieces only, never a surface. */
+  --color-grad-from: #9cbf5c;
+  --color-grad-to: #2b440c;
 
   --shadow-pop: 0 6px 24px -6px rgb(15 18 23 / 0.16), 0 2px 6px -2px rgb(15 18 23 / 0.08);
 
@@ -58,74 +75,80 @@
 
 @layer theme {
   [data-theme="dark"] {
-    --color-canvas: #0e1014;
-    --color-surface: #16191f;
-    --color-raised: #1e222a;
-    --color-line: #282d37;
-    --color-line-strong: #3a4150;
-    --color-ink: #e6e8ec;
-    --color-muted: #99a1ad;
-    --color-faint: #6b7280;
+    --color-canvas: #0c0e12;
+    --color-surface: #14171d;
+    --color-raised: #1a1e26;
+    --color-line: #232932;
+    --color-line-strong: #2f3642;
+    --color-ink: #e8eaef;
+    --color-muted: #b3b9c4;
+    --color-faint: #8b919d;
 
-    --color-accent: #5b8cff;
+    --color-accent: #7a9a40;
+    --color-accent-btn: #2f4a0e;
+    --color-accent-ink: #c3d49e;
+    --color-accent-line: rgb(122 154 64 / 0.5);
     --color-on-accent: #ffffff;
-    --color-accent-soft: #1a2540;
+    --color-accent-soft: #1a1e26;
 
-    --color-danger: #e5484d;
-    --color-danger-soft: #37211f;
-    --color-warn: #e0a72e;
-    --color-warn-soft: #362d18;
-    --color-ok: #35c46f;
-    --color-ok-soft: #15301f;
+    --color-danger: #f87171;
+    --color-danger-soft: #2a1518;
+    --color-warn: #fbbf24;
+    --color-warn-soft: #2a2310;
+    --color-ok: #2dd4bf;
+    --color-ok-soft: #0d2220;
 
-    --color-kind-pod: #a58bff;
+    --color-kind-pod: #b39dfa;
     --color-kind-pod-soft: #251f3d;
-    --color-kind-container: #6d9bff;
+    --color-kind-container: #7aa7ff;
     --color-kind-container-soft: #1a2540;
-    --color-kind-volume: #3fc4bf;
+    --color-kind-volume: #2dd4bf;
     --color-kind-volume-soft: #12302f;
-    --color-kind-network: #f0954a;
+    --color-kind-network: #fb923c;
     --color-kind-network-soft: #3a2716;
-    --color-kind-image: #e57ab8;
+    --color-kind-image: #f472b6;
     --color-kind-image-soft: #3a1d2e;
-    --color-kind-kube: #9aa7ba;
+    --color-kind-kube: #94a3b8;
     --color-kind-kube-soft: #232831;
 
-    --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.55), 0 2px 8px -2px rgb(0 0 0 / 0.4);
+    --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.45);
   }
 
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) {
-      --color-canvas: #0e1014;
-      --color-surface: #16191f;
-      --color-raised: #1e222a;
-      --color-line: #282d37;
-      --color-line-strong: #3a4150;
-      --color-ink: #e6e8ec;
-      --color-muted: #99a1ad;
-      --color-faint: #6b7280;
-      --color-accent: #5b8cff;
+      --color-canvas: #0c0e12;
+      --color-surface: #14171d;
+      --color-raised: #1a1e26;
+      --color-line: #232932;
+      --color-line-strong: #2f3642;
+      --color-ink: #e8eaef;
+      --color-muted: #b3b9c4;
+      --color-faint: #8b919d;
+      --color-accent: #7a9a40;
+      --color-accent-btn: #2f4a0e;
+      --color-accent-ink: #c3d49e;
+      --color-accent-line: rgb(122 154 64 / 0.5);
       --color-on-accent: #ffffff;
-      --color-accent-soft: #1a2540;
-      --color-danger: #e5484d;
-      --color-danger-soft: #37211f;
-      --color-warn: #e0a72e;
-      --color-warn-soft: #362d18;
-      --color-ok: #35c46f;
-      --color-ok-soft: #15301f;
-      --color-kind-pod: #a58bff;
+      --color-accent-soft: #1a1e26;
+      --color-danger: #f87171;
+      --color-danger-soft: #2a1518;
+      --color-warn: #fbbf24;
+      --color-warn-soft: #2a2310;
+      --color-ok: #2dd4bf;
+      --color-ok-soft: #0d2220;
+      --color-kind-pod: #b39dfa;
       --color-kind-pod-soft: #251f3d;
-      --color-kind-container: #6d9bff;
+      --color-kind-container: #7aa7ff;
       --color-kind-container-soft: #1a2540;
-      --color-kind-volume: #3fc4bf;
+      --color-kind-volume: #2dd4bf;
       --color-kind-volume-soft: #12302f;
-      --color-kind-network: #f0954a;
+      --color-kind-network: #fb923c;
       --color-kind-network-soft: #3a2716;
-      --color-kind-image: #e57ab8;
+      --color-kind-image: #f472b6;
       --color-kind-image-soft: #3a1d2e;
-      --color-kind-kube: #9aa7ba;
+      --color-kind-kube: #94a3b8;
       --color-kind-kube-soft: #232831;
-      --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.55), 0 2px 8px -2px rgb(0 0 0 / 0.4);
+      --shadow-pop: 0 8px 28px -6px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.45);
     }
   }
 }
@@ -334,6 +357,31 @@
   .badge-unknown::before { background: var(--color-faint); opacity: 0.5; }
   .badge-warn { color: var(--color-ink); }
   .badge-warn::before { background: var(--color-warn); }
+
+  /* A unit's status cell: no pill, just the dot and a word, with the
+     detail ("up 6 days", "exit 1 · 2h ago") under it in small faint type.
+     Status uses status colours only, never the accent. */
+  .badge.status {
+    display: inline-grid;
+    grid-template-columns: auto auto;
+    align-items: center;
+    column-gap: 0.45rem;
+    row-gap: 0.05rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 0.85rem;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+  .badge.status .status-word { font-weight: 550; }
+  .badge.status .status-detail {
+    grid-column: 2;
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-faint);
+  }
+  .badge-failed .status-word { color: var(--color-danger); }
 
   .chip {
     display: inline-flex;
@@ -773,7 +821,17 @@
     color: var(--color-ink);
   }
   .sidebar .brand:hover { text-decoration: none; }
-  .nav-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; flex: 1; }
+  .nav-list { display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
+  .nav-group { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+  .nav-section-label {
+    padding: 1rem 0.6rem 0.35rem;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-faint);
+  }
+  .nav-section-label:first-child { padding-top: 0.25rem; }
   .nav-list a {
     display: flex;
     align-items: center;
@@ -1359,7 +1417,7 @@
   .cell-code { font-size: 0.8rem; color: var(--color-muted); overflow-wrap: break-word; }
   /* The name column carries the tree, chips and second line -- give it the
      room, and let detail columns (image refs, subnets) wrap instead. */
-  .tree-table th:first-child { width: 42%; }
+  .tree-table th:first-child { width: 34%; }
 
   /* Status: the live badge, then autostart / auto-update as bare icons. */
   .status-cell { display: flex; align-items: center; gap: 0.4rem; }
@@ -1498,6 +1556,102 @@
   .data-table [data-filtering] tr.is-collapsed:not([hidden]),
   .data-table [data-filtering] tr.pod-collapsed:not([hidden]) { display: table-row; }
 
+  /* Unit detail tabs (`detail::detail_page`, `frontend/tabs.js`). */
+  .unit-tabs { margin-top: 1rem; }
+  .tab-radio { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .tab-bar { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--color-line); }
+  .tab-bar label {
+    padding: 0.5rem 0.85rem; margin-bottom: -1px; cursor: pointer; user-select: none;
+    font-size: 0.875rem; font-weight: 520; color: var(--color-muted);
+    border-bottom: 2px solid transparent;
+  }
+  .tab-bar label:hover { color: var(--color-ink); }
+  .tab-panel { display: none; }
+  .tab-panel .detail-grid { margin-top: 1rem; }
+  .tab-panel[data-panel="config"], .tab-panel[data-panel="logs"] { padding-top: 1rem; }
+  .config-head, .logs-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+  .unit-tabs:has(#tab-overview:checked) [data-panel="overview"],
+  .unit-tabs:has(#tab-config:checked) [data-panel="config"],
+  .unit-tabs:has(#tab-logs:checked) [data-panel="logs"] { display: block; }
+  .unit-tabs:has(#tab-overview:checked) [data-tab="overview"],
+  .unit-tabs:has(#tab-config:checked) [data-tab="config"],
+  .unit-tabs:has(#tab-logs:checked) [data-tab="logs"] {
+    color: var(--color-accent-ink);
+    border-image: linear-gradient(90deg, var(--color-grad-from), var(--color-grad-to)) 1;
+  }
+  .unit-tabs:has(.tab-radio:focus-visible) .tab-bar { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+  /* Machine page (`templates::machine`) and its tab bar (`machine_tabs`). */
+  .machine-tabs { margin: 0.25rem 0 1rem; }
+  .machine-tabs a {
+    padding: 0.5rem 0.85rem; margin-bottom: -1px;
+    font-size: 0.875rem; font-weight: 520; color: var(--color-muted);
+    border-bottom: 2px solid transparent;
+  }
+  .machine-tabs a:hover { color: var(--color-ink); text-decoration: none; }
+  .machine-tabs a[aria-current="page"] {
+    color: var(--color-accent-ink);
+    border-image: linear-gradient(90deg, var(--color-grad-from), var(--color-grad-to)) 1;
+  }
+  .machine-tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .machine-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; align-items: start; }
+  @media (max-width: 900px) {
+    .machine-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .machine-grid { grid-template-columns: minmax(0, 1fr); }
+    .tab-bar { overflow-x: auto; }
+  }
+
+  /* Ports conflict card (`ports::conflicts_card`). */
+  .clash-card { margin-bottom: 1rem; border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-line)); }
+  .clash-story { margin: 0 0 0.6rem; color: var(--color-muted); font-size: 0.875rem; }
+  .clash-claims { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; font-size: 0.875rem; }
+  .clash-claim { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+  /* New unit "Start from a template" (`templates::starters`). */
+  .starter-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0 0 0.75rem; }
+  .starter-picker .field-hint { margin-right: 0.25rem; }
+  .chip.starter { cursor: pointer; }
+  .chip.starter:hover { text-decoration: none; border-color: var(--color-line-strong); }
+  .chip.starter[aria-current="true"] { color: var(--color-accent-ink); border-color: var(--color-accent); }
+
+  /* Podman health check result beside the status (`list::row`). */
+  .health-pill { font-size: 0.72rem; font-weight: 560; padding: 0.05rem 0.4rem; border-radius: 999px; border: 1px solid var(--color-line); color: var(--color-muted); }
+  .health-healthy { color: var(--color-ok); border-color: color-mix(in srgb, var(--color-ok) 40%, transparent); }
+  .health-unhealthy { color: var(--color-danger); border-color: color-mix(in srgb, var(--color-danger) 45%, transparent); }
+
+  /* Services bulk bar (`services::bulk_bar`, `frontend/bulk.js`). */
+  .bulk-bar {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    position: sticky; bottom: 1rem; z-index: 5;
+    margin: 0.75rem 0 0; padding: 0.45rem 0.6rem;
+    box-shadow: 0 6px 24px rgb(0 0 0 / 0.25);
+    background: var(--color-raised); border: 1px solid var(--color-line-strong); border-radius: 0.6rem;
+  }
+  .bulk-bar[hidden] { display: none; }
+  .bulk-count { font-size: 0.85rem; font-weight: 560; margin-right: 0.25rem; }
+  .bulk-result { font-size: 0.82rem; color: var(--color-muted); margin-left: auto; }
+  .bulk-error { color: var(--color-danger); }
+  .row-select { flex: none; margin: 0 0.15rem 0 0; accent-color: var(--color-accent-btn); }
+
+  /* Services' Boot / Auto-update columns (`list::boot_flag`). */
+  .flag-cell { font-size: 0.8rem; white-space: nowrap; }
+  .flag-on { color: var(--color-ink); }
+  .flag-off { color: var(--color-faint); }
+
+  /* Toolbar state filter (`list::state_filter`): pure CSS via `:has()`, so
+     it survives SSE badge swaps. A unit row whose badge doesn't match the
+     checked state is hidden; group headers, pod / Standalone trunks and
+     "empty group" rows stay as context. Matches inside collapsed groups and
+     pods are revealed, as with the filter box. "Stopped" includes units
+     systemd hasn't loaded. */
+  .toolbar:has(.state-filter [value="running"]:checked) ~ .table-wrap tbody > tr:not(.group-row, .tree-trunk, .group-empty):not(:has(.badge-running)),
+  .toolbar:has(.state-filter [value="stopped"]:checked) ~ .table-wrap tbody > tr:not(.group-row, .tree-trunk, .group-empty):not(:has(.badge-stopped, .badge-unknown)),
+  .toolbar:has(.state-filter [value="failed"]:checked) ~ .table-wrap tbody > tr:not(.group-row, .tree-trunk, .group-empty):not(:has(.badge-failed)) { display: none; }
+  .toolbar:has(.state-filter [value="running"]:checked) ~ .table-wrap tbody > tr:is(.is-collapsed, .pod-collapsed):not([hidden]):has(.badge-running),
+  .toolbar:has(.state-filter [value="stopped"]:checked) ~ .table-wrap tbody > tr:is(.is-collapsed, .pod-collapsed):not([hidden]):has(.badge-stopped, .badge-unknown),
+  .toolbar:has(.state-filter [value="failed"]:checked) ~ .table-wrap tbody > tr:is(.is-collapsed, .pod-collapsed):not([hidden]):has(.badge-failed) { display: table-row; }
+  .segmented-sm label { padding: 0.25rem 0.7rem; font-size: 0.8rem; }
+
   /* A pod's (or Standalone's) chevron, collapsing the rows under it --
      `frontend/podtree.js`. */
   .pod-toggle {
@@ -1533,6 +1687,8 @@
     align-items: start;
     margin-top: 1.25rem;
   }
+  .detail-grid.solo { grid-template-columns: minmax(0, 40rem); }
+  .detail-grid.solo .detail-aside { position: static; }
   .detail-main { min-width: 0; }
   .detail-main h2 { margin-top: 0; }
   .detail-aside {
@@ -1946,6 +2102,129 @@
     box-shadow: var(--shadow-pop);
   }
   .login-card h1 { display: flex; align-items: center; justify-content: center; gap: 0.5rem; text-align: center; margin: 0 0 1rem; }
+
+  /* Overview page (`templates::overview`). */
+  .overview-summary { margin: -0.25rem 0 1rem; color: var(--color-muted); max-width: 60rem; }
+  .overview-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .stat-card-note { color: var(--color-faint); font-size: 0.78rem; margin-top: 0.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 0.75rem; margin-top: 0.75rem; align-items: start; }
+  .machine-head { display: flex; align-items: center; gap: 0.7rem; }
+  .machine-avatar {
+    display: inline-grid; place-items: center; flex: none;
+    width: 2.1rem; height: 2.1rem; border-radius: 0.5rem;
+    background: var(--color-raised); border: 1px solid var(--color-line);
+    font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; color: var(--color-accent-ink);
+  }
+  .machine-name { display: block; font-weight: 620; color: var(--color-ink); }
+  .machine-meta { color: var(--color-muted); font-size: 0.8rem; }
+  .machine-counts { margin-top: 0.75rem; font-size: 0.85rem; color: var(--color-muted); }
+  .count-ok { color: var(--color-ok); font-weight: 560; }
+  .count-failed { color: var(--color-danger); font-weight: 560; }
+  .machine-warn { margin-top: 0.6rem; font-size: 0.8rem; color: var(--color-warn); }
+  .need-list { list-style: none; margin: 0; padding: 0; }
+  .need { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0; border-top: 1px solid var(--color-line); }
+  .need:first-child { border-top: 0; padding-top: 0; }
+  .need-text { flex: 1; min-width: 0; }
+  .need-title { font-size: 0.9rem; }
+  .need-note { color: var(--color-muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .need-actions { display: flex; gap: 0.4rem; flex: none; }
+  .activity { margin-top: 0.75rem; }
+  .activity-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.4rem; }
+  .activity-head .card-title { margin: 0; }
+  .act-list { list-style: none; margin: 0; padding: 0; }
+  .act-item { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.45rem 0; border-top: 1px solid var(--color-line); font-size: 0.875rem; }
+  .act-item:first-child { border-top: 0; }
+  .act-dot { flex: none; width: 0.45rem; height: 0.45rem; border-radius: 999px; background: var(--color-faint); transform: translateY(-0.05rem); }
+  .act-problem .act-dot { background: var(--color-danger); }
+  .act-change .act-dot { background: var(--color-ok); }
+  .act-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .act-time { flex: none; color: var(--color-faint); font-size: 0.78rem; }
+  .act-empty { padding: 0.4rem 0; font-size: 0.85rem; }
+  .activity:has([value="problem"]:checked) .act-change,
+  .activity:has([value="change"]:checked) .act-problem { display: none; }
+  @media (max-width: 900px) {
+    .overview-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .overview-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  /* Deep Moss accent pieces ------------------------------- *
+     The gradient runs light to deep moss and only ever sits on accent
+     pieces: the primary button, the active nav item, tile and header
+     edges, the checked segment. Never on a surface. Every gradient has a
+     solid fallback underneath (the background-color / box-shadow it
+     replaces), so a browser without it still shows the accent. */
+  .btn-primary {
+    background-color: var(--color-accent-btn);
+    background-image: linear-gradient(180deg, #4f7a1b, var(--color-grad-to));
+    border-color: #3c5c14;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14), 0 6px 16px -10px rgb(95 138 36 / 0.9);
+  }
+  .btn-primary:hover {
+    background-color: var(--color-accent-btn);
+    background-image: linear-gradient(180deg, #5b8a24, #30500e);
+  }
+
+  .sidebar {
+    border-right-color: transparent;
+    border-image: linear-gradient(180deg, var(--color-accent-line), var(--color-line) 35%) 1;
+  }
+  .brand-mark { color: var(--color-accent); }
+  /* Section labels are the one place gradient text is used. */
+  .nav-section-label {
+    color: var(--color-accent);
+    background: linear-gradient(90deg, var(--color-grad-from), color-mix(in srgb, var(--color-grad-to) 60%, var(--color-grad-from)) 70%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    width: fit-content;
+  }
+  /* The light end of the gradient is too pale on a light sidebar. */
+  :root:not([data-theme="dark"]) .nav-section-label {
+    background-image: linear-gradient(90deg, #5b8a24, var(--color-grad-to));
+  }
+  .nav-list a[aria-current="page"] {
+    position: relative;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 70%), var(--color-raised);
+    color: var(--color-accent-ink);
+  }
+  .nav-list a[aria-current="page"] svg { color: var(--color-accent); }
+  .nav-list a[aria-current="page"]::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.4rem;
+    bottom: 0.4rem;
+    width: 3px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--color-grad-from), var(--color-grad-to));
+  }
+  .btn-icon[aria-current="page"] { color: var(--color-accent); background: var(--color-raised); box-shadow: inset 0 0 0 1px var(--color-accent-line); }
+
+  .page-header {
+    padding-bottom: 0.9rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid transparent;
+    border-image: linear-gradient(90deg, var(--color-accent-line), transparent 65%) 1;
+  }
+
+  .stat-card {
+    background: linear-gradient(90deg, var(--color-grad-from), var(--color-grad-to)) top / 100% 2px no-repeat, var(--color-surface);
+  }
+  .stat-card-alert {
+    background: linear-gradient(90deg, #f87171, #7f1d1d) top / 100% 2px no-repeat, var(--color-surface);
+  }
+
+  .segmented input:checked + label {
+    background: var(--color-raised);
+    color: var(--color-accent-ink);
+    box-shadow: inset 0 -2px 0 var(--color-accent);
+  }
+
+  .tag-menu > summary.badge:hover,
+  .tag-menu[open] > summary.badge { background: var(--color-raised); box-shadow: inset 0 0 0 1px var(--color-accent-line); }
+  .data-table tr.group-row.drag-over > td { background: var(--color-raised); box-shadow: inset 2px 0 0 var(--color-accent); }
+  .banner-info { box-shadow: inset 3px 0 0 var(--color-accent); }
+  .view-opt.is-active { box-shadow: inset 0 -2px 0 var(--color-accent); color: var(--color-accent-ink); }
 }
 
 /* ------------------------------------------------------------------ *

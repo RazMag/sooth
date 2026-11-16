@@ -32,7 +32,10 @@ async fn new_form(
     action: &str,
     kind: KindChoice,
     skeleton: &str,
+    template: Option<&str>,
 ) -> maud::Markup {
+    let starter = template.and_then(|id| templates::starters::find(kind_of(&kind), id));
+    let skeleton = starter.map_or(skeleton, |s| s.body);
     let csrf = crate::auth::csrf::current(&session)
         .await
         .unwrap_or_default();
@@ -51,7 +54,20 @@ async fn new_form(
         host_vars: &host_vars,
         error: None,
         health: state.health.get(),
+        starter: starter.map(|s| s.id),
     })
+}
+
+fn kind_of(kind: &KindChoice) -> UnitKind {
+    match kind {
+        KindChoice::Fixed(k) | KindChoice::Choose { selected: k } => *k,
+    }
+}
+
+/// `?template=` on a section's New page -- see `templates::starters`.
+#[derive(Deserialize)]
+pub struct TemplateQuery {
+    template: Option<String>,
 }
 
 pub async fn containers_new_form(
@@ -70,6 +86,7 @@ pub async fn containers_new_form(
         "/containers",
         KindChoice::Fixed(UnitKind::Container),
         &skeleton,
+        query.template.as_deref(),
     )
     .await
 }
@@ -77,11 +94,13 @@ pub async fn containers_new_form(
 #[derive(Deserialize)]
 pub struct PodQuery {
     pod: Option<String>,
+    template: Option<String>,
 }
 
 pub async fn volumes_new_form(
     State(state): State<AppState>,
     session: Session,
+    Query(query): Query<TemplateQuery>,
 ) -> impl IntoResponse {
     new_form(
         &state,
@@ -90,12 +109,14 @@ pub async fn volumes_new_form(
         "/volumes",
         KindChoice::Fixed(UnitKind::Volume),
         "[Volume]\n",
+        query.template.as_deref(),
     )
     .await
 }
 pub async fn networks_new_form(
     State(state): State<AppState>,
     session: Session,
+    Query(query): Query<TemplateQuery>,
 ) -> impl IntoResponse {
     new_form(
         &state,
@@ -104,10 +125,15 @@ pub async fn networks_new_form(
         "/networks",
         KindChoice::Fixed(UnitKind::Network),
         "[Network]\n",
+        query.template.as_deref(),
     )
     .await
 }
-pub async fn images_new_form(State(state): State<AppState>, session: Session) -> impl IntoResponse {
+pub async fn images_new_form(
+    State(state): State<AppState>,
+    session: Session,
+    Query(query): Query<TemplateQuery>,
+) -> impl IntoResponse {
     new_form(
         &state,
         session,
@@ -115,6 +141,7 @@ pub async fn images_new_form(State(state): State<AppState>, session: Session) ->
         "/images",
         KindChoice::Fixed(UnitKind::Image),
         "[Image]\nImage=\n",
+        query.template.as_deref(),
     )
     .await
 }
@@ -128,6 +155,7 @@ pub async fn units_new_form(State(state): State<AppState>, session: Session) -> 
             selected: UnitKind::Container,
         },
         "",
+        None,
     )
     .await
 }
@@ -366,6 +394,7 @@ async fn reject_new(
             host_vars: &host_vars,
             error: Some(error),
             health: state.health.get(),
+            starter: None,
         }),
     )
         .into_response()

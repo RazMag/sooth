@@ -32,6 +32,21 @@ pub async fn logs_page(
     ))
 }
 
+/// The detail page's Logs tab (`templates::logs::logs_panel`).
+pub async fn logs_panel(
+    State(state): State<AppState>,
+    Path(file_name): Path<String>,
+) -> Result<impl IntoResponse, crate::error::FragmentError> {
+    let unit = discovery::load_by_name(&state.quadlet_dir, &file_name)?;
+    let initial = journal::tail_recent(&unit.service_name(), 200)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to read initial journal tail");
+            Vec::new()
+        });
+    Ok(templates::logs::logs_panel(&unit, &initial))
+}
+
 pub async fn logs_stream(
     State(state): State<AppState>,
     Path(file_name): Path<String>,

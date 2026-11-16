@@ -12,7 +12,9 @@ pub mod images;
 pub mod imagetags;
 pub mod list;
 pub mod logs;
+pub mod machine;
 pub mod networks;
+pub mod overview;
 pub mod pods;
 pub mod ports;
 pub mod registries;
@@ -20,6 +22,8 @@ pub mod secrets;
 pub mod selfupdate;
 pub mod services;
 pub mod settings;
+pub mod starters;
+pub mod tagspage;
 pub mod volumes;
 
 use axum::http::StatusCode;
@@ -42,7 +46,10 @@ pub use icons::{Icon, brand_mark, favicon_href, icon};
 /// error pages).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavItem {
+    Overview,
     Services,
+    Machine,
+    ImageTags,
     Volumes,
     Networks,
     Images,
@@ -51,7 +58,7 @@ pub enum NavItem {
     Secrets,
     Registries,
     GitSync,
-    /// Not part of `all()` -- rendered as its own control in the sidebar
+    /// Not part of `sections()` -- rendered as its own control in the sidebar
     /// footer, not the main nav list.
     Settings,
 }
@@ -59,7 +66,10 @@ pub enum NavItem {
 impl NavItem {
     pub fn href(self) -> &'static str {
         match self {
-            NavItem::Services => "/",
+            NavItem::Overview => "/",
+            NavItem::Services => "/services",
+            NavItem::Machine => "/machine",
+            NavItem::ImageTags => "/tags",
             NavItem::Volumes => "/volumes",
             NavItem::Networks => "/networks",
             NavItem::Images => "/images",
@@ -74,13 +84,16 @@ impl NavItem {
 
     pub fn label(self) -> &'static str {
         match self {
+            NavItem::Overview => "Overview",
             NavItem::Services => "Services",
+            NavItem::Machine => "Machine",
+            NavItem::ImageTags => "Images & tags",
             NavItem::Volumes => "Volumes",
             NavItem::Networks => "Networks",
             NavItem::Images => "Images",
             NavItem::Ports => "Ports",
             NavItem::Environment => "Environment",
-            NavItem::Secrets => "Secrets",
+            NavItem::Secrets => "Secrets & env",
             NavItem::Registries => "Registries",
             NavItem::GitSync => "Git Sync",
             NavItem::Settings => "Settings",
@@ -89,7 +102,10 @@ impl NavItem {
 
     fn nav_icon(self) -> Icon {
         match self {
+            NavItem::Overview => Icon::Overview,
             NavItem::Services => Icon::Services,
+            NavItem::Machine => Icon::Monitor,
+            NavItem::ImageTags => Icon::Images,
             NavItem::Volumes => Icon::Volumes,
             NavItem::Networks => Icon::Networks,
             NavItem::Images => Icon::Images,
@@ -102,18 +118,36 @@ impl NavItem {
         }
     }
 
-    fn all() -> [NavItem; 9] {
+    /// The sidebar's grouped sections, in order: a small caps label, then
+    /// its links. Fleet-wide pages first, then this machine's own resources,
+    /// then configuration. Settings is not here -- it's its own control in
+    /// the sidebar footer.
+    fn sections() -> [(&'static str, &'static [NavItem]); 3] {
         [
-            NavItem::Services,
-            NavItem::Volumes,
-            NavItem::Networks,
-            NavItem::Images,
-            NavItem::Ports,
-            NavItem::Environment,
-            NavItem::Secrets,
-            NavItem::Registries,
-            NavItem::GitSync,
+            (
+                "Fleet",
+                &[
+                    NavItem::Overview,
+                    NavItem::Services,
+                    NavItem::Ports,
+                    NavItem::ImageTags,
+                ],
+            ),
+            ("This machine", &[NavItem::Machine]),
+            ("Configuration", &[NavItem::GitSync, NavItem::Secrets]),
         ]
+    }
+
+    /// The sidebar entry that stands for this page: the machine's own
+    /// resource pages sit under Machine (its tabs, see [`machine_tabs`]),
+    /// Registries and host variables under Secrets & env (see
+    /// [`config_tabs`]), everything else is its own entry.
+    pub fn sidebar_entry(self) -> NavItem {
+        match self {
+            NavItem::Volumes | NavItem::Networks | NavItem::Images => NavItem::Machine,
+            NavItem::Registries | NavItem::Environment => NavItem::Secrets,
+            other => other,
+        }
     }
 
     /// The sidebar item to highlight for a unit of a given kind -- the nav
@@ -184,12 +218,17 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                     div.nav-scrim data-nav-scrim {}
                     nav.sidebar {
                         a.brand href="/" { (brand_mark()) span { "Sooth" } }
-                        ul.nav-list {
-                            @for item in NavItem::all() {
-                                li {
-                                    a href=(item.href())
-                                        aria-current=[active.filter(|a| *a == item).map(|_| "page")] {
-                                        (icon(item.nav_icon())) span { (item.label()) }
+                        div.nav-list {
+                            @for (label, items) in NavItem::sections() {
+                                div.nav-section-label { (label) }
+                                ul.nav-group {
+                                    @for item in items {
+                                        li {
+                                            a href=(item.href())
+                                                aria-current=[active.filter(|a| a.sidebar_entry() == *item).map(|_| "page")] {
+                                                (icon(item.nav_icon())) span { (item.label()) }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -256,6 +295,43 @@ pub fn back_link(href: &str, label: &str) -> Markup {
 /// A page's title bar: `<h1>` plus a right-aligned slot for actions (a
 /// "+ New" button, a status badge, ...). Used by every full page so headers
 /// stay identical across sections.
+/// The tab bar every page about this machine carries under its header:
+/// the Machine page itself, then its resource lists. `active` is `None`
+/// for the All units list.
+pub fn machine_tabs(active: Option<NavItem>) -> Markup {
+    let tabs: [(Option<NavItem>, &str, &str); 5] = [
+        (Some(NavItem::Machine), "/machine", "Overview"),
+        (Some(NavItem::Volumes), "/volumes", "Volumes"),
+        (Some(NavItem::Networks), "/networks", "Networks"),
+        (Some(NavItem::Images), "/images", "Images & builds"),
+        (None, "/units", "All units"),
+    ];
+    html! {
+        nav.tab-bar.machine-tabs aria-label="This machine" {
+            @for (item, href, label) in tabs {
+                a href=(href) aria-current=[(item == active).then_some("page")] { (label) }
+            }
+        }
+    }
+}
+
+/// The tab bar of the Secrets & env pages: secrets, registry logins and
+/// host variables are all values that stay on this machine.
+pub fn config_tabs(active: NavItem) -> Markup {
+    let tabs = [
+        (NavItem::Secrets, "Secrets"),
+        (NavItem::Registries, "Registries"),
+        (NavItem::Environment, "Host variables"),
+    ];
+    html! {
+        nav.tab-bar.machine-tabs aria-label="Secrets & env" {
+            @for (item, label) in tabs {
+                a href=(item.href()) aria-current=[(item == active).then_some("page")] { (label) }
+            }
+        }
+    }
+}
+
 pub fn page_header(title: &str, actions: Markup) -> Markup {
     html! {
         div.page-header {
@@ -345,28 +421,85 @@ fn status_display(status: &UnitStatus) -> (&'static str, &'static str) {
     }
 }
 
-/// The live-updating status badge for one unit. Rendered inline on
-/// list/detail pages and as the payload of `status-{service}` SSE events, so
-/// both paths converge on identical markup.
-pub fn status_badge(service: &str, status: &UnitStatus) -> Markup {
-    let (variant, label) = status_display(status);
-    let raw = format!("{}/{}", status.active_state, status.sub_state);
-    html! {
-        span id=(dom_id(service)) class={"badge " (variant)} title=(raw)
-            sse-swap={"status-" (service)} hx-swap="outerHTML" {
-            (label)
+pub(crate) fn now_usec() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or_default()
+}
+
+/// A short, rough span: "45s", "12 min", "3h", "6 days".
+pub(crate) fn rough_span(usec: u64) -> String {
+    let secs = usec / 1_000_000;
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{} min", secs / 60),
+        3600..86_400 => format!("{}h", secs / 3600),
+        _ => {
+            let days = secs / 86_400;
+            if days == 1 {
+                "1 day".to_string()
+            } else {
+                format!("{days} days")
+            }
         }
     }
 }
 
-/// A status badge with no SSE wiring -- for a unit shown more than once on a
+/// The second line of a status cell, under the state word: how long a
+/// running unit has been up, and for a failed one why and when. Empty when
+/// there's nothing worth saying (a transitional state, an unknown time).
+pub(crate) fn status_detail(status: &UnitStatus, now: u64) -> String {
+    let ago = |t: u64| (t > 0 && t <= now).then(|| rough_span(now - t));
+    if status.is_failed() {
+        match (status.failure.as_deref(), ago(status.state_change_usec)) {
+            (Some(why), Some(when)) => format!("{why} \u{b7} {when} ago"),
+            (Some(why), None) => why.to_string(),
+            (None, Some(when)) => format!("{when} ago"),
+            (None, None) => String::new(),
+        }
+    } else if status.is_active() {
+        ago(status.active_since_usec)
+            .map(|span| format!("up {span}"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    }
+}
+
+fn status_inner(status: &UnitStatus) -> Markup {
+    let (_, label) = status_display(status);
+    let detail = status_detail(status, now_usec());
+    html! {
+        span.status-word { (label) }
+        @if !detail.is_empty() { span.status-detail { (detail) } }
+    }
+}
+
+/// The live-updating status cell for one unit: a status dot and a word
+/// ("Running"), with the detail under it ("up 6 days", "exit 1 \u{b7} 2h
+/// ago"). Rendered inline on list/detail pages and as the payload of
+/// `status-{service}` SSE events, so both paths converge on identical
+/// markup.
+pub fn status_badge(service: &str, status: &UnitStatus) -> Markup {
+    let (variant, _) = status_display(status);
+    let raw = format!("{}/{}", status.active_state, status.sub_state);
+    html! {
+        span id=(dom_id(service)) class={"badge status " (variant)} title=(raw)
+            sse-swap={"status-" (service)} hx-swap="outerHTML" {
+            (status_inner(status))
+        }
+    }
+}
+
+/// A status cell with no SSE wiring -- for a unit shown more than once on a
 /// page (e.g. a pod member on every one of its pod's port rows), where
 /// `status_badge`'s id would repeat. The surrounding fragment has to
 /// re-render itself to stay current.
 pub fn plain_status_badge(status: &UnitStatus) -> Markup {
-    let (variant, label) = status_display(status);
+    let (variant, _) = status_display(status);
     let raw = format!("{}/{}", status.active_state, status.sub_state);
-    html! { span class={"badge " (variant)} title=(raw) { (label) } }
+    html! { span class={"badge status " (variant)} title=(raw) { (status_inner(status)) } }
 }
 
 /// A small "Autostart" pill shown next to a unit's actions when its quadlet
@@ -415,7 +548,7 @@ pub fn kind_dot(kind: UnitKind) -> Markup {
 
 /// Reads a container's current `[Container]` `AutoUpdate=` policy from the
 /// parsed model (`None` == off / absent / unrecognised).
-fn autoupdate_mode(unit: &QuadletUnit) -> Option<AutoUpdateMode> {
+pub(crate) fn autoupdate_mode(unit: &QuadletUnit) -> Option<AutoUpdateMode> {
     unit.section("Container")
         .and_then(|s| s.get("AutoUpdate"))
         .and_then(AutoUpdateMode::parse)
@@ -885,7 +1018,6 @@ pub fn detail_links(base_url: &str, csrf: &str) -> Markup {
     html! {
         div.detail-links {
             a.btn.btn-ghost.btn-sm href={(base_url) "/edit"} { (icon(Icon::Edit)) span { "Edit" } }
-            a.btn.btn-ghost.btn-sm href={(base_url) "/logs"} { (icon(Icon::Logs)) span { "Logs" } }
             (delete_form(base_url, csrf, "btn btn-danger btn-sm"))
         }
     }
@@ -1395,10 +1527,79 @@ pub fn error_fragment(message: &str, id: Uuid) -> Markup {
 mod tests {
     use super::*;
 
+    fn st(active_state: &str) -> UnitStatus {
+        UnitStatus {
+            load_state: "loaded".into(),
+            active_state: active_state.into(),
+            ..UnitStatus::not_found()
+        }
+    }
+
+    #[test]
+    fn status_detail_reads_uptime_and_failures() {
+        const DAY: u64 = 86_400_000_000;
+        let now = 100 * DAY;
+        let running = UnitStatus {
+            active_since_usec: now - 6 * DAY - 5,
+            ..st("active")
+        };
+        assert_eq!(status_detail(&running, now), "up 6 days");
+        let fresh = UnitStatus {
+            active_since_usec: now - 90_000_000,
+            ..st("active")
+        };
+        assert_eq!(status_detail(&fresh, now), "up 1 min");
+        let failed = UnitStatus {
+            failure: Some("exit 1".into()),
+            state_change_usec: now - 2 * 3_600_000_000,
+            ..st("failed")
+        };
+        assert_eq!(status_detail(&failed, now), "exit 1 \u{b7} 2h ago");
+        // No timestamp (never active, or a clock from the future): nothing.
+        assert_eq!(status_detail(&st("active"), now), "");
+        assert_eq!(status_detail(&st("inactive"), now), "");
+        let future = UnitStatus {
+            active_since_usec: now + 1,
+            ..st("active")
+        };
+        assert_eq!(status_detail(&future, now), "");
+    }
+
+    #[test]
+    fn sidebar_sections_list_every_nav_item_once() {
+        let listed: Vec<NavItem> = NavItem::sections()
+            .iter()
+            .flat_map(|(_, items)| items.iter().copied())
+            .collect();
+        for item in [
+            NavItem::Overview,
+            NavItem::Services,
+            NavItem::Machine,
+            NavItem::ImageTags,
+            NavItem::Ports,
+            NavItem::Secrets,
+            NavItem::GitSync,
+        ] {
+            assert_eq!(
+                listed.iter().filter(|i| **i == item).count(),
+                1,
+                "{:?}",
+                item.label()
+            );
+        }
+        assert!(!listed.contains(&NavItem::Settings));
+    }
+
     #[test]
     fn section_back_target_covers_every_kind() {
-        assert_eq!(section_back_target(UnitKind::Container), ("/", "Services"));
-        assert_eq!(section_back_target(UnitKind::Pod), ("/", "Services"));
+        assert_eq!(
+            section_back_target(UnitKind::Container),
+            ("/services", "Services")
+        );
+        assert_eq!(
+            section_back_target(UnitKind::Pod),
+            ("/services", "Services")
+        );
         assert_eq!(
             section_back_target(UnitKind::Volume),
             ("/volumes", "Volumes")

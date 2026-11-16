@@ -67,6 +67,9 @@ pub struct NewUnitPage<'a> {
     pub host_vars: &'a [EnvVar],
     pub error: Option<&'a str>,
     pub health: Health,
+    /// The starter template the editor opened with (`?template=`), to
+    /// highlight in the picker.
+    pub starter: Option<&'a str>,
 }
 
 /// Shared by every section's "New" page -- the differences are the POST
@@ -124,6 +127,9 @@ pub fn new_unit_page(p: NewUnitPage<'_>) -> Markup {
                     value=(p.group_prefill) placeholder="e.g. media/arr"
                     autocomplete="off" autocapitalize="off" spellcheck="false";
                 (known_groups_datalist(p.known_groups))
+            }
+            @if let KindChoice::Fixed(k) = &p.kind {
+                (super::starters::picker(*k, p.starter))
             }
             div.editor-row {
                 div.editor-col {

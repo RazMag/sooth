@@ -25,6 +25,14 @@ pub struct DetailCtx<'a> {
     pub host_vars: &'a [(String, Option<bool>)],
 }
 
+/// The detail page's tabs, in order: (id, label). The id is the panel's
+/// `data-panel` and the URL hash.
+const TABS: [(&str, &str); 3] = [
+    ("overview", "Overview"),
+    ("config", "Config"),
+    ("logs", "Logs"),
+];
+
 pub fn detail_page(
     unit: &QuadletUnit,
     status: &UnitStatus,
@@ -56,32 +64,46 @@ pub fn detail_page(
             (detail_links(&base, csrf))
         }
 
-        div.detail-grid {
-            aside.detail-aside {
-                div.card {
-                    h2.card-title { "Overview" }
-                    table.kv-table {
-                        tr { td { "Kind" } td { (unit.kind.primary_section()) } }
-                        tr { td { "Service" } td { code { (service) } } }
-                        tr { td { "File" } td { code { (unit.path.display().to_string()) } } }
-                        @if !unit.is_template() {
-                            tr {
-                                td { "Group" }
-                                td { (group_picker(&base, &unit.group, csrf, ctx.known_groups)) }
+        // Tabs are radios + labels; `.unit-tabs` CSS shows the checked
+        // one's panel, and `frontend/tabs.js` keeps it in the URL hash.
+        div.unit-tabs {
+            @for (id, _) in TABS {
+                input.tab-radio type="radio" name="unit-tab" id={"tab-" (id)} value=(id) checked[id == "overview"];
+            }
+            nav.tab-bar aria-label="Unit sections" {
+                @for (id, label) in TABS {
+                    label for={"tab-" (id)} data-tab=(id) { (label) }
+                }
+            }
+            section.tab-panel data-panel="overview" {
+                div.detail-grid.solo[extra.is_none()] {
+                    aside.detail-aside { div.card {
+                        h2.card-title { "Overview" }
+                        table.kv-table {
+                            tr { td { "Kind" } td { (unit.kind.primary_section()) } }
+                            tr { td { "Service" } td { code { (service) } } }
+                            tr { td { "File" } td { code { (unit.path.display().to_string()) } } }
+                            @if !unit.is_template() {
+                                tr {
+                                    td { "Group" }
+                                    td { (group_picker(&base, &unit.group, csrf, ctx.known_groups)) }
+                                }
+                            }
+                            @for (key, value) in facts {
+                                tr { td { (key) } td { (value) } }
+                            }
+                            @if !ctx.host_vars.is_empty() {
+                                tr { td { "Host variables" } td { (host_vars_cell(ctx.host_vars)) } }
                             }
                         }
-                        @for (key, value) in facts {
-                            tr { td { (key) } td { (value) } }
-                        }
-                        @if !ctx.host_vars.is_empty() {
-                            tr { td { "Host variables" } td { (host_vars_cell(ctx.host_vars)) } }
-                        }
-                    }
+                    } }
+                    @if let Some(e) = extra { div.detail-main { (e) } }
                 }
-                @if let Some(e) = extra { (e) }
             }
-            div.detail-main {
-                h2 { "Configuration" }
+            section.tab-panel data-panel="config" {
+                div.config-head {
+                    code.page-meta { (unit.path.display().to_string()) }
+                }
                 // The quadlet file changes under an open detail page on an
                 // autostart toggle (Enable/Disable patches the `[Install]`
                 // section) or an external edit, so re-fetch the rendered
@@ -89,6 +111,11 @@ pub fn detail_page(
                 div.config-live hx-get={(base) "/config"} hx-trigger="sse:units-changed delay:300ms" hx-swap="innerHTML" {
                     (section_table(unit))
                 }
+            }
+            // Loaded the first time the tab is shown, so the journal stream
+            // only opens when someone looks.
+            section.tab-panel data-panel="logs" hx-get={(base) "/logs/panel"} hx-trigger="intersect once" hx-swap="innerHTML" {
+                p.muted { "Loading logs…" }
             }
         }
     };

@@ -61,6 +61,8 @@ const VOLUMES_SPEC: ListSpec = ListSpec {
     columns: templates::volumes::COLUMNS,
     new_href: "/volumes/new",
     empty_hint: "No volumes yet.",
+    state_filter: false,
+    service_columns: false,
 };
 const VOLUMES_KINDS: &[UnitKind] = &[UnitKind::Volume];
 
@@ -71,6 +73,8 @@ const NETWORKS_SPEC: ListSpec = ListSpec {
     columns: templates::networks::COLUMNS,
     new_href: "/networks/new",
     empty_hint: "No networks yet.",
+    state_filter: false,
+    service_columns: false,
 };
 const NETWORKS_KINDS: &[UnitKind] = &[UnitKind::Network];
 
@@ -81,6 +85,8 @@ const IMAGES_SPEC: ListSpec = ListSpec {
     columns: templates::images::COLUMNS,
     new_href: "/images/new",
     empty_hint: "No images or builds yet.",
+    state_filter: false,
+    service_columns: false,
 };
 const IMAGES_KINDS: &[UnitKind] = &[UnitKind::Image, UnitKind::Build];
 
@@ -91,6 +97,8 @@ const ALL_UNITS_SPEC: ListSpec = ListSpec {
     columns: ALL_UNITS_COLUMNS,
     new_href: "/units/new",
     empty_hint: "No quadlet files found yet.",
+    state_filter: false,
+    service_columns: false,
 };
 const ALL_UNITS_KINDS: &[UnitKind] = &[
     UnitKind::Container,
@@ -130,6 +138,7 @@ macro_rules! list_handlers {
                     missing: &missing,
                     tags: &tags,
                     ports: None,
+                    health: None,
                     view,
                 },
                 state.health.get(),
@@ -161,6 +170,7 @@ macro_rules! list_handlers {
                     missing: &missing,
                     tags: &tags,
                     ports: None,
+                    health: None,
                     view,
                 },
             ))

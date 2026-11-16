@@ -6,6 +6,62 @@ All notable changes to sooth are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Deep Moss look (v2 work in progress).** The dashboard uses the new
+  Deep Moss palette in both themes: neutral grey surfaces, a deep moss
+  accent on buttons, links and the active page, and a light-to-deep moss
+  gradient on accent pieces only. Healthy status is teal, so it never reads
+  as a button. The sidebar is grouped into Fleet, This machine and
+  Configuration sections.
+- **Status reads word first.** The Status column says "Running" with how
+  long it has been up, or "Failed" with the exit code and when it failed.
+  It now comes right after the name in every list, and Services shows Boot
+  and Auto-update as their own columns ("on" / "off" / the policy) instead
+  of icons.
+
+### Added
+
+- **Overview page.** The home page now says how many services are up,
+  with tiles for running, failed, newer image tags and Git Sync, a card for
+  this machine, and a "Needs you" list of problems with the action that
+  fixes each. Services moved to `/services`.
+- **Activity feed.** The Overview lists units failing, recovering,
+  starting and stopping, and Git Sync updates and failures, newest first,
+  with an All / Problems / Changes filter. It's kept in `activity.jsonl`
+  beside the config file (the last 500 entries), so it survives restarts.
+- **Flat layout.** Every list can show its units in one name-sorted list,
+  next to Pods and Directories, with chips naming each unit's pod and
+  folder.
+- **Secrets & env.** Secrets, Registries and host variables (the old
+  Environment page) are one sidebar entry with three tabs, since all three
+  are values that stay on this machine.
+- **Images & tags page.** Every pinned container with a newer tag in one
+  table, with the same Switch menu as its Services row and the tag check's
+  status. The Overview's "Review tags" opens it.
+- **Health checks show.** A running container with a `HealthCmd=` shows
+  podman's verdict (healthy / unhealthy / starting) beside its status on
+  Services, and an unhealthy one is listed under "Needs you".
+- **Start from a template.** The New container, volume, network and
+  image pages offer starter quadlets (a web app, an app with a data
+  volume, a database with a secret, a run-once job, a bind-mounted folder,
+  an internal network, ...) to open the editor with.
+- **Port conflicts up front.** The Ports page opens with a card for each
+  host port claimed more than once: who holds it, which stopped unit would
+  fail to bind, and a button to change that unit's port.
+- **Machine page.** "This machine" in the sidebar is now one entry, a
+  page with this host's facts (architecture, OS, podman and sooth versions,
+  quadlet folder), its health checks, the podman and git versions, and a
+  tile per resource. Volumes, Networks, Images & builds and All units are
+  its tabs.
+- **Unit pages have tabs.** Overview, Config and Logs. The Logs tab opens
+  the live journal tail the first time you look at it, and the open tab is
+  kept in the URL (`#config`, `#logs`).
+- **Bulk actions on Services.** Tick rows to get a bar with Restart,
+  Start and Stop for all of them at once.
+- **Filter Services by state.** An All / Running / Stopped / Failed switch
+  above the Services table shows only the units in that state.
+
 ## [1.1.0] - 2026-10-23
 
 ### Added

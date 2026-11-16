@@ -9,9 +9,10 @@ use maud::{Markup, html};
 
 use super::imagetags::{BadgeNote, tag_badge, tag_slot};
 use super::{
-    Icon, NavItem, autostart_icon, autoupdate_icon, csrf_input, group_kebab, icon, kebab_menu,
-    kind_dot, known_groups_datalist, page_header, shell, status_badge,
+    Icon, NavItem, autostart_icon, autoupdate_icon, autoupdate_mode, csrf_input, group_kebab, icon,
+    kebab_menu, kind_dot, known_groups_datalist, page_header, shell, status_badge,
 };
+use crate::containerhealth::ContainerHealth;
 use crate::health::Health;
 use crate::quadlet::ports::SplitPorts;
 use crate::quadlet::refs::{self, MissingRefs};
@@ -32,6 +33,8 @@ const STANDALONE: &str = ":standalone";
 /// - `Pods`: a branch tree -- each pod heads the units it owns, a resource
 ///   several pods use shows as a linked leaf under each of them, and every
 ///   other unit hangs off a "Standalone" trunk. No group sections, no drag.
+/// - `Flat`: every listed unit in one list sorted by name, each carrying
+///   chips for its folder and pod. No tree, no drag.
 /// - `Dirs`: the group directories as collapsible sections, units flat
 ///   inside them (a pod member carries a chip naming its pod); drag-and-drop
 ///   filing and "Add group" live here.
@@ -40,6 +43,7 @@ pub enum ListView {
     #[default]
     Pods,
     Dirs,
+    Flat,
 }
 
 impl ListView {
@@ -47,6 +51,7 @@ impl ListView {
         match s {
             "pods" => Some(Self::Pods),
             "dirs" => Some(Self::Dirs),
+            "flat" => Some(Self::Flat),
             _ => None,
         }
     }
@@ -55,6 +60,7 @@ impl ListView {
         match self {
             Self::Pods => "pods",
             Self::Dirs => "dirs",
+            Self::Flat => "flat",
         }
     }
 }
@@ -79,6 +85,9 @@ pub struct ListContext<'a> {
     /// name (`core::split_pod_ports`) -- only for a table with a Ports
     /// column (Services); `None` elsewhere.
     pub ports: Option<&'a HashMap<String, SplitPorts>>,
+    /// Podman health-check results by file name
+    /// (`containerhealth::health_of`) -- only for the Services table.
+    pub health: Option<&'a HashMap<String, ContainerHealth>>,
     pub view: ListView,
 }
 
@@ -110,6 +119,20 @@ pub struct ListSpec {
     pub columns: &'static [Column],
     pub new_href: &'static str,
     pub empty_hint: &'static str,
+    /// Show the All / Running / Stopped / Failed filter in the toolbar
+    /// (see [`state_filter`]); the workload lists only.
+    pub state_filter: bool,
+    /// Give Boot and Auto-update their own columns (the workload lists),
+    /// instead of icons beside the status.
+    pub service_columns: bool,
+}
+
+impl ListSpec {
+    /// How many cells a row spans: name, status, the spec's columns, the
+    /// Boot / Auto-update pair when shown, and the actions menu.
+    fn width(&self) -> usize {
+        self.columns.len() + 3 + if self.service_columns { 2 } else { 0 }
+    }
 }
 
 /// Every kind in `kinds`, plus Pod -- what a list handler loads, so a pod
@@ -188,13 +211,15 @@ struct Place<'a> {
 
 fn row(
     (unit, status): &Entry,
-    columns: &[Column],
+    spec: &ListSpec,
     csrf: &str,
     all_units: &[QuadletUnit],
     lists: &ListContext,
     place: &Place,
 ) -> Markup {
     let service = unit.service_name();
+    let columns = spec.columns;
+    let service_columns = spec.service_columns;
     let ctx = RowCtx {
         unit,
         status,
@@ -237,6 +262,10 @@ fn row(
                             (pod_toggle(&unit.file_name))
                         }
                     }
+                    @if service_columns && !unit.is_template() {
+                        input.row-select type="checkbox" value=(unit.file_name)
+                            aria-label={"Select " (unit.file_name)};
+                    }
                     (kind_dot(unit.kind))
                     div.tree-name {
                         div.tree-title {
@@ -262,17 +291,50 @@ fn row(
             // A pod in a table that doesn't list pods is only here to head
             // its units -- that table's columns (Driver, Used by, ...) don't
             // describe it, so they stay blank rather than read "—".
-            @for column in columns {
-                td { @if place.listed { ((column.cell)(&ctx)) } }
-            }
             td {
                 div.status-cell {
                     (status_badge(&service, status))
-                    (autostart_icon(status.is_autostart_enabled()))
-                    (autoupdate_icon(unit))
+                    @if let Some(h) = lists.health.and_then(|h| h.get(&unit.file_name)) {
+                        @if status.is_active() {
+                            span class={"health-pill health-" (h.as_str())}
+                                title="Podman health check (HealthCmd=)" { (h.as_str()) }
+                        }
+                    }
+                    @if !service_columns {
+                        (autostart_icon(status.is_autostart_enabled()))
+                        (autoupdate_icon(unit))
+                    }
                 }
             }
+            @for column in columns {
+                td { @if place.listed { ((column.cell)(&ctx)) } }
+            }
+            @if service_columns {
+                td.flag-cell { (boot_flag(status)) }
+                td.flag-cell { (autoupdate_flag(unit)) }
+            }
             td { (kebab_menu(unit, status, csrf, lists.known)) }
+        }
+    }
+}
+
+/// The Boot column: whether systemd starts the unit at login.
+fn boot_flag(status: &UnitStatus) -> Markup {
+    html! {
+        @if status.is_autostart_enabled() {
+            span.flag-on title="Starts on login (has an [Install] section)" { "on" }
+        } @else {
+            span.flag-off { "off" }
+        }
+    }
+}
+
+/// The Auto-update column: the unit's `AutoUpdate=` policy, or "off".
+fn autoupdate_flag(unit: &QuadletUnit) -> Markup {
+    html! {
+        @match autoupdate_mode(unit) {
+            Some(m) => span.flag-on title="Updates when podman-auto-update runs" { (m.as_str()) },
+            None => span.flag-off { "off" },
         }
     }
 }
@@ -322,13 +384,20 @@ fn location_chips(
                 }
             }
         }
-        ListView::Dirs => {
+        ListView::Dirs | ListView::Flat => {
             let pod = refs::owning_pod(unit, all_units)
                 .and_then(|name| all_units.iter().find(|u| u.file_name == name));
+            let folder = (lists.view == ListView::Flat && !unit.group.is_empty())
+                .then_some(unit.group.as_str());
             html! {
                 @if let Some(pod) = pod {
                     a.chip.chip-pod href=(core::unit_url(pod)) title={"Part of " (pod.file_name)} {
                         (icon(Icon::Pod)) (naming::stem(&pod.file_name))
+                    }
+                }
+                @if let Some(folder) = folder {
+                    span.chip.chip-muted.chip-folder title={"Filed under " (folder)} {
+                        (icon(Icon::Folder)) (folder)
                     }
                 }
             }
@@ -575,7 +644,7 @@ fn pod_rows(
     lists: &ListContext,
 ) -> Markup {
     let tree = PodTree::build(spec, units, all_units);
-    let colspan = spec.columns.len() + 3;
+    let colspan = spec.width();
     if tree.pods.is_empty() && tree.standalone.is_empty() {
         return html! { tr { td colspan=(colspan) .empty { (spec.empty_hint) } } };
     }
@@ -586,14 +655,14 @@ fn pod_rows(
         @for pod in &tree.pods {
             @let kids = tree.children_of(&pod.0);
             @let leaves = tree.leaves_of(&pod.0);
-            (row(pod, spec.columns, csrf, all_units, lists, &Place {
+            (row(pod, spec, csrf, all_units, lists, &Place {
                 group: None,
                 tree: TreePos::Pod { children: kids, leaves: leaves.len() },
                 rails: Rails::default(),
                 listed: spec.kinds.contains(&pod.0.kind),
             }))
             @for (i, kid) in kids.iter().enumerate() {
-                (row(kid, spec.columns, csrf, all_units, lists, &Place {
+                (row(kid, spec, csrf, all_units, lists, &Place {
                     group: None,
                     tree: TreePos::Child { pod: Some(&pod.0) },
                     rails: Rails::child(i + 1 < kids.len() + leaves.len()),
@@ -608,7 +677,7 @@ fn pod_rows(
             (standalone_row(tree.standalone.len(), colspan))
         }
         @for (i, entry) in tree.standalone.iter().enumerate() {
-            (row(entry, spec.columns, csrf, all_units, lists, &Place {
+            (row(entry, spec, csrf, all_units, lists, &Place {
                 group: None,
                 tree: if trunked { TreePos::Child { pod: None } } else { TreePos::Plain },
                 rails: if trunked {
@@ -792,7 +861,7 @@ fn dir_rows(
         .filter(|(u, _)| spec.kinds.contains(&u.kind))
         .collect();
     let sections = section_groups(listed.iter().map(|(u, _)| u.group.as_str()), lists.known);
-    let colspan = spec.columns.len() + 3;
+    let colspan = spec.width();
     if listed.is_empty() && sections.is_empty() {
         return html! { tr { td colspan=(colspan) .empty { (spec.empty_hint) } } };
     }
@@ -802,7 +871,7 @@ fn dir_rows(
     html! {
         // Root (ungrouped) units first, bare.
         @for entry in listed.iter().filter(|(u, _)| u.group.is_empty()) {
-            (row(entry, spec.columns, csrf, all_units, lists, &Place {
+            (row(entry, spec, csrf, all_units, lists, &Place {
                 group: None,
                 tree: TreePos::Plain,
                 rails: Rails::default(),
@@ -826,7 +895,7 @@ fn dir_rows(
                 }
             } @else {
                 @for (i, entry) in members.iter().enumerate() {
-                    (row(entry, spec.columns, csrf, all_units, lists, &Place {
+                    (row(entry, spec, csrf, all_units, lists, &Place {
                         group: Some(grp),
                         tree: TreePos::Plain,
                         rails: shape.member(grp, i + 1 < members.len()),
@@ -848,6 +917,36 @@ pub fn list_rows(
     match lists.view {
         ListView::Pods => pod_rows(spec, units, csrf, all_units, lists),
         ListView::Dirs => dir_rows(spec, units, csrf, all_units, lists),
+        ListView::Flat => flat_rows(spec, units, csrf, all_units, lists),
+    }
+}
+
+/// [`ListView::Flat`]: the listed units sorted by name, no tree. A pod
+/// only appears when the table lists pods.
+fn flat_rows(
+    spec: &ListSpec,
+    units: &[Entry],
+    csrf: &str,
+    all_units: &[QuadletUnit],
+    lists: &ListContext,
+) -> Markup {
+    let mut shown: Vec<&Entry> = units
+        .iter()
+        .filter(|(u, _)| spec.kinds.contains(&u.kind))
+        .collect();
+    shown.sort_by(|(a, _), (b, _)| a.file_name.cmp(&b.file_name));
+    html! {
+        @if shown.is_empty() {
+            tr { td colspan=(spec.width()) .empty { (spec.empty_hint) } }
+        }
+        @for entry in shown {
+            (row(entry, spec, csrf, all_units, lists, &Place {
+                group: None,
+                tree: TreePos::Plain,
+                rails: Rails::default(),
+                listed: true,
+            }))
+        }
     }
 }
 
@@ -885,6 +984,30 @@ fn view_toggle(current: ListView) -> Markup {
         nav.view-toggle aria-label="Table layout" {
             (opt(ListView::Pods, Icon::Pod, "Pods"))
             (opt(ListView::Dirs, Icon::Folder, "Directories"))
+            (opt(ListView::Flat, Icon::Menu, "Flat"))
+        }
+    }
+}
+
+/// The toolbar's All / Running / Stopped / Failed filter: radios styled as
+/// a segmented control. No JS -- the CSS (`.state-filter` in `styles.css`)
+/// hides rows whose live badge doesn't match via `:has()`, so it keeps
+/// working across SSE badge swaps and `/rows` refreshes. Pod trunks and
+/// group headers stay as context.
+fn state_filter() -> Markup {
+    const STATES: [(&str, &str); 4] = [
+        ("all", "All"),
+        ("running", "Running"),
+        ("stopped", "Stopped"),
+        ("failed", "Failed"),
+    ];
+    html! {
+        div.segmented.segmented-sm.state-filter role="radiogroup" aria-label="Filter by state" {
+            @for (value, label) in STATES {
+                @let id = format!("state-filter-{value}");
+                input type="radio" name="state-filter" id=(id) value=(value) checked[value == "all"];
+                label for=(id) { (label) }
+            }
         }
     }
 }
@@ -917,6 +1040,9 @@ pub fn list_table(
         (known_groups_datalist(groups.known))
         div.toolbar {
             input.input.input-sm.filter-box type="search" data-filter-target=(ROWS_ID) placeholder="Filter…";
+            @if spec.state_filter {
+                (state_filter())
+            }
             (view_toggle(groups.view))
             div.toolbar-actions {
                 @if groups.view == ListView::Dirs {
@@ -942,10 +1068,14 @@ pub fn list_table(
                 thead {
                     tr {
                         th { "Name" }
+                        th { "Status" }
                         @for column in spec.columns {
                             th { (column.header) }
                         }
-                        th { "Status" }
+                        @if spec.service_columns {
+                            th { "Boot" }
+                            th { "Auto-update" }
+                        }
                         th {}
                     }
                 }
@@ -970,13 +1100,23 @@ pub fn list_page(
     groups: &ListContext,
     health: Health,
 ) -> Markup {
+    let on_machine = matches!(
+        spec.active_nav,
+        None | Some(NavItem::Volumes | NavItem::Networks | NavItem::Images)
+    );
     let body = html! {
         (page_header(spec.title, html! {}))
+        @if on_machine { (super::machine_tabs(spec.active_nav)) }
         (list_table(
             spec, units, csrf, &rows_route(spec), all_units, groups, new_actions(spec),
         ))
     };
-    shell(spec.title, spec.active_nav, Some(health), body)
+    shell(
+        spec.title,
+        spec.active_nav.or(Some(NavItem::Machine)),
+        Some(health),
+        body,
+    )
 }
 
 /// The `/rows` fragment route lives at `{new_href's section}/rows` -- derived
@@ -1024,6 +1164,8 @@ mod tests {
             columns: &[],
             new_href: "/t/new",
             empty_hint: "",
+            state_filter: false,
+            service_columns: false,
         }
     }
 
@@ -1076,6 +1218,7 @@ mod tests {
             missing: &missing,
             tags: &tags,
             ports: None,
+            health: None,
             view,
         };
         list_rows(spec, units, "csrf", all, &lists).into_string()
@@ -1196,5 +1339,65 @@ mod tests {
         assert_eq!(nested_unit_count("media/arr/hd"), 1);
         assert_eq!(nested_unit_count("media-extra"), 1);
         assert_eq!(nested_unit_count("empty"), 0);
+    }
+
+    #[test]
+    fn state_filter_offers_four_states_with_all_checked() {
+        let html = state_filter().into_string();
+        for value in ["all", "running", "stopped", "failed"] {
+            assert!(html.contains(&format!(r#"value="{value}""#)), "{value}");
+        }
+        assert_eq!(html.matches("checked").count(), 1);
+        assert!(html.contains(r#"value="all" checked"#));
+    }
+
+    #[test]
+    fn service_columns_show_boot_and_auto_update_as_words() {
+        let mut spec = spec(&[UnitKind::Container]);
+        spec.service_columns = true;
+        let u = unit(
+            "app.container",
+            UnitKind::Container,
+            "",
+            &[("AutoUpdate", "registry")],
+        );
+        let units = vec![(u.clone(), UnitStatus::not_found())];
+        let html = render(&spec, &units, &[u], ListView::Pods);
+        assert!(
+            html.contains(r#"<span class="flag-off">off</span>"#),
+            "{html}"
+        );
+        assert!(html.contains(r#">registry</span>"#), "{html}");
+        // Without the columns the same row keeps its icons and no flags.
+        spec.service_columns = false;
+        assert!(!render(&spec, &units, &[], ListView::Pods).contains("flag-cell"));
+    }
+
+    #[test]
+    fn flat_view_sorts_listed_units_without_a_tree() {
+        let spec = spec(&[UnitKind::Container]);
+        let all = vec![
+            unit("web.pod", UnitKind::Pod, "", &[]),
+            unit("zeta.container", UnitKind::Container, "media", &[]),
+            unit(
+                "alpha.container",
+                UnitKind::Container,
+                "",
+                &[("Pod", "web.pod")],
+            ),
+        ];
+        let units: Vec<Entry> = all
+            .iter()
+            .map(|u| (u.clone(), UnitStatus::not_found()))
+            .collect();
+        let html = render(&spec, &units, &all, ListView::Flat);
+        let a = html.find("alpha.container").unwrap();
+        let z = html.find("zeta.container").unwrap();
+        assert!(a < z);
+        // The pod isn't listed by this table, but alpha's chip names it.
+        assert!(!html.contains(r#"data-pod="web.pod""#));
+        assert!(html.contains("chip-pod"));
+        assert!(html.contains("Filed under media"));
+        assert_eq!(ListView::parse("flat"), Some(ListView::Flat));
     }
 }
