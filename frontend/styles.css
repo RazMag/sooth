@@ -1749,6 +1749,81 @@
   .inline-rename > summary { list-style: none; cursor: pointer; }
   .inline-rename > summary::-webkit-details-marker { display: none; }
   .inline-rename[open] { display: flex; gap: 0.35rem; align-items: center; }
+  .machine-link { color: inherit; }
+
+  /* Machines across pages: a status dot (online / offline / not checked
+     yet), the sidebar's monograms, the Services scope switcher and the
+     header row over each machine's units. */
+  .machine-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    flex: none;
+    background: var(--color-line-strong);
+  }
+  .machine-dot.is-online { background: var(--color-ok); }
+  .machine-dot.is-offline { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-danger); }
+  .nav-machine-mark {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.3rem;
+    height: 1.3rem;
+    flex: none;
+    border-radius: 0.35rem;
+    background: var(--color-raised);
+    color: var(--color-muted);
+    font-size: 0.62rem;
+    font-weight: 700;
+  }
+  .nav-machine-mark .machine-dot {
+    position: absolute;
+    right: -0.15rem;
+    bottom: -0.15rem;
+    box-shadow: 0 0 0 2px var(--color-surface);
+  }
+  .nav-machine-mark .machine-dot.is-offline {
+    background: var(--color-surface);
+    box-shadow: 0 0 0 2px var(--color-surface), inset 0 0 0 1.5px var(--color-danger);
+  }
+  .nav-machines:empty { display: none; }
+
+  .scope-switch { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: -0.25rem 0 1rem; }
+  .scope-switch .chip {
+    gap: 0.4rem;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.8rem;
+    background: var(--color-surface);
+    color: var(--color-muted);
+    border: 1px solid var(--color-line);
+  }
+  .scope-switch .chip:hover { text-decoration: none; color: var(--color-ink); border-color: var(--color-line-strong); }
+  .scope-switch .chip[aria-current="page"] {
+    background: var(--color-accent-soft);
+    color: var(--color-accent);
+    border-color: var(--color-accent-line);
+  }
+
+  .data-table .machine-row td {
+    background: var(--color-raised);
+    border-top: 1px solid var(--color-line-strong);
+    padding-top: 0.55rem;
+    padding-bottom: 0.55rem;
+  }
+  .machine-head { display: flex; align-items: center; flex-wrap: wrap; gap: 0.3rem 0.6rem; font-size: 0.85rem; }
+  .machine-head-name { font-weight: 700; font-size: 0.92rem; color: var(--color-ink); }
+  .machine-head-warn { color: var(--color-warn); }
+  .machine-head .btn { margin-left: auto; }
+  .chip-machine { gap: 0.4rem; padding: 0.2rem 0.6rem; font-size: 0.78rem; text-decoration: none; }
+  .chip-machine:hover { text-decoration: none; }
+  .action-error { color: var(--color-danger); font-size: 0.85rem; }
+  .remote-unit-note { margin-top: 0.75rem; }
+  .menu-result:empty { display: none; }
+  .menu-result { display: block; padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+  .menu-result-ok { color: var(--color-ok); }
+  .menu-result-error { color: var(--color-danger); }
 
   #log-output {
     background: var(--color-surface);

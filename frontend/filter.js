@@ -1,7 +1,8 @@
 // Live client-side row filter for list tables. An
 // `<input data-filter-target="rows-id">` hides non-matching rows in the
-// `<tbody id="rows-id">`. Group header rows (`tr.group-row`) are never hidden
-// by the needle themselves; while a needle is active the tbody gets
+// `<tbody id="rows-id">`. Group header rows (`tr.group-row`) and machine
+// header rows (`tr.machine-row`, on a page listing several machines) are
+// never hidden by the needle themselves; while a needle is active the tbody gets
 // `data-filtering`, which the CSS uses to reveal rows inside collapsed groups
 // and pods so a match is never buried. In the Pods layout a trunk row (a pod,
 // or the Standalone heading) stays visible while any row under it matches,
@@ -18,7 +19,7 @@ export function initFilter() {
 
     const rows = target.querySelectorAll(":scope > tr");
     for (const row of rows) {
-      if (row.classList.contains("group-row")) continue;
+      if (row.classList.contains("group-row") || row.classList.contains("machine-row")) continue;
       row.hidden = needle.length > 0 && !row.textContent.toLowerCase().includes(needle);
     }
     for (const pod of target.querySelectorAll(":scope > tr[data-pod][hidden]")) {

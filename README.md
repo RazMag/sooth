@@ -323,6 +323,17 @@ UI and no password.
    (`https://host:8421`) and the code, and check that the fingerprint shown
    matches the one the machine printed. Name it, and it's paired.
 
+Once paired, the machine shows up in the sidebar with a dot (green when
+it answers, a hollow red ring when it doesn't; the hub checks every 30
+seconds). **Services** lists every machine's containers and pods in one
+table, a header row per machine; the chips above it, or `?m=<machine>` in
+the address (`?m=local` for the hub's own), narrow it to one. Another
+machine's unit page shows its status, its quadlet and the end of its
+journal, with Start, Stop and Restart when the hub has full access. A
+machine that stops answering keeps showing what it last reported, marked
+offline, with its actions turned off and a Retry. Editing, moving and
+deleting units on other machines come in a later 2.0 update.
+
 Hub and agent talk over HTTPS with mutual TLS, and each accepts only the
 key it pinned at pairing: there's no certificate authority and no password
 on the wire. The agent listens on `127.0.0.1:8421` by default; set
@@ -339,9 +350,9 @@ and start sooth there: it keeps its key, so every agent still recognises it.
 Keep that folder private, since the key in it is what the agents trust.
 
 To try it on one machine, `just dev-fleet` runs a dashboard on 8420 and an
-agent on 8421 against one scratch directory, pairs them, and has the
-dashboard's lists, status and logs go through the agent. The agent's
-requests show in the output, prefixed `[agent]`.
+agent on 8421 against one scratch directory and pairs them as "Dev agent",
+so Services lists every unit twice: once on the hub, and once read through
+the agent. The agent's requests show in the output, prefixed `[agent]`.
 
 ### Run as a systemd user service
 

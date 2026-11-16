@@ -19,6 +19,7 @@ pub mod overview;
 pub mod pods;
 pub mod ports;
 pub mod registries;
+pub mod remote_unit;
 pub mod secrets;
 pub mod selfupdate;
 pub mod services;
@@ -236,6 +237,12 @@ pub fn shell(title: &str, active: Option<NavItem>, health: Option<Health>, body:
                                             }
                                         }
                                     }
+                                }
+                                // The paired machines, under this hub's own
+                                // (see `handlers::machines::nav`).
+                                @if items.contains(&NavItem::Machine) {
+                                    div.nav-machines hx-get="/machines/nav"
+                                        hx-trigger="load, sse:machines-changed" hx-swap="innerHTML" {}
                                 }
                             }
                         }

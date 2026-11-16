@@ -31,6 +31,15 @@ All notable changes to sooth are documented here. The format follows
   works once for 10 minutes and can grant read-only access. Machines can be
   renamed and unpaired. The hub's pairings live in its config folder, so
   copying that folder moves the hub.
+- **Every machine on one page (v2 work in progress).** Services lists the
+  units of the hub and every paired machine together, under a header row
+  per machine, and `?m=` (or the chips above the table) narrows it to one.
+  Paired machines appear in the sidebar with a status dot, checked every 30
+  seconds. Another machine's unit has its own page with its status,
+  quadlet and recent logs, and Start, Stop and Restart when the hub has full
+  access; the bulk bar works across machines too. A machine that stops
+  answering keeps showing what it last reported, marked offline, with its
+  actions off and a Retry.
 - **Overview page.** The home page now says how many services are up,
   with tiles for running, failed, newer image tags and Git Sync, a card for
   this machine, and a "Needs you" list of problems with the action that

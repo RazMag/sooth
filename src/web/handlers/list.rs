@@ -140,6 +140,7 @@ macro_rules! list_handlers {
                     ports: None,
                     health: None,
                     view,
+                    on: None,
                 },
                 state.health.get(),
             ))
@@ -172,6 +173,7 @@ macro_rules! list_handlers {
                     ports: None,
                     health: None,
                     view,
+                    on: None,
                 },
             ))
         }

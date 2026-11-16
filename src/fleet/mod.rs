@@ -2,18 +2,83 @@
 //! `machines.toml` beside the config file, with this hub's own link key in
 //! `link/` next to it. Copying that config folder to another machine moves
 //! the hub with all its pairings.
+//!
+//! The fleet also remembers, in memory, how each machine last answered
+//! ([`Seen`]) and the last unit listing each page got from it, so a machine
+//! that drops off still shows what it was running, marked as such
+//! ([`Listing::Stale`]). [`monitor`] re-checks every machine in the
+//! background and tells open pages when one comes or goes.
 
+pub mod monitor;
+
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
+use futures_util::future::join_all;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
+use crate::events::{DashboardEvent, EventSender};
 use crate::link::trust::{Permission, now_secs};
 use crate::link::{API_VERSION, Fingerprint, Identity};
 use crate::machine::api::Hello;
 use crate::machine::remote::{self, RemoteMachine};
-use crate::quadlet::QuadletError;
+use crate::machine::{Facts, Machine, UnitListing};
+use crate::quadlet::{QuadletError, UnitKind};
+
+/// How long the hub waits for a machine before calling it offline.
+pub const REACH_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// How a paired machine answered when last asked.
+#[derive(Debug, Clone)]
+pub enum Reach {
+    Online { facts: Facts, millis: u128 },
+    Offline { reason: String },
+}
+
+impl Reach {
+    pub fn is_online(&self) -> bool {
+        matches!(self, Self::Online { .. })
+    }
+}
+
+/// The last word from a machine.
+#[derive(Debug, Clone)]
+pub struct Seen {
+    pub reach: Reach,
+    /// When it last answered, if it ever has since the hub started.
+    pub online_at: Option<u64>,
+}
+
+/// A machine's units for one page: fresh, or the last ones it gave if it
+/// doesn't answer now.
+pub enum Listing {
+    Live(UnitListing),
+    Stale {
+        listing: UnitListing,
+        as_of: u64,
+        reason: String,
+    },
+    Unreachable {
+        reason: String,
+    },
+}
+
+impl Listing {
+    /// The units to draw, fresh or not (none when it never answered).
+    pub fn units(&self) -> Option<&UnitListing> {
+        match self {
+            Self::Live(l) | Self::Stale { listing: l, .. } => Some(l),
+            Self::Unreachable { .. } => None,
+        }
+    }
+
+    pub fn is_live(&self) -> bool {
+        matches!(self, Self::Live(_))
+    }
+}
 
 /// One paired machine as saved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +107,13 @@ pub struct Linked {
     pub remote: RemoteMachine,
 }
 
+impl Linked {
+    /// The machine, for code that works on any [`Machine`].
+    pub fn machine(&self) -> Machine {
+        Machine::Remote(self.remote.clone())
+    }
+}
+
 #[derive(Clone)]
 pub struct Fleet {
     inner: Arc<Inner>,
@@ -53,6 +125,10 @@ struct Inner {
     /// What this hub calls itself to agents (its hostname).
     hub_name: String,
     machines: RwLock<Vec<Linked>>,
+    seen: RwLock<HashMap<String, Seen>>,
+    /// The last listing per machine and set of kinds.
+    listings: Mutex<HashMap<ListingKey, (UnitListing, u64)>>,
+    events: OnceLock<EventSender>,
 }
 
 fn invalid(msg: impl Into<String>) -> AppError {
@@ -118,8 +194,141 @@ impl Fleet {
                 path,
                 hub_name: hub_name.to_string(),
                 machines: RwLock::new(machines),
+                seen: RwLock::new(HashMap::new()),
+                listings: Mutex::new(HashMap::new()),
+                events: OnceLock::new(),
             }),
         })
+    }
+
+    /// Where to announce a machine coming online or dropping off
+    /// ([`DashboardEvent::MachinesChanged`]).
+    pub fn notify_on(&self, events: EventSender) {
+        let _ = self.inner.events.set(events);
+    }
+
+    fn announce(&self) {
+        if let Some(events) = self.inner.events.get() {
+            let _ = events.send(DashboardEvent::MachinesChanged);
+        }
+    }
+
+    /// How the machine `id` last answered, if it's been asked.
+    pub fn seen(&self, id: &str) -> Option<Seen> {
+        self.inner
+            .seen
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
+    }
+
+    /// Notes how `id` answered. An answer of another sort than the last one
+    /// (it came back, or dropped off) is announced.
+    fn record(&self, id: &str, reach: Reach) {
+        let now = now_secs();
+        let flipped = {
+            let mut seen = self.inner.seen.write().unwrap_or_else(|e| e.into_inner());
+            let before = seen.get(id).cloned();
+            let online_at = if reach.is_online() {
+                Some(now)
+            } else {
+                before.as_ref().and_then(|b| b.online_at)
+            };
+            let flipped = before
+                .as_ref()
+                .is_none_or(|b| b.reach.is_online() != reach.is_online());
+            seen.insert(id.to_string(), Seen { reach, online_at });
+            flipped
+        };
+        if flipped {
+            self.announce();
+        }
+    }
+
+    /// Asks one machine about itself, and notes the answer.
+    pub async fn check(&self, linked: &Linked) -> Reach {
+        let started = Instant::now();
+        let reach = match tokio::time::timeout(REACH_TIMEOUT, linked.remote.facts()).await {
+            Ok(Ok(facts)) => Reach::Online {
+                facts,
+                millis: started.elapsed().as_millis(),
+            },
+            Ok(Err(e)) => Reach::Offline {
+                reason: e.user_message(),
+            },
+            Err(_) => Reach::Offline {
+                reason: no_answer(),
+            },
+        };
+        self.record(&linked.entry.id, reach.clone());
+        reach
+    }
+
+    /// [`Fleet::check`] on every machine at once.
+    pub async fn check_all(&self) -> Vec<(Linked, Reach)> {
+        join_all(self.machines().into_iter().map(|m| async move {
+            let reach = self.check(&m).await;
+            (m, reach)
+        }))
+        .await
+    }
+
+    /// The last units of `kinds` the machine `id` gave, without asking it.
+    pub fn cached(&self, id: &str, kinds: &[UnitKind]) -> Option<UnitListing> {
+        self.inner
+            .listings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&listing_key(id, kinds))
+            .map(|(l, _)| l.clone())
+    }
+
+    /// The machine's units of `kinds`, or the last ones it gave if it doesn't
+    /// answer within [`REACH_TIMEOUT`].
+    pub async fn listing(&self, linked: &Linked, kinds: &[UnitKind]) -> Listing {
+        let id = &linked.entry.id;
+        let key = listing_key(id, kinds);
+        let reason = match tokio::time::timeout(REACH_TIMEOUT, linked.machine().units(kinds)).await
+        {
+            Ok(Ok(listing)) => {
+                self.inner
+                    .listings
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(key, (listing.clone(), now_secs()));
+                // Units came back, so it's up; keep the facts it last gave.
+                if self.seen(id).is_none_or(|s| !s.reach.is_online()) {
+                    let linked = linked.clone();
+                    let fleet = self.clone();
+                    tokio::spawn(async move { fleet.check(&linked).await });
+                }
+                return Listing::Live(listing);
+            }
+            Ok(Err(e)) => e.user_message(),
+            Err(_) => no_answer(),
+        };
+        self.record(
+            id,
+            Reach::Offline {
+                reason: reason.clone(),
+            },
+        );
+        match self
+            .inner
+            .listings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+            .cloned()
+        {
+            Some((listing, as_of)) => Listing::Stale {
+                listing,
+                as_of,
+                reason,
+            },
+            None => Listing::Unreachable { reason },
+        }
     }
 
     pub fn fingerprint(&self) -> Fingerprint {
@@ -217,6 +426,8 @@ impl Fleet {
             remote,
         });
         self.save(&machines)?;
+        drop(machines);
+        self.announce();
         tracing::info!(machine = %entry.name, address = %entry.address, %fingerprint, "machine paired");
         Ok(entry)
     }
@@ -242,8 +453,24 @@ impl Fleet {
             .unwrap_or_else(|e| e.into_inner());
         machines.retain(|m| m.entry.id != id);
         self.save(&machines)?;
+        drop(machines);
+        self.forget(id);
         tracing::info!(machine = %linked.entry.name, confirmed, "machine unpaired");
         Ok(confirmed)
+    }
+
+    fn forget(&self, id: &str) {
+        self.inner
+            .seen
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(id);
+        self.inner
+            .listings
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|(m, _), _| m != id);
+        self.announce();
     }
 
     /// Renames a machine (its id stays, so links keep working).
@@ -259,14 +486,92 @@ impl Fleet {
             .find(|m| m.entry.id == id)
             .ok_or_else(|| AppError::NotFound(id.to_string()))?;
         m.entry.name = name.to_string();
-        self.save(&machines)
+        self.save(&machines)?;
+        drop(machines);
+        self.announce();
+        Ok(())
     }
+}
+
+/// A machine id and a set of kinds.
+type ListingKey = (String, Vec<String>);
+
+fn listing_key(id: &str, kinds: &[UnitKind]) -> ListingKey {
+    (
+        id.to_string(),
+        kinds.iter().map(|k| format!("{k:?}")).collect(),
+    )
+}
+
+fn no_answer() -> String {
+    format!("no answer within {} seconds", REACH_TIMEOUT.as_secs())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::machine::remote::tests::{fake, spawn_agent};
+
+    #[tokio::test]
+    async fn a_machine_that_stops_answering_shows_its_last_units() {
+        let dir = tempfile::tempdir().unwrap();
+        let fleet = Fleet::load(&dir.path().join("config.toml"), "hub01").unwrap();
+        let (tx, mut rx) = tokio::sync::broadcast::channel(16);
+        fleet.notify_on(tx);
+        let agent = spawn_agent(fake()).await;
+        let code = agent.hubs.issue_code(Permission::Full).unwrap();
+        let (fp, _) = fleet.probe(&agent.url).await.unwrap();
+        fleet.add(&agent.url, fp, &code, "Pi").await.unwrap();
+        let linked = fleet.get("pi").unwrap();
+        let kinds = [UnitKind::Container];
+
+        match fleet.listing(&linked, &kinds).await {
+            Listing::Live((units, all)) => {
+                assert_eq!(units.len(), 1);
+                assert_eq!(all.len(), 2);
+            }
+            _ => panic!("expected a live listing"),
+        }
+        assert!(fleet.check(&linked).await.is_online());
+        assert!(fleet.seen("pi").unwrap().reach.is_online());
+
+        // The agent forgets this hub, so it refuses it from now on.
+        agent.hubs.remove(&fleet.fingerprint()).unwrap();
+        match fleet.listing(&linked, &kinds).await {
+            Listing::Stale {
+                listing: (units, _),
+                reason,
+                ..
+            } => {
+                assert_eq!(units[0].0.file_name, "web.container");
+                assert!(!reason.is_empty());
+            }
+            _ => panic!("expected the last listing, marked stale"),
+        }
+        let seen = fleet.seen("pi").unwrap();
+        assert!(!seen.reach.is_online());
+        assert!(seen.online_at.is_some(), "it did answer once");
+        assert!(fleet.cached("pi", &kinds).is_some());
+        // Kinds it never listed have nothing to fall back on.
+        assert!(matches!(
+            fleet.listing(&linked, &[UnitKind::Volume]).await,
+            Listing::Unreachable { .. }
+        ));
+
+        // Pairing, coming online and dropping off were all announced.
+        let mut announced = 0;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event, DashboardEvent::MachinesChanged) {
+                announced += 1;
+            }
+        }
+        assert!(announced >= 3, "announced {announced} times");
+
+        // Unpairing forgets what it last said.
+        fleet.remove("pi").await.unwrap();
+        assert!(fleet.seen("pi").is_none());
+        assert!(fleet.cached("pi", &kinds).is_none());
+    }
 
     #[test]
     fn slugs_are_url_safe() {

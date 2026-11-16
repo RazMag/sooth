@@ -48,11 +48,12 @@
 # --with-agent (what `just dev-fleet` runs) also starts `sooth --agent` on
 # the next port up, against the same scratch dir but with its own config and
 # key (<dir>/.sooth-dev/agent), pairs the dashboard with it as "Dev agent"
-# (once per scratch dir, through `sooth --pair-code` and `--link-add`), and
-# points the dashboard's pages at it (SOOTH_DEV_VIEW_MACHINE, see
-# main::dev_view): lists, status, start/stop/restart and log tails then travel
-# over the agent API, with mutual TLS. Its log lines are prefixed [agent]; it
-# stops when the dashboard does.
+# (once per scratch dir, through `sooth --pair-code` and `--link-add`). The
+# Services page then lists every unit twice, once under this hub and once
+# under "Dev agent" -- the second set read over the agent API, with mutual
+# TLS, as are its unit pages (/machines/dev-agent/units/...) and their
+# start/stop/restart. Its log lines are prefixed [agent]; it stops when the
+# dashboard does.
 #
 #   scripts/run-dev.sh --with-agent
 
@@ -253,7 +254,6 @@ if [ -n "$fake_no_podman_flag" ] || [ -n "$fake_linger_disabled_flag" ]; then
     fi
 fi
 
-agent_env=
 if [ -n "$with_agent_flag" ]; then
     agent_port=$((port + 1))
     agent_dir=$scratch/.sooth-dev/agent
@@ -285,12 +285,10 @@ if [ -n "$with_agent_flag" ]; then
         fingerprint=$(SOOTH_CONFIG="$agent_config" "$bin" --fingerprint) || exit 1
         SOOTH_CONFIG="$config" "$bin" --link-add "Dev agent" "https://127.0.0.1:$agent_port" "$code" "$fingerprint" || exit 1
     fi
-    agent_env="SOOTH_DEV_VIEW_MACHINE=dev-agent"
 fi
 
 echo "==> starting sooth on http://127.0.0.1:$port  (quadlet dir: $scratch)"
-env $agent_env \
-    SOOTH_CONFIG="$config" \
+env SOOTH_CONFIG="$config" \
     SOOTH_QUADLET_DIR="$scratch" \
     SOOTH_AUTH_PASSWORD_HASH="$hash" \
     SOOTH_BIND_ADDR="127.0.0.1:$port" \

@@ -144,23 +144,6 @@ async fn link_add_cli() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A dev-only way to look at a linked machine before the fleet pages merge
-/// machines: with `SOOTH_DEV_VIEW_MACHINE=<id>`, the pages read units,
-/// status and logs (and run start/stop/restart) through that machine's
-/// agent instead of this host. Detail pages, edits and the live log follow
-/// still use this host's quadlet directory, so the agent must serve the same
-/// one (`just dev-fleet` sets that up).
-fn dev_view(fleet: &fleet::Fleet) -> anyhow::Result<Option<machine::Machine>> {
-    let Ok(id) = std::env::var("SOOTH_DEV_VIEW_MACHINE") else {
-        return Ok(None);
-    };
-    let linked = fleet
-        .get(&id)
-        .ok_or_else(|| anyhow::anyhow!("SOOTH_DEV_VIEW_MACHINE: no machine '{id}'"))?;
-    tracing::warn!(machine = %linked.entry.name, "dev: pages read units through this machine's agent");
-    Ok(Some(machine::Machine::Remote(linked.remote)))
-}
-
 /// `sooth --agent`: serves this host's machine API (`machine::api`) for a
 /// hub to call, and nothing else -- no UI, no sessions, no background tasks.
 /// Everything it answers is read fresh from disk and systemd per request.
@@ -378,14 +361,13 @@ async fn run() -> anyhow::Result<()> {
         &web::templates::overview::MachineInfo::detect().hostname,
     )?;
     info!(fingerprint = %fleet.fingerprint(), machines = fleet.machines().len(), "hub link key");
-    let machine = match dev_view(&fleet)? {
-        Some(remote) => remote,
-        None => machine::Machine::Local(machine::local::LocalMachine::new(
-            quadlet_dir.clone(),
-            systemd_client.clone(),
-            health.clone(),
-        )),
-    };
+    fleet.notify_on(events_tx.clone());
+    let fleet_task = fleet::monitor::spawn(fleet.clone());
+    let machine = machine::Machine::Local(machine::local::LocalMachine::new(
+        quadlet_dir.clone(),
+        systemd_client.clone(),
+        health.clone(),
+    ));
     let state = AppState {
         config: Arc::new(config.clone()),
         quadlet_dir,
@@ -428,6 +410,7 @@ async fn run() -> anyhow::Result<()> {
     watch_task.abort();
     fs_watch_task.abort();
     activity_task.abort();
+    fleet_task.abort();
     git_sync.abort_all();
     self_update.abort();
     image_tags.abort();

@@ -69,5 +69,8 @@ fn render_event(event: DashboardEvent) -> Vec<Result<Event, Infallible>> {
         DashboardEvent::ActivityChanged => {
             vec![Ok(Event::default().event("activity-changed").data("1"))]
         }
+        DashboardEvent::MachinesChanged => {
+            vec![Ok(Event::default().event("machines-changed").data("1"))]
+        }
     }
 }

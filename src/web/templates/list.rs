@@ -8,9 +8,11 @@ use std::collections::HashMap;
 use maud::{Markup, html};
 
 use super::imagetags::{BadgeNote, tag_badge, tag_slot};
+use super::remote_unit::remote_kebab;
 use super::{
     Icon, NavItem, autostart_icon, autoupdate_icon, autoupdate_mode, csrf_input, group_kebab, icon,
-    kebab_menu, kind_dot, known_groups_datalist, page_header, shell, status_badge,
+    kebab_menu, kind_dot, known_groups_datalist, page_header, plain_status_badge, shell,
+    status_badge,
 };
 use crate::containerhealth::ContainerHealth;
 use crate::health::Health;
@@ -89,6 +91,44 @@ pub struct ListContext<'a> {
     /// (`containerhealth::health_of`) -- only for the Services table.
     pub health: Option<&'a HashMap<String, ContainerHealth>>,
     pub view: ListView,
+    /// Set when these rows are another machine's (see [`OnMachine`]).
+    pub on: Option<&'a OnMachine<'a>>,
+}
+
+/// Rows drawn for a machine other than this hub's own: links go to its
+/// pages under `/machines/{id}`, nothing listens for this hub's own live
+/// events (a unit there can share a name with one here), and only the
+/// actions its agent serves are offered.
+pub struct OnMachine<'a> {
+    pub id: &'a str,
+    /// Start, stop and restart are offered: the hub has full access and
+    /// the machine answered just now.
+    pub actions: bool,
+}
+
+impl ListContext<'_> {
+    /// Where a unit's page is.
+    pub fn href(&self, unit: &QuadletUnit) -> String {
+        match self.on {
+            Some(m) => remote_unit_url(m.id, &unit.file_name),
+            None => core::unit_url(unit),
+        }
+    }
+
+    /// A unit, group or pod name made unique on a page that lists several
+    /// machines -- for the `data-*` keys the tree and bulk scripts match
+    /// rows by. This hub's own names stay as they are.
+    fn key(&self, name: &str) -> String {
+        match self.on {
+            Some(m) => format!("{}/{name}", m.id),
+            None => name.to_string(),
+        }
+    }
+}
+
+/// A unit's page on another machine.
+pub fn remote_unit_url(machine: &str, file_name: &str) -> String {
+    format!("/machines/{machine}/units/{file_name}")
 }
 
 /// What a column cell can draw on: the row's own unit and live status, plus
@@ -102,6 +142,9 @@ pub struct RowCtx<'a> {
     /// This row's share of its pod's published ports, when they were split
     /// (see [`ListContext::ports`]).
     pub split_ports: Option<&'a SplitPorts>,
+    /// The row is this hub's own, so a cell may refresh itself from this
+    /// hub's routes on a live event.
+    pub live: bool,
 }
 
 pub struct Column {
@@ -130,7 +173,7 @@ pub struct ListSpec {
 impl ListSpec {
     /// How many cells a row spans: name, status, the spec's columns, the
     /// Boot / Auto-update pair when shown, and the actions menu.
-    fn width(&self) -> usize {
+    pub fn width(&self) -> usize {
         self.columns.len() + 3 + if self.service_columns { 2 } else { 0 }
     }
 }
@@ -225,14 +268,20 @@ fn row(
         status,
         all_units,
         split_ports: lists.ports.and_then(|p| p.get(&unit.file_name)),
+        live: lists.on.is_none(),
     };
+    let local = lists.on.is_none();
     let dirs = lists.view == ListView::Dirs;
     let move_url = dirs.then(|| format!("{}/move", core::unit_url(unit)));
     let (pod, pod_member) = match place.tree {
-        TreePos::Pod { .. } => (Some(unit.file_name.as_str()), None),
-        TreePos::Child { pod } => (None, Some(pod.map_or(STANDALONE, |p| p.file_name.as_str()))),
+        TreePos::Pod { .. } => (Some(lists.key(&unit.file_name)), None),
+        TreePos::Child { pod } => (
+            None,
+            Some(lists.key(pod.map_or(STANDALONE, |p| p.file_name.as_str()))),
+        ),
         TreePos::Plain => (None, None),
     };
+    let selectable = lists.on.is_none_or(|m| m.actions);
     let more = place.rails.elbow == Some(true);
     let classes: Vec<&str> = [
         pod.is_some().then_some("tree-trunk"),
@@ -243,7 +292,8 @@ fn row(
     .collect();
     html! {
         tr class=[(!classes.is_empty()).then(|| classes.join(" "))]
-            data-group-member=[place.group]
+            data-group-member=[place.group.map(|g| lists.key(g))]
+            data-remote=[lists.on.map(|m| m.id)]
             data-pod=[pod]
             data-pod-member=[pod_member]
             data-branch=[place.rails.elbow.map(|_| if more { "mid" } else { "last" })]
@@ -251,7 +301,7 @@ fn row(
             td {
                 div.tree-cell {
                     (place.rails.render())
-                    @if dirs && !unit.is_template() {
+                    @if dirs && local && !unit.is_template() {
                         span.drag-handle draggable="true"
                             title="Drag to file this unit under another group" aria-hidden="true" {
                             (icon(Icon::Grip))
@@ -262,14 +312,14 @@ fn row(
                             (pod_toggle(&unit.file_name))
                         }
                     }
-                    @if service_columns && !unit.is_template() {
-                        input.row-select type="checkbox" value=(unit.file_name)
+                    @if service_columns && selectable && !unit.is_template() {
+                        input.row-select type="checkbox" value=(lists.key(&unit.file_name))
                             aria-label={"Select " (unit.file_name)};
                     }
                     (kind_dot(unit.kind))
                     div.tree-name {
                         div.tree-title {
-                            a href=(core::unit_url(unit)) { (unit.file_name) }
+                            a href=(lists.href(unit)) { (unit.file_name) }
                             @if unit.is_template() {
                                 span.chip.chip-muted title="Template unit — managed read-only, use the CLI to instantiate it" { "template" }
                             }
@@ -277,14 +327,14 @@ fn row(
                             @if let Some(m) = lists.missing.get(&unit.file_name) {
                                 (missing_badge(unit, m))
                             }
-                            @if unit.kind == UnitKind::Container {
+                            @if local && unit.kind == UnitKind::Container {
                                 (tag_slot(&unit.file_name, match lists.tags.get(&unit.file_name) {
                                     Some(t) => tag_badge(&core::unit_url(unit), &unit.file_name, t, BadgeNote::None, csrf),
                                     None => html! {},
                                 }, false))
                             }
                         }
-                        (secondary_line(unit, place, all_units))
+                        (secondary_line(unit, place, all_units, lists))
                     }
                 }
             }
@@ -293,7 +343,11 @@ fn row(
             // describe it, so they stay blank rather than read "—".
             td {
                 div.status-cell {
-                    (status_badge(&service, status))
+                    @if local {
+                        (status_badge(&service, status))
+                    } @else {
+                        (plain_status_badge(status))
+                    }
                     @if let Some(h) = lists.health.and_then(|h| h.get(&unit.file_name)) {
                         @if status.is_active() {
                             span class={"health-pill health-" (h.as_str())}
@@ -313,7 +367,12 @@ fn row(
                 td.flag-cell { (boot_flag(status)) }
                 td.flag-cell { (autoupdate_flag(unit)) }
             }
-            td { (kebab_menu(unit, status, csrf, lists.known)) }
+            td {
+                @match lists.on {
+                    None => (kebab_menu(unit, status, csrf, lists.known)),
+                    Some(m) => (remote_kebab(m, unit, status, csrf)),
+                }
+            }
         }
     }
 }
@@ -391,7 +450,7 @@ fn location_chips(
                 .then_some(unit.group.as_str());
             html! {
                 @if let Some(pod) = pod {
-                    a.chip.chip-pod href=(core::unit_url(pod)) title={"Part of " (pod.file_name)} {
+                    a.chip.chip-pod href=(lists.href(pod)) title={"Part of " (pod.file_name)} {
                         (icon(Icon::Pod)) (naming::stem(&pod.file_name))
                     }
                 }
@@ -408,7 +467,12 @@ fn location_chips(
 /// A row's muted second line: a pod's member summary, a container's
 /// resource chips, or the unit's `description()` for any other kind (a
 /// container's is its image, which the Services table has a column for).
-fn secondary_line(unit: &QuadletUnit, place: &Place, all_units: &[QuadletUnit]) -> Markup {
+fn secondary_line(
+    unit: &QuadletUnit,
+    place: &Place,
+    all_units: &[QuadletUnit],
+    lists: &ListContext,
+) -> Markup {
     if let TreePos::Pod { children, leaves } = place.tree {
         let containers: Vec<&UnitStatus> = children
             .iter()
@@ -438,7 +502,7 @@ fn secondary_line(unit: &QuadletUnit, place: &Place, all_units: &[QuadletUnit]) 
                 div.cell-secondary.unit-refs {
                     @for name in &resources {
                         @if let Some(r) = all_units.iter().find(|u| &u.file_name == name) {
-                            a.unit-ref href=(core::unit_url(r)) title=(name) {
+                            a.unit-ref href=(lists.href(r)) title=(name) {
                                 (icon(kind_icon(r.kind))) (naming::stem(name))
                             }
                         }
@@ -613,17 +677,18 @@ fn leaf_row(
     more: bool,
     colspan: usize,
     all: &[QuadletUnit],
+    lists: &ListContext,
 ) -> Markup {
     let consumers = refs::consumers_of(unit, all);
     html! {
-        tr.tree-leaf data-pod-member=(pod.file_name) data-branch=(if more { "mid" } else { "last" }) {
+        tr.tree-leaf data-pod-member=(lists.key(&pod.file_name)) data-branch=(if more { "mid" } else { "last" }) {
             td colspan=(colspan - 1) {
                 div.tree-cell {
                     (Rails::child(more).render())
                     (kind_dot(unit.kind))
                     div.tree-name {
                         div.tree-title {
-                            a href=(core::unit_url(unit)) { (unit.file_name) }
+                            a href=(lists.href(unit)) { (unit.file_name) }
                             span.chip.chip-muted title={"Also used by: " (consumers.join(", "))} {
                                 (icon(Icon::Link)) "shared · " (consumers.len()) " consumers"
                             }
@@ -670,11 +735,11 @@ fn pod_rows(
                 }))
             }
             @for (i, leaf) in leaves.iter().enumerate() {
-                (leaf_row(leaf, &pod.0, i + 1 < leaves.len(), colspan, all_units))
+                (leaf_row(leaf, &pod.0, i + 1 < leaves.len(), colspan, all_units, lists))
             }
         }
         @if trunked && !tree.standalone.is_empty() {
-            (standalone_row(tree.standalone.len(), colspan))
+            (standalone_row(tree.standalone.len(), colspan, &lists.key(STANDALONE)))
         }
         @for (i, entry) in tree.standalone.iter().enumerate() {
             (row(entry, spec, csrf, all_units, lists, &Place {
@@ -692,9 +757,9 @@ fn pod_rows(
 }
 
 /// The Standalone trunk: heads every unit no single listed pod owns.
-fn standalone_row(count: usize, colspan: usize) -> Markup {
+fn standalone_row(count: usize, colspan: usize, key: &str) -> Markup {
     html! {
-        tr.tree-trunk.standalone-row data-pod=(STANDALONE) {
+        tr.tree-trunk.standalone-row data-pod=(key) {
             td colspan=(colspan) {
                 div.tree-cell {
                     (pod_toggle("standalone units"))
@@ -805,17 +870,30 @@ impl DirShape<'_> {
 /// `aria-expanded="false"`; `groups.js` reconciles it against the per-browser
 /// remembered state, and member rows carry `is-collapsed` so the no-JS /
 /// pre-JS view starts collapsed.
-fn group_header_row(
-    path: &str,
+struct GroupHeader<'a> {
+    path: &'a str,
+    /// `data-group`: the path, prefixed with the machine on a page listing
+    /// several (see [`ListContext::key`]).
+    key: &'a str,
     count: usize,
     colspan: usize,
-    csrf: &str,
     synced: bool,
-    rails: &Rails,
-) -> Markup {
+    /// This hub's own group, so it can be dragged and has a menu.
+    local: bool,
+}
+
+fn group_header_row(g: &GroupHeader, csrf: &str, rails: &Rails) -> Markup {
+    let GroupHeader {
+        path,
+        key,
+        count,
+        colspan,
+        synced,
+        local,
+    } = *g;
     let last = path.rsplit('/').next().unwrap_or(path);
     html! {
-        tr.group-row data-group=(path)
+        tr.group-row data-group=(key) data-remote[!local]
             data-branch=[rails.elbow.map(|more| if more { "mid" } else { "last" })] {
             td.group-head-cell colspan=(colspan - 1) {
                 div.tree-cell {
@@ -824,9 +902,11 @@ fn group_header_row(
                     // parent too -- see `web::core::move_group_dir`, which
                     // keeps `GitSyncConfig.group` pointed at wherever it
                     // ends up -- so it gets the same grip as any other group.
-                    span.drag-handle.group-drag draggable="true"
-                        title="Drag to move this group under another" aria-hidden="true" {
-                        (icon(Icon::Grip))
+                    @if local {
+                        span.drag-handle.group-drag draggable="true"
+                            title="Drag to move this group under another" aria-hidden="true" {
+                            (icon(Icon::Grip))
+                        }
                     }
                     button.group-toggle type="button" aria-expanded="false" title=(path) {
                         span.group-chevron aria-hidden="true" { (icon(Icon::ChevronDown)) }
@@ -842,7 +922,7 @@ fn group_header_row(
                     }
                 }
             }
-            td.group-kebab-cell { (group_kebab(path, csrf)) }
+            td.group-kebab-cell { @if local { (group_kebab(path, csrf)) } }
         }
     }
 }
@@ -883,9 +963,17 @@ fn dir_rows(
             @let members: Vec<&&Entry> = listed.iter().filter(|(u, _)| u.group == *grp).collect();
             @let nested = nested_unit_count(listed.iter().map(|(u, _)| u.group.as_str()), grp);
             @let synced = lists.synced.iter().any(|g| g == grp);
-            (group_header_row(grp, nested, colspan, csrf, synced, &shape.header(grp)))
+            @let key = lists.key(grp);
+            (group_header_row(&GroupHeader {
+                path: grp,
+                key: &key,
+                count: nested,
+                colspan,
+                synced,
+                local: lists.on.is_none(),
+            }, csrf, &shape.header(grp)))
             @if members.is_empty() && nested == 0 {
-                tr.group-empty.is-collapsed data-group-member=(grp) {
+                tr.group-empty.is-collapsed data-group-member=(key) data-remote[lists.on.is_some()] {
                     td colspan=(colspan) {
                         div.tree-cell {
                             (shape.member(grp, false).render())
@@ -1036,6 +1124,40 @@ pub fn list_table(
     groups: &ListContext,
     create: Markup,
 ) -> Markup {
+    list_table_with(
+        spec,
+        csrf,
+        groups,
+        create,
+        &TableBody {
+            rows: list_rows(spec, units, csrf, all_units, groups),
+            route: rows_route,
+            refresh: LOCAL_REFRESH,
+        },
+    )
+}
+
+/// What redraws a table's rows: this hub's own unit and tag changes.
+pub const LOCAL_REFRESH: &str = "sse:units-changed, sse:image-tags-changed";
+
+/// A table's `<tbody>`: its first rows, and the route and triggers that
+/// redraw them.
+pub struct TableBody<'a> {
+    pub rows: Markup,
+    pub route: &'a str,
+    /// `hx-trigger` for the redraw.
+    pub refresh: &'a str,
+}
+
+/// [`list_table`] with rows drawn by the caller -- the Services page, which
+/// lists several machines' units in one table.
+pub fn list_table_with(
+    spec: &ListSpec,
+    csrf: &str,
+    groups: &ListContext,
+    create: Markup,
+    body: &TableBody,
+) -> Markup {
     html! {
         (known_groups_datalist(groups.known))
         div.toolbar {
@@ -1084,8 +1206,8 @@ pub fn list_table(
                 // and the kebab's action forms (a scoped swap inside the
                 // menu) in place -- swapping the whole `<tbody>` here would
                 // slam shut any menu the user has open.
-                tbody id=(ROWS_ID) hx-get=(rows_route) hx-trigger="sse:units-changed, sse:image-tags-changed" hx-swap="innerHTML" {
-                    (list_rows(spec, units, csrf, all_units, groups))
+                tbody id=(ROWS_ID) hx-get=(body.route) hx-trigger=(body.refresh) hx-swap="innerHTML" {
+                    (body.rows)
                 }
             }
         }
@@ -1210,6 +1332,16 @@ mod tests {
     }
 
     fn render(spec: &ListSpec, units: &[Entry], all: &[QuadletUnit], view: ListView) -> String {
+        render_on(spec, units, all, view, None)
+    }
+
+    fn render_on(
+        spec: &ListSpec,
+        units: &[Entry],
+        all: &[QuadletUnit],
+        view: ListView,
+        on: Option<&OnMachine>,
+    ) -> String {
         let missing = HashMap::new();
         let tags = HashMap::new();
         let lists = ListContext {
@@ -1220,8 +1352,54 @@ mod tests {
             ports: None,
             health: None,
             view,
+            on,
         };
         list_rows(spec, units, "csrf", all, &lists).into_string()
+    }
+
+    #[test]
+    fn another_machines_rows_link_there_and_skip_this_hubs_live_wiring() {
+        let all = fixture();
+        let units = listed(&all, &[UnitKind::Container, UnitKind::Pod]);
+        let mut services = spec(&[UnitKind::Container, UnitKind::Pod]);
+        services.service_columns = true;
+        for view in [ListView::Pods, ListView::Dirs, ListView::Flat] {
+            let on = OnMachine {
+                id: "pi",
+                actions: true,
+            };
+            let html = render_on(&services, &units, &all, view, Some(&on));
+            assert!(html.contains(r#"href="/machines/pi/units/app.container""#));
+            assert!(!html.contains("href=\"/containers/"), "{view:?}");
+            // A unit of the same name here must not update these rows.
+            assert!(!html.contains("sse-swap"), "{view:?}");
+            assert!(!html.contains("sse:status-"), "{view:?}");
+            // Nothing here edits, moves or deletes there yet.
+            assert!(!html.contains("/edit"), "{view:?}");
+            assert!(!html.contains("drag-handle"), "{view:?}");
+            assert!(
+                html.contains(r#"hx-post="/machines/pi/units/solo.container/start?style=menu""#)
+            );
+            assert!(
+                html.contains(r#"value="pi/solo.container""#),
+                "bulk keys name the machine"
+            );
+            assert!(html.contains("data-remote=\"pi\""));
+        }
+        let html = render_on(
+            &services,
+            &units,
+            &all,
+            ListView::Pods,
+            Some(&OnMachine {
+                id: "pi",
+                actions: false,
+            }),
+        );
+        assert!(html.contains(r#"data-pod="pi/web.pod""#));
+        assert!(html.contains(r#"data-pod="pi/:standalone""#));
+        assert!(!html.contains("hx-post"), "no actions when it can't act");
+        assert!(!html.contains("row-select"));
     }
 
     #[test]

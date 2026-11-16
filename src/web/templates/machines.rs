@@ -5,15 +5,9 @@ use maud::{Markup, html};
 
 use super::{BannerKind, Icon, NavItem, banner, csrf_input, icon, page_header, shell};
 use crate::fleet::MachineEntry;
+pub use crate::fleet::Reach;
 use crate::health::Health;
-use crate::machine::Facts;
 use crate::machine::api::Hello;
-
-/// How a paired machine answered just now.
-pub enum Reach {
-    Online { facts: Facts, millis: u128 },
-    Offline { reason: String },
-}
 
 pub struct Row {
     pub entry: MachineEntry,
@@ -92,7 +86,7 @@ fn machine_row(row: &Row, csrf: &str) -> Markup {
     html! {
         tr id={"machine-" (e.id)} {
             td {
-                strong { (e.name) }
+                a.machine-link href={"/services?m=" (e.id)} title="Its services" { strong { (e.name) } }
                 @if let Reach::Online { facts, .. } = &row.reach {
                     div.machine-sub {
                         (facts.hostname) " · " (facts.arch)
@@ -138,6 +132,57 @@ fn machine_row(row: &Row, csrf: &str) -> Markup {
             }
         }
     }
+}
+
+/// A paired machine in the sidebar.
+pub struct NavMachine {
+    pub id: String,
+    pub name: String,
+    /// How it last answered; `None` before the first check.
+    pub online: Option<bool>,
+}
+
+/// The sidebar's other machines, under this hub's own: a dot and a name
+/// each, linking to its services. Empty when there are none.
+pub fn nav_machines(items: &[NavMachine]) -> Markup {
+    if items.is_empty() {
+        return html! {};
+    }
+    html! {
+        div.nav-section-label { "Other machines" }
+        ul.nav-group {
+        @for m in items {
+            li {
+                a href={"/services?m=" (m.id)} title=(match m.online {
+                    Some(true) => "Online",
+                    Some(false) => "Offline",
+                    None => "Not checked yet",
+                }) {
+                    span.nav-machine-mark aria-hidden="true" {
+                        (monogram(&m.name))
+                        span.machine-dot.is-online[m.online == Some(true)]
+                            .is-offline[m.online == Some(false)] {}
+                    }
+                    span { (m.name) }
+                }
+            }
+        }
+        }
+    }
+}
+
+/// A machine's one or two letters, from its name's first words.
+fn monogram(name: &str) -> String {
+    let mut words = name
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty());
+    let first = words.next().and_then(|w| w.chars().next());
+    let second = words.next().and_then(|w| w.chars().next());
+    first
+        .into_iter()
+        .chain(second)
+        .flat_map(char::to_uppercase)
+        .collect()
 }
 
 pub struct ConfirmPage<'a> {
@@ -231,6 +276,28 @@ mod tests {
         assert!(html.contains(r#"action="/machines/remove""#));
         assert!(html.contains(r#"action="/machines/add""#));
         assert!(html.contains(r#"aria-current="page""#));
+    }
+
+    #[test]
+    fn the_sidebar_lists_each_machine_with_a_dot() {
+        let html = nav_machines(&[
+            NavMachine {
+                id: "pi-garage".into(),
+                name: "Pi garage".into(),
+                online: Some(false),
+            },
+            NavMachine {
+                id: "nas".into(),
+                name: "nas".into(),
+                online: None,
+            },
+        ])
+        .into_string();
+        assert!(html.contains(r#"href="/services?m=pi-garage""#));
+        assert!(html.contains(">PG<"), "monogram from the first two words");
+        assert!(html.contains("machine-dot is-offline"));
+        assert!(html.contains("Not checked yet"));
+        assert_eq!(nav_machines(&[]).into_string(), "");
     }
 
     #[test]

@@ -2,13 +2,10 @@
 //! code (`/machines/add`, which probes the agent), then the fingerprint
 //! check and a name (`/machines/pair`). Rename and unpair are plain POSTs.
 
-use std::time::{Duration, Instant};
-
 use axum::Form;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
-use futures_util::future::join_all;
 use maud::html;
 use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
@@ -17,14 +14,11 @@ use crate::config::AppState;
 use crate::error::{AppError, PageError};
 use crate::link::Fingerprint;
 use crate::web::templates::machines::{
-    ConfirmPage, MachinesPage, Reach, Row, confirm_page, machines_page,
+    ConfirmPage, MachinesPage, NavMachine, Row, confirm_page, machines_page, nav_machines,
 };
 use crate::web::templates::overview::MachineInfo;
 
 const FLASH_KEY: &str = "machines.flash";
-
-/// How long the list waits for each machine before calling it offline.
-const REACH_TIMEOUT: Duration = Duration::from_secs(4);
 
 #[derive(Debug, Serialize, Deserialize)]
 enum Flash {
@@ -54,27 +48,16 @@ async fn check_csrf(session: &Session, token: &str) -> Result<(), PageError> {
 }
 
 async fn reach_all(state: &AppState) -> Vec<Row> {
-    let machines = state.fleet.machines();
-    join_all(machines.into_iter().map(|m| async move {
-        let started = Instant::now();
-        let reach = match tokio::time::timeout(REACH_TIMEOUT, m.remote.facts()).await {
-            Ok(Ok(facts)) => Reach::Online {
-                facts,
-                millis: started.elapsed().as_millis(),
-            },
-            Ok(Err(e)) => Reach::Offline {
-                reason: e.user_message(),
-            },
-            Err(_) => Reach::Offline {
-                reason: format!("no answer within {} seconds", REACH_TIMEOUT.as_secs()),
-            },
-        };
-        Row {
+    state
+        .fleet
+        .check_all()
+        .await
+        .into_iter()
+        .map(|(m, reach)| Row {
             entry: m.entry,
             reach,
-        }
-    }))
-    .await
+        })
+        .collect()
 }
 
 async fn render_list(
@@ -120,6 +103,23 @@ async fn render_list(
         }),
     )
         .into_response()
+}
+
+/// The sidebar's other machines, each with a dot for how it last answered
+/// (`fleet::monitor` keeps that current). Loaded by every page's sidebar and
+/// redrawn on `machines-changed`.
+pub async fn nav(State(state): State<AppState>) -> maud::Markup {
+    let items: Vec<NavMachine> = state
+        .fleet
+        .machines()
+        .into_iter()
+        .map(|m| NavMachine {
+            online: state.fleet.seen(&m.entry.id).map(|s| s.reach.is_online()),
+            id: m.entry.id,
+            name: m.entry.name,
+        })
+        .collect();
+    nav_machines(&items)
 }
 
 pub async fn index(State(state): State<AppState>, session: Session) -> Response {

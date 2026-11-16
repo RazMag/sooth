@@ -13,6 +13,7 @@ pub mod pods;
 pub mod ports;
 pub mod raw_create;
 pub mod registries;
+pub mod remote_unit;
 pub mod secrets;
 pub mod selfupdate;
 pub mod services;
