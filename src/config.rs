@@ -61,13 +61,9 @@ pub struct Config {
     /// `git_syncs`/`self_update` -- changing it needs a restart.
     #[serde(default)]
     pub github_token: String,
-    /// The bearer token `sooth --agent` requires on every API call (see
-    /// `crate::machine::api`). Empty means agent mode refuses to start;
-    /// `sooth --agent-token` prints a fresh one.
-    #[serde(default)]
-    pub agent_token: String,
-    /// Where `sooth --agent` serves the machine API. Loopback by default:
-    /// the API is plain HTTP until machines are paired over HTTPS or SSH.
+    /// Where `sooth --agent` serves the machine API (HTTPS with mutual TLS,
+    /// see `crate::link`). Loopback by default: set an address the hub can
+    /// reach, or keep loopback and link the machine over SSH.
     #[serde(default = "default_agent_bind_addr")]
     pub agent_bind_addr: SocketAddr,
 }
@@ -93,7 +89,6 @@ impl Default for Config {
             self_update: SelfUpdateConfig::default(),
             image_tags: ImageTagsConfig::default(),
             github_token: String::new(),
-            agent_token: String::new(),
             agent_bind_addr: default_agent_bind_addr(),
         }
     }
@@ -132,18 +127,6 @@ impl Config {
         argon2::PasswordHash::new(&self.auth_password_hash).map_err(|e| {
             anyhow::anyhow!("SOOTH_AUTH_PASSWORD_HASH is not a valid argon2 hash: {e}")
         })?;
-        Ok(())
-    }
-
-    /// [`Config::validate`] for `sooth --agent`, which has no web UI and so
-    /// no password -- only the API token.
-    pub fn validate_agent(&self) -> anyhow::Result<()> {
-        if self.agent_token.trim().len() < 16 {
-            anyhow::bail!(
-                "agent mode needs a token of at least 16 characters -- set SOOTH_AGENT_TOKEN \
-                 (generate one with: sooth --agent-token)"
-            );
-        }
         Ok(())
     }
 }
@@ -312,6 +295,9 @@ pub struct AppState {
     /// host for now; writes (create/edit/move/delete) still go to
     /// `quadlet_dir` directly.
     pub machine: crate::machine::Machine,
+    /// The machines this hub is paired with, and its link key -- see
+    /// `crate::fleet`.
+    pub fleet: crate::fleet::Fleet,
 }
 
 #[cfg(test)]
