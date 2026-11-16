@@ -5,18 +5,23 @@
 
 use maud::{Markup, html};
 
-use super::list::{Column, ListContext, ListSpec, RowCtx};
-use super::{Icon, NavItem, icon, ports_cell_live, shell, split_ports_cell_live};
+use super::list::{Column, ListContext, ListSpec, RowCtx, TableBody};
+use super::{
+    Icon, NavItem, icon, ports_cell_live, ports_summary, shell, split_ports_cell_live,
+    split_ports_summary,
+};
 use crate::health::Health;
-use crate::quadlet::{QuadletUnit, UnitKind};
-use crate::systemd::UnitStatus;
+use crate::quadlet::UnitKind;
 
 /// A pod's published ports show on the member(s) serving them, the rest on
 /// the pod itself (see `ListContext::ports`); any other row shows its own.
 fn ports_cell(ctx: &RowCtx) -> Markup {
-    match ctx.split_ports {
-        Some(split) => split_ports_cell_live(ctx.unit, ctx.status, split),
-        None => ports_cell_live(ctx.unit, ctx.status),
+    let active = ctx.status.is_active();
+    match (ctx.split_ports, ctx.live) {
+        (Some(split), true) => split_ports_cell_live(ctx.unit, ctx.status, split),
+        (None, true) => ports_cell_live(ctx.unit, ctx.status),
+        (Some(split), false) => split_ports_summary(ctx.unit, active, split),
+        (None, false) => ports_summary(ctx.unit, active),
     }
 }
 
@@ -110,33 +115,195 @@ pub fn bulk_result(ok: usize, failed: &[(String, String)], done: &str) -> Markup
     }
 }
 
-pub fn services_page(
-    units: &[(QuadletUnit, UnitStatus)],
-    stats: &Stats,
-    csrf: &str,
-    all_units: &[QuadletUnit],
-    groups: &ListContext,
-    health: Health,
-) -> Markup {
+/// How a machine's header row reads.
+pub enum HeaderState<'a> {
+    Live {
+        count: usize,
+    },
+    /// It didn't answer; its rows are what it last listed.
+    Stale {
+        count: usize,
+        ago: String,
+        reason: &'a str,
+    },
+    /// It didn't answer, and hasn't since the hub started.
+    Unreachable {
+        reason: &'a str,
+    },
+}
+
+pub struct MachineHeader<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    /// This hub's own machine.
+    pub local: bool,
+    pub state: HeaderState<'a>,
+}
+
+/// The row heading one machine's units on a page that lists several. Its
+/// Retry redraws the whole table (`retry` is the rows route).
+pub fn machine_row(h: &MachineHeader, colspan: usize, retry: &str) -> Markup {
+    let online = !matches!(
+        h.state,
+        HeaderState::Stale { .. } | HeaderState::Unreachable { .. }
+    );
+    let units = |n: usize| {
+        if n == 1 {
+            "1 service".to_string()
+        } else {
+            format!("{n} services")
+        }
+    };
+    html! {
+        tr.machine-row data-machine=(h.id) {
+            td colspan=(colspan) {
+                div.machine-head {
+                    span.machine-dot.is-online[online].is-offline[!online] aria-hidden="true" {}
+                    a.machine-head-name href={"/services?m=" (h.id)} { (h.name) }
+                    @if h.local { span.chip.chip-muted { "this hub" } }
+                    @match &h.state {
+                        HeaderState::Live { count } => span.muted { (units(*count)) },
+                        HeaderState::Stale { count, ago, reason } => {
+                            span.muted { (units(*count)) }
+                            span.machine-head-warn {
+                                "Offline: " (reason) ". Showing what it reported " (ago) "."
+                            }
+                        }
+                        HeaderState::Unreachable { reason } => {
+                            span.machine-head-warn { "Offline: " (reason) "." }
+                        }
+                    }
+                    @if !online {
+                        button.btn.btn-sm.btn-ghost type="button" hx-get=(retry)
+                            hx-target={"#" (super::list::ROWS_ID)} hx-swap="innerHTML" {
+                            (icon(Icon::Refresh)) span { "Retry" }
+                        }
+                    }
+                }
+            }
+        }
+        @if let HeaderState::Unreachable { .. } = h.state {
+            tr.machine-empty data-machine=(h.id) {
+                td colspan=(colspan) .empty {
+                    "Nothing to show yet: it hasn't answered since the hub started."
+                }
+            }
+        }
+    }
+}
+
+/// One choice in the scope switcher.
+pub struct ScopeChoice {
+    pub href: String,
+    pub label: String,
+    /// Online, offline, or not known yet; `None` for "All machines".
+    pub dot: Option<bool>,
+    pub current: bool,
+}
+
+fn scope_switch(choices: &[ScopeChoice]) -> Markup {
+    html! {
+        nav.scope-switch aria-label="Machines" {
+            @for c in choices {
+                a.chip href=(c.href) aria-current=[c.current.then_some("page")] {
+                    @if let Some(online) = c.dot {
+                        span.machine-dot.is-online[online].is-offline[!online] aria-hidden="true" {}
+                    }
+                    (c.label)
+                }
+            }
+        }
+    }
+}
+
+pub struct ServicesPage<'a> {
+    pub stats: &'a Stats,
+    pub csrf: &'a str,
+    /// The toolbar's context (this hub's groups, the layout).
+    pub context: &'a ListContext<'a>,
+    pub body: &'a TableBody<'a>,
+    pub counts_route: &'a str,
+    /// The scope switcher, when the hub has other machines.
+    pub scopes: Option<Vec<ScopeChoice>>,
+    /// Offer New container / pod: this hub's own machine is in scope (new
+    /// units are made here; placing them on other machines comes later).
+    pub creates: bool,
+    pub health: Health,
+}
+
+pub fn services_page(p: &ServicesPage) -> Markup {
     let create = html! {
-        a.btn.btn-sm.btn-primary href="/containers/new" { (icon(Icon::Plus)) span { "Container" } }
-        a.btn.btn-sm href="/pods/new" { (icon(Icon::Plus)) span { "Pod" } }
+        @if p.creates {
+            a.btn.btn-sm.btn-primary href="/containers/new" { (icon(Icon::Plus)) span { "Container" } }
+            a.btn.btn-sm href="/pods/new" { (icon(Icon::Plus)) span { "Pod" } }
+        }
     };
     let body = html! {
         (super::page_header("Services", html! {}))
-        div id="services-counts" hx-get="/services/counts"
-            hx-trigger="sse:units-changed, sse:any-status delay:300ms" hx-swap="innerHTML" {
-            (stats_bar(stats))
+        @if let Some(choices) = &p.scopes { (scope_switch(choices)) }
+        div id="services-counts" hx-get=(p.counts_route)
+            hx-trigger="sse:units-changed, sse:any-status delay:300ms, sse:machines-changed" hx-swap="innerHTML" {
+            (stats_bar(p.stats))
         }
-        (super::list::list_table(&SPEC, units, csrf, "/services/rows", all_units, groups, create))
-        (bulk_bar(csrf))
+        (super::list::list_table_with(&SPEC, p.csrf, p.context, create, p.body))
+        (bulk_bar(p.csrf))
     };
-    shell("Services", Some(NavItem::Services), Some(health), body)
+    shell("Services", Some(NavItem::Services), Some(p.health), body)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_machine_header_says_whether_its_rows_are_current() {
+        let live = machine_row(
+            &MachineHeader {
+                id: "pi",
+                name: "Pi",
+                local: false,
+                state: HeaderState::Live { count: 1 },
+            },
+            6,
+            "/services/rows",
+        )
+        .into_string();
+        assert!(live.contains("1 service"));
+        assert!(live.contains("machine-dot is-online"));
+        assert!(!live.contains("Retry"));
+
+        let stale = machine_row(
+            &MachineHeader {
+                id: "pi",
+                name: "Pi",
+                local: false,
+                state: HeaderState::Stale {
+                    count: 3,
+                    ago: "5m ago".into(),
+                    reason: "no answer within 4 seconds",
+                },
+            },
+            6,
+            "/services/rows",
+        )
+        .into_string();
+        assert!(stale.contains("3 services"));
+        assert!(stale.contains("Showing what it reported 5m ago"));
+        assert!(stale.contains(r#"hx-get="/services/rows""#));
+
+        let never = machine_row(
+            &MachineHeader {
+                id: "pi",
+                name: "Pi",
+                local: false,
+                state: HeaderState::Unreachable { reason: "refused" },
+            },
+            6,
+            "/services/rows",
+        )
+        .into_string();
+        assert!(never.contains("hasn't answered since the hub started"));
+    }
 
     #[test]
     fn bulk_result_counts_and_lists_failures() {

@@ -14,10 +14,11 @@ function csrfToken() {
 
 // The group a drop on `el` targets: a group header -> its path; any member
 // row -> that member's group; a bare root row -> "" (the quadlet-dir root).
-// null when `el` isn't part of a droppable row.
+// null when `el` isn't part of a droppable row -- including any row of
+// another machine (`data-remote`), whose groups aren't this hub's folders.
 function dropGroup(el) {
   const tr = el.closest?.("tr");
-  if (!tr) return null;
+  if (!tr || tr.dataset.remote != null) return null;
   if (tr.classList.contains("group-row")) return tr.dataset.group ?? null;
   if (tr.dataset.groupMember != null) return tr.dataset.groupMember;
   if (tr.dataset.moveUrl) return "";

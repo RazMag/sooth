@@ -30,6 +30,9 @@ pub enum DashboardEvent {
     ImageTagsChanged,
     /// The Activity feed (`crate::activity`) gained an entry.
     ActivityChanged,
+    /// A paired machine came online or dropped off, or the list of machines
+    /// changed (`crate::fleet`). Drives the sidebar's machine dots.
+    MachinesChanged,
 }
 
 pub type EventSender = tokio::sync::broadcast::Sender<DashboardEvent>;

@@ -69,6 +69,20 @@ fn log_output(unit: &QuadletUnit, lines: &[LogLine]) -> Markup {
     }
 }
 
+/// The lines with no live tail -- for a unit on another machine, whose
+/// journal isn't streamed to the hub yet.
+pub fn log_lines(lines: &[LogLine]) -> Markup {
+    let latest = lines.iter().rev().find_map(|l| l.invocation.as_deref());
+    html! {
+        div #log-output {
+            @if lines.is_empty() {
+                p.empty { "No log entries yet." }
+            }
+            @for row in rows(lines, latest) { (row) }
+        }
+    }
+}
+
 /// The lines plus a divider wherever the run changes. A line with no
 /// invocation ID stays with the run before it (it never starts a new one).
 fn rows(lines: &[LogLine], latest: Option<&str>) -> Vec<Markup> {
