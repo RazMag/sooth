@@ -22,6 +22,11 @@ All notable changes to sooth are documented here. The format follows
 
 ### Added
 
+- **Agent mode (v2 work in progress).** `sooth --agent` serves only this
+  machine's API (facts, units with status, start/stop/restart, log tails)
+  under `/api/v1`, behind a bearer token from `SOOTH_AGENT_TOKEN`, on
+  `SOOTH_AGENT_BIND_ADDR` (loopback by default). `sooth --agent-token`
+  prints a fresh token. The hub doesn't link to agents yet.
 - **Overview page.** The home page now says how many services are up,
   with tiles for running, failed, newer image tags and Git Sync, a card for
   this machine, and a "Needs you" list of problems with the action that

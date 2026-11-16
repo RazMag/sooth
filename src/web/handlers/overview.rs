@@ -68,14 +68,15 @@ async fn gather(state: &AppState) -> Result<Overview, AppError> {
             .count(),
     };
 
+    let facts = state.machine.facts().await?;
     Ok(Overview {
-        machine: MachineInfo::detect(),
+        machine: MachineInfo::from(&facts),
         stats: compute_stats(&units),
         failed,
         missing_secrets,
         newer_tags,
         sync,
-        health: state.health.get(),
+        health: facts.health,
         unhealthy,
     })
 }

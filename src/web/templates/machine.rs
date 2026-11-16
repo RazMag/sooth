@@ -135,7 +135,7 @@ mod tests {
         let page = machine_page(&MachinePage {
             machine: MachineInfo {
                 hostname: "nas01".into(),
-                arch: "x86_64",
+                arch: "x86_64".into(),
                 os: None,
             },
             quadlet_dir: "/q".into(),

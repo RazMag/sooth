@@ -13,9 +13,19 @@ use crate::health::Health;
 /// What the host says about itself, for the machine card.
 pub struct MachineInfo {
     pub hostname: String,
-    pub arch: &'static str,
+    pub arch: String,
     /// `/etc/os-release`'s `PRETTY_NAME`, when readable.
     pub os: Option<String>,
+}
+
+impl From<&crate::machine::Facts> for MachineInfo {
+    fn from(f: &crate::machine::Facts) -> Self {
+        Self {
+            hostname: f.hostname.clone(),
+            arch: f.arch.clone(),
+            os: f.os.clone(),
+        }
+    }
 }
 
 impl MachineInfo {
@@ -30,7 +40,7 @@ impl MachineInfo {
             .and_then(|s| pretty_name(&s));
         Self {
             hostname,
-            arch: std::env::consts::ARCH,
+            arch: std::env::consts::ARCH.to_string(),
             os,
         }
     }
@@ -389,7 +399,7 @@ mod tests {
         Overview {
             machine: MachineInfo {
                 hostname: "nas01".into(),
-                arch: "x86_64",
+                arch: "x86_64".into(),
                 os: Some("Fedora Linux 43".into()),
             },
             stats: Stats {

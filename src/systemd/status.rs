@@ -11,7 +11,7 @@ use super::client::ManagerProxy;
 const LOGIN_TARGET: &str = "default.target";
 
 /// A unit's live status as reported by systemd over D-Bus.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UnitStatus {
     pub load_state: String,
     pub active_state: String,

@@ -16,6 +16,7 @@ mod imageinfo;
 mod imagetags;
 mod journal;
 mod logging;
+mod machine;
 mod quadlet;
 mod registries;
 mod secrets;
@@ -49,8 +50,86 @@ fn main() -> anyhow::Result<()> {
         return git_askpass_cli();
     }
 
+    if std::env::args().nth(1).as_deref() == Some("--agent-token") {
+        let token: String = rand::random::<[u8; 32]>()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        println!("{token}");
+        return Ok(());
+    }
+
     let rt = tokio::runtime::Runtime::new()?;
+    if std::env::args().nth(1).as_deref() == Some("--agent") {
+        return rt.block_on(run_agent());
+    }
     rt.block_on(run())
+}
+
+/// A dev-only stand-in for linking machines, which doesn't exist yet: with
+/// `SOOTH_DEV_AGENT_URL` and `SOOTH_DEV_AGENT_TOKEN` set, the pages read
+/// units, status and logs (and run start/stop/restart) through that agent's
+/// API instead of this host. Everything else -- detail pages, edits, the live
+/// log follow -- still uses this host's quadlet directory, so the agent must
+/// serve the same one (`just dev-fleet` sets that up).
+fn dev_agent() -> anyhow::Result<Option<machine::Machine>> {
+    let Ok(url) = std::env::var("SOOTH_DEV_AGENT_URL") else {
+        return Ok(None);
+    };
+    let token = std::env::var("SOOTH_DEV_AGENT_TOKEN").unwrap_or_default();
+    let remote = machine::remote::RemoteMachine::new(&url, &token)
+        .map_err(|e| anyhow::anyhow!("SOOTH_DEV_AGENT_URL: {e}"))?;
+    tracing::warn!(%url, "dev: pages read units through the agent at this address");
+    Ok(Some(machine::Machine::Remote(remote)))
+}
+
+/// `sooth --agent`: serves this host's machine API (`machine::api`) for a
+/// hub to call, and nothing else -- no UI, no sessions, no background tasks.
+/// Everything it answers is read fresh from disk and systemd per request.
+async fn run_agent() -> anyhow::Result<()> {
+    let config_path = std::env::var_os("SOOTH_CONFIG")
+        .map(Into::into)
+        .unwrap_or_else(config::default_config_path);
+    let config = Config::load(Some(config_path))?;
+    logging::init(config.log_filter.as_deref());
+    config.validate_agent()?;
+
+    let quadlet_dir = config.resolved_quadlet_dir()?;
+    quadlet::discovery::ensure_dir(&quadlet_dir)?;
+    info!(path = %quadlet_dir.display(), "using quadlet directory");
+    let systemd_client = systemd::Client::connect().await?;
+    let health = health::HealthCell::new(health::Health::check());
+
+    let machine = machine::Machine::Local(machine::local::LocalMachine::new(
+        Arc::new(quadlet_dir),
+        Arc::new(systemd_client),
+        health,
+    ));
+    let app = machine::api::router(machine::api::ApiState {
+        machine,
+        token: Arc::from(config.agent_token.trim()),
+    });
+
+    let addr = config.agent_bind_addr;
+    if !addr.ip().is_loopback() {
+        tracing::warn!(
+            %addr,
+            "the agent API is plain HTTP for now -- serve it only on a trusted network"
+        );
+    }
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!(%addr, "sooth agent listening");
+
+    let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal(
+            shutdown_tx,
+            Arc::new(Notify::new()),
+            Arc::new(AtomicBool::new(false)),
+        ))
+        .await?;
+    info!("agent shut down cleanly");
+    Ok(())
 }
 
 /// Prompts for a password on stderr (not echoed) and prints an argon2 hash
@@ -203,10 +282,20 @@ async fn run() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let activity_log = activity::ActivityLog::beside_config(&config_path);
+    let quadlet_dir = Arc::new(quadlet_dir);
+    let systemd_client = Arc::new(systemd_client);
+    let machine = match dev_agent()? {
+        Some(remote) => remote,
+        None => machine::Machine::Local(machine::local::LocalMachine::new(
+            quadlet_dir.clone(),
+            systemd_client.clone(),
+            health.clone(),
+        )),
+    };
     let state = AppState {
         config: Arc::new(config.clone()),
-        quadlet_dir: Arc::new(quadlet_dir),
-        systemd: Arc::new(systemd_client),
+        quadlet_dir,
+        systemd: systemd_client,
         health,
         config_path: Arc::new(config_path),
         events: events_tx,
@@ -216,6 +305,7 @@ async fn run() -> anyhow::Result<()> {
         self_update: self_update.clone(),
         image_tags: image_tags.clone(),
         activity: activity_log,
+        machine,
     };
     let activity_task = activity::spawn(state.clone());
 

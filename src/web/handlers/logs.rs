@@ -14,17 +14,25 @@ use crate::journal;
 use crate::quadlet::discovery;
 use crate::web::templates;
 
+/// The last 200 lines a logs view opens with; an unreadable journal just
+/// opens empty, the live tail still fills in.
+async fn initial_tail(state: &AppState, file_name: &str) -> Vec<journal::LogLine> {
+    state
+        .machine
+        .logs(file_name, 200)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to read initial journal tail");
+            Vec::new()
+        })
+}
+
 pub async fn logs_page(
     State(state): State<AppState>,
     Path(file_name): Path<String>,
 ) -> Result<impl IntoResponse, PageError> {
     let unit = discovery::load_by_name(&state.quadlet_dir, &file_name)?;
-    let initial = journal::tail_recent(&unit.service_name(), 200)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to read initial journal tail");
-            Vec::new()
-        });
+    let initial = initial_tail(&state, &file_name).await;
     Ok(templates::logs::logs_page(
         &unit,
         &initial,
@@ -38,12 +46,7 @@ pub async fn logs_panel(
     Path(file_name): Path<String>,
 ) -> Result<impl IntoResponse, crate::error::FragmentError> {
     let unit = discovery::load_by_name(&state.quadlet_dir, &file_name)?;
-    let initial = journal::tail_recent(&unit.service_name(), 200)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "failed to read initial journal tail");
-            Vec::new()
-        });
+    let initial = initial_tail(&state, &file_name).await;
     Ok(templates::logs::logs_panel(&unit, &initial))
 }
 

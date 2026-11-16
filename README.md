@@ -296,6 +296,8 @@ secrets in an `EnvironmentFile=`.
 | `SOOTH_COOKIE_SECURE` | `false` | Require HTTPS for the session cookie. Set `true` when reachable off-box, behind a TLS-terminating reverse proxy. |
 | `SOOTH_LOG_FILTER` | `sooth=info,tower_http=info,zbus=warn` | A `tracing-subscriber` `EnvFilter` string; `RUST_LOG` also works. |
 | `SOOTH_SESSION_IDLE_TIMEOUT_SECS` | `43200` (12h) | Session idle expiry. |
+| `SOOTH_AGENT_TOKEN` | *(empty)* | Agent mode only: the bearer token the machine API requires (16+ characters; `sooth --agent-token` prints one). |
+| `SOOTH_AGENT_BIND_ADDR` | `127.0.0.1:8421` | Agent mode only: where the machine API listens. |
 
 All of these are also editable from the in-app Settings page, which writes
 back to the resolved TOML file; changes there take effect on the next
@@ -306,6 +308,20 @@ layer would override the saved value on the next start anyway. A **Restart**
 button on the same page winds the server down and re-execs the binary in
 place (same argv and environment) so those saved changes take effect without
 shell access — it doesn't rely on a systemd `Restart=` or a known unit name.
+
+### Agent mode (v2 work in progress)
+
+`sooth --agent` serves only this machine's API, for a hub to manage it: no
+web UI and no password, just JSON under `/api/v1` behind
+`SOOTH_AGENT_TOKEN`. It answers with the machine's facts, its units with
+their live status, start/stop/restart, and log tails. The API is plain HTTP
+for now, so it listens on loopback by default; pairing over HTTPS or SSH
+comes with linking machines to a hub.
+
+To try it with a dashboard, `just dev-fleet` runs both against one scratch
+directory: the agent on port 8421, and a dashboard on 8420 that reads its
+lists, status and logs (and runs start/stop/restart) through the agent. The
+agent's requests show in the output, prefixed `[agent]`.
 
 ### Run as a systemd user service
 
@@ -360,6 +376,7 @@ section, and `cargo`/`npm`/`scripts/run-dev.sh` still work directly with no
 | `just frontend` | `npm ci && npm run build` |
 | `just watch-frontend` | `npm run watch` |
 | `just dev [args...]` | `scripts/run-dev.sh [args...]` (args are forwarded) |
+| `just dev-fleet [args...]` | `scripts/run-dev.sh --with-agent [args...]`: also runs `sooth --agent` on the next port and has the dashboard read units through it |
 | `just ci` | reproduces `.github/workflows/ci.yml` locally, end to end |
 
 `just dev` forwards arguments as-is, e.g. `just dev --port 8123

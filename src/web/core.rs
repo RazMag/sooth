@@ -15,6 +15,7 @@ use crate::config::AppState;
 use crate::error::{AppError, FragmentError};
 use crate::events::DashboardEvent;
 use crate::imageinfo;
+use crate::machine::Action;
 use crate::quadlet::autoupdate::{self, AutoUpdateMode};
 use crate::quadlet::ports::{self, ExposedPort, MemberPorts, SplitPorts};
 use crate::quadlet::refs::{self, MissingRefs};
@@ -76,17 +77,7 @@ pub async fn load_units_and_siblings(
     state: &AppState,
     kinds: &[UnitKind],
 ) -> Result<(Vec<(QuadletUnit, UnitStatus)>, Vec<QuadletUnit>), AppError> {
-    let all = discovery::load_all(&state.quadlet_dir)?;
-    let mut out = Vec::new();
-    for unit in all.iter().filter(|u| kinds.contains(&u.kind)) {
-        let status = if unit.is_template() {
-            UnitStatus::not_found()
-        } else {
-            state.systemd.status(&unit.service_name()).await?
-        };
-        out.push((unit.clone(), status));
-    }
-    Ok((out, all))
+    state.machine.units(kinds).await
 }
 
 /// The names that exist in podman's secret store and in the user manager's
@@ -618,11 +609,11 @@ pub async fn execute_action(
     let is_autostart = matches!(action, "enable" | "disable");
 
     let span = tracing::info_span!("unit_action", unit = %service, action);
-    async {
+    let acted = async {
+        if let Some(a) = Action::parse(action) {
+            return Ok(Some(state.machine.act(file_name, a).await?));
+        }
         match action {
-            "start" => state.systemd.start(&service).await?,
-            "stop" => state.systemd.stop(&service).await?,
-            "restart" => state.systemd.restart(&service).await?,
             // Podman's generated `.service` units live under a systemd
             // generator dir, which `EnableUnitFiles` refuses outright -- so
             // "enable"/"disable" is a patch of the quadlet's `[Install]`
@@ -631,7 +622,7 @@ pub async fn execute_action(
             "disable" => set_autostart(state, &unit, false).await?,
             _ => unreachable!("action is one of the fixed route names in handlers/unit_ops.rs"),
         }
-        Ok::<(), FragmentError>(())
+        Ok::<_, FragmentError>(None)
     }
     .instrument(span)
     .await?;
@@ -643,7 +634,10 @@ pub async fn execute_action(
         let _ = state.events.send(DashboardEvent::UnitsChanged);
     }
 
-    let status = state.systemd.status(&service).await?;
+    let status = match acted {
+        Some(status) => status,
+        None => state.machine.status(file_name).await?,
+    };
     let _ = state.events.send(DashboardEvent::Status {
         service: service.clone(),
         status: status.clone(),

@@ -2206,6 +2206,7 @@ dependencies = [
  "maud",
  "notify",
  "rand 0.10.2",
+ "reqwest",
  "rpassword",
  "rust-embed",
  "self_update",
