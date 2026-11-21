@@ -12,6 +12,8 @@ use crate::machine::api::Hello;
 pub struct Row {
     pub entry: MachineEntry,
     pub reach: Reach,
+    /// `HTTPS` or `SSH`.
+    pub via: &'static str,
 }
 
 pub struct MachinesPage<'a> {
@@ -23,6 +25,9 @@ pub struct MachinesPage<'a> {
     pub address: &'a str,
     pub notice: Option<Markup>,
     pub error: Option<&'a str>,
+    /// This hub's SSH public key, for machines reached over SSH; `None`
+    /// when it couldn't be made (no `ssh-keygen` here).
+    pub ssh_key: Option<String>,
     pub health: Health,
 }
 
@@ -56,14 +61,37 @@ pub fn machines_page(p: MachinesPage<'_>) -> Markup {
             (csrf_input(p.csrf))
             div.field {
                 label for="machine-address" { "Address" }
-                input.input #machine-address type="url" name="address" value=(p.address)
-                    placeholder="https://192.168.1.20:8421" required
+                input.input #machine-address type="text" name="address" value=(p.address)
+                    placeholder="https://192.168.1.20:8421 or ssh://pi@192.168.1.20" required
                     autocapitalize="off" spellcheck="false";
                 p.field-hint {
-                    "Where this hub reaches the machine's agent. The agent listens on "
-                    code { "127.0.0.1:8421" } " unless " code { "SOOTH_AGENT_BIND_ADDR" }
-                    " says otherwise."
+                    "Where this hub reaches the machine's agent: its " code { "https://" }
+                    " address when the agent listens where this hub can reach it (set "
+                    code { "SOOTH_AGENT_BIND_ADDR" } " on that machine, e.g. "
+                    code { "0.0.0.0:8421" } "), or " code { "ssh://user@host" }
+                    " to go through SSH to an agent left on its default "
+                    code { "127.0.0.1:8421" } "."
                 }
+            }
+            details.field.ssh-setup open[p.address.starts_with("ssh://")] {
+                summary { "Adding over SSH" }
+                @match &p.ssh_key {
+                    Some(key) => {
+                        p.field-hint {
+                            "Add this hub's key to that user's " code { "~/.ssh/authorized_keys" }
+                            " on the machine. The hub keeps an SSH tunnel open to the agent and "
+                            "talks to it through that, with the same pinned keys as a direct link."
+                        }
+                        pre.ssh-key { code { (key) } }
+                    }
+                    None => p.banner.banner-warn {
+                        "This hub couldn't make an SSH key: install OpenSSH (" code { "ssh" }
+                        " and " code { "ssh-keygen" } ") here to add machines over SSH."
+                    },
+                }
+                label for="machine-agent-port" { "Agent port on that machine" }
+                input.input.input-sm #machine-agent-port type="text" name="agent_port"
+                    inputmode="numeric" placeholder="8421";
             }
             div.field {
                 label for="machine-code" { "Pairing code" }
@@ -106,7 +134,12 @@ fn machine_row(row: &Row, csrf: &str) -> Markup {
                     }
                 }
             }
-            td { code { (e.address) } }
+            td {
+                code { (e.address) }
+                @if row.via == "SSH" {
+                    " " span.chip.chip-muted title="Through an SSH tunnel" { "SSH" }
+                }
+            }
             td.nowrap { (e.permission.label()) }
             td.registry-row-actions {
                 details.inline-rename {
@@ -188,6 +221,8 @@ fn monogram(name: &str) -> String {
 pub struct ConfirmPage<'a> {
     pub csrf: &'a str,
     pub address: &'a str,
+    /// The agent's port behind an SSH address, if one was given.
+    pub agent_port: Option<u16>,
     pub code: &'a str,
     pub fingerprint: String,
     pub hello: &'a Hello,
@@ -218,6 +253,9 @@ pub fn confirm_page(p: ConfirmPage<'_>) -> Markup {
         form.card method="post" action="/machines/pair" autocomplete="off" {
             (csrf_input(p.csrf))
             input type="hidden" name="address" value=(p.address);
+            @if let Some(port) = p.agent_port {
+                input type="hidden" name="agent_port" value=(port);
+            }
             input type="hidden" name="code" value=(p.code);
             input type="hidden" name="fingerprint" value=(p.fingerprint);
             div.field {
@@ -245,6 +283,7 @@ mod tests {
             id: "pi".into(),
             name: "Pi".into(),
             address: "https://10.0.0.5:8421".into(),
+            agent_port: None,
             fingerprint: Identity::generate().unwrap().fingerprint,
             permission: Permission::ReadOnly,
             added_at: 0,
@@ -258,6 +297,7 @@ mod tests {
             reach: Reach::Offline {
                 reason: "couldn't reach it".into(),
             },
+            via: "SSH",
         }];
         let html = machines_page(MachinesPage {
             csrf: "tok",
@@ -267,9 +307,13 @@ mod tests {
             address: "",
             notice: None,
             error: None,
+            ssh_key: Some("ssh-ed25519 AAAATEST sooth-hub@hub01".into()),
             health: Health::default(),
         })
         .into_string();
+        assert!(html.contains("ssh-ed25519 AAAATEST"));
+        assert!(html.contains(r#"name="agent_port""#));
+        assert!(html.contains(">SSH<"));
         assert!(html.contains(r#"id="machine-pi""#));
         assert!(html.contains("Offline"));
         assert!(html.contains("Read-only"));
@@ -310,6 +354,7 @@ mod tests {
         let html = confirm_page(ConfirmPage {
             csrf: "tok",
             address: "https://10.0.0.5:8421",
+            agent_port: Some(8422),
             code: "AAAA-BBBB-CCCC",
             fingerprint: "ab12 cd34".into(),
             hello: &hello,
@@ -320,5 +365,6 @@ mod tests {
         .into_string();
         assert!(html.contains(r#"name="fingerprint" value="ab12 cd34""#));
         assert!(html.contains(r#"name="code" value="AAAA-BBBB-CCCC""#));
+        assert!(html.contains(r#"name="agent_port" value="8422""#));
     }
 }

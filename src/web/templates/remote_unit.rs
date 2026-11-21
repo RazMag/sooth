@@ -240,6 +240,7 @@ mod tests {
             id: "pi".into(),
             name: "Pi".into(),
             address: "https://10.0.0.5:8421".into(),
+            agent_port: None,
             fingerprint: Identity::generate().unwrap().fingerprint,
             permission,
             added_at: 0,

@@ -51,7 +51,7 @@ watch-frontend:
 dev *ARGS:
     scripts/run-dev.sh {{ARGS}}
 
-# Like `dev`, plus a `sooth --agent` on the next port that the dashboard reads units through; e.g. `just dev-fleet --port 8123`.
+# Like `dev`, plus a `sooth --agent` on the next port, paired with the dashboard; e.g. `just dev-fleet --port 8123`. Add `--ssh` to reach it through a throwaway sshd (an SSH link).
 dev-fleet *ARGS:
     scripts/run-dev.sh --with-agent {{ARGS}}
 

@@ -11,8 +11,10 @@
 //! - [`listener::TlsListener`]: the agent's TLS listener, which hands each
 //!   connection's client fingerprint to the router.
 //! - [`trust`]: the agent's pinned hubs and its one-time pairing code.
+//! - [`ssh`]: SSH tunnels to agents the hub can only reach over SSH.
 
 pub mod listener;
+pub mod ssh;
 pub mod trust;
 pub mod verify;
 
