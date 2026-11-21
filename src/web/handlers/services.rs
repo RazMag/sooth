@@ -29,7 +29,7 @@ use crate::web::templates::list::{
 };
 use crate::web::templates::overview::MachineInfo;
 use crate::web::templates::services::{
-    HeaderState, MachineHeader, ScopeChoice, ServicesPage, Stats, machine_row,
+    HeaderState, MachineHeader, ServicesPage, Stats, machine_row,
 };
 use crate::web::templates::{self};
 
@@ -219,39 +219,6 @@ fn refresh_trigger(scope: &Scope, fleet: &crate::fleet::Fleet) -> &'static str {
     }
 }
 
-/// The scope switcher's choices: every machine, this hub, each paired one.
-fn scope_choices(state: &AppState, scope: &Scope) -> Option<Vec<ScopeChoice>> {
-    let machines = state.fleet.machines();
-    if machines.is_empty() {
-        return None;
-    }
-    let current = scope.param();
-    let mut out = vec![
-        ScopeChoice {
-            href: "/services".into(),
-            label: "All machines".into(),
-            dot: None,
-            current: current.is_none(),
-        },
-        ScopeChoice {
-            href: format!("/services?m={LOCAL}"),
-            label: MachineInfo::detect().hostname,
-            dot: Some(true),
-            current: current == Some(LOCAL),
-        },
-    ];
-    for m in machines {
-        let online = state.fleet.seen(&m.entry.id).map(|s| s.reach.is_online());
-        out.push(ScopeChoice {
-            current: current == Some(m.entry.id.as_str()),
-            href: format!("/services?m={}", m.entry.id),
-            label: m.entry.name,
-            dot: online,
-        });
-    }
-    Some(out)
-}
-
 pub async fn page(
     State(state): State<AppState>,
     session: Session,
@@ -290,7 +257,7 @@ pub async fn page(
             refresh: refresh_trigger(&scope, &state.fleet),
         },
         counts_route: &counts_route,
-        scopes: scope_choices(&state, &scope),
+        scopes: scope.choices(&state.fleet, "/services"),
         creates: scope.includes_local(),
         health: state.health.get(),
     }))

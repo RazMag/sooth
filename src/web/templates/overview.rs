@@ -1,10 +1,10 @@
-//! The Overview home page: one sentence on how things are, four tiles, this
-//! machine's card, and "Needs you" -- the problems worth acting on, each
-//! with the action that fixes it. In Phase 1 there is one machine; the hub
-//! will list every machine here once the fleet layer exists.
+//! The Overview home page: one sentence on how things are, four tiles, a
+//! card per machine in scope, and "Needs you" -- the problems worth acting
+//! on, each with the action that fixes it.
 
 use maud::{Markup, html};
 
+use super::scope::{ScopeChoice, scope_switch};
 use super::services::Stats;
 use super::{Icon, NavItem, icon, rough_span, shell};
 use crate::activity::{Entry, Kind};
@@ -44,16 +44,15 @@ impl MachineInfo {
             os,
         }
     }
+}
 
-    /// Two letters for the machine's avatar.
-    fn initials(&self) -> String {
-        self.hostname
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric())
-            .take(2)
-            .collect::<String>()
-            .to_uppercase()
-    }
+/// Two letters for a machine's avatar.
+fn initials(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(2)
+        .collect::<String>()
+        .to_uppercase()
 }
 
 fn pretty_name(os_release: &str) -> Option<String> {
@@ -68,8 +67,64 @@ fn pretty_name(os_release: &str) -> Option<String> {
 pub struct FailedUnit {
     pub name: String,
     pub href: String,
+    /// Where its logs are.
+    pub logs: String,
     /// "exit 1 · 2h ago", as the status cell shows it.
     pub detail: String,
+    /// The machine it's on, when that isn't this hub.
+    pub machine: Option<String>,
+}
+
+impl FailedUnit {
+    /// "radarr.container", or "radarr.container on Pi".
+    fn label(&self) -> String {
+        match &self.machine {
+            Some(m) => format!("{} on {m}", self.name),
+            None => self.name.clone(),
+        }
+    }
+}
+
+/// How a machine answered the page.
+pub enum Answer {
+    Live,
+    /// It didn't; its numbers are what it last reported.
+    Stale {
+        ago: String,
+        reason: String,
+    },
+    /// It didn't, and hasn't since the hub started.
+    Unreachable {
+        reason: String,
+    },
+}
+
+/// One machine's card.
+pub struct MachineCard {
+    pub name: String,
+    pub href: String,
+    /// This hub's own machine.
+    pub local: bool,
+    /// Its architecture and OS, when it has said.
+    pub info: Option<MachineInfo>,
+    /// Its services, when it has ever listed them.
+    pub stats: Option<Stats>,
+    pub health: Option<Health>,
+    pub answer: Answer,
+}
+
+impl MachineCard {
+    fn answering(&self) -> bool {
+        matches!(self.answer, Answer::Live)
+    }
+
+    fn linger_off(&self) -> bool {
+        self.health.is_some_and(|h| h.linger_enabled == Some(false))
+    }
+
+    fn no_generator(&self) -> bool {
+        self.health.is_some_and(|h| !h.podman_generator_found)
+    }
 }
 
 /// A secret some units reference that isn't set.
@@ -87,16 +142,39 @@ pub struct SyncSummary {
 }
 
 pub struct Overview {
-    pub machine: MachineInfo,
+    /// A card per machine in scope, this hub's first.
+    pub machines: Vec<MachineCard>,
+    /// Every machine's services together.
     pub stats: Stats,
     pub failed: Vec<FailedUnit>,
     pub missing_secrets: Vec<MissingSecret>,
-    /// Containers pinned to an image with newer tags.
-    pub newer_tags: Vec<String>,
+    /// Containers pinned to an image with newer tags; `None` when this
+    /// hub's own machine isn't in scope (tags are only checked here so far).
+    pub newer_tags: Option<Vec<String>>,
     pub sync: SyncSummary,
-    pub health: Health,
     /// Running containers whose podman health check is failing.
     pub unhealthy: Vec<FailedUnit>,
+    /// The Services page, in the same scope.
+    pub services_href: String,
+}
+
+impl Overview {
+    fn newer_tags(&self) -> &[String] {
+        self.newer_tags.as_deref().unwrap_or_default()
+    }
+
+    fn silent(&self) -> impl Iterator<Item = &MachineCard> {
+        self.machines.iter().filter(|m| !m.answering())
+    }
+
+    /// " on Pi", when there's more than one machine to tell apart.
+    fn on(&self, card: &MachineCard) -> String {
+        if self.machines.len() > 1 {
+            format!(" on {}", card.name)
+        } else {
+            String::new()
+        }
+    }
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
@@ -116,48 +194,78 @@ fn headline(stats: &Stats) -> String {
 /// The sentence under the headline: each problem in a few words, or a
 /// reassurance when there are none.
 fn summary(o: &Overview) -> String {
-    let mut parts: Vec<String> = Vec::new();
+    // Each part, and whether it starts with a name (left as it is) rather
+    // than a word to capitalise.
+    let mut parts: Vec<(String, bool)> = Vec::new();
     match o.failed.as_slice() {
         [] => {}
-        [one] => parts.push(format!("{} failed", one.name)),
-        many => parts.push(format!("{} failed", plural(many.len(), "unit", "units"))),
+        [one] => parts.push((format!("{} failed", one.label()), true)),
+        many => parts.push((
+            format!("{} failed", plural(many.len(), "unit", "units")),
+            false,
+        )),
     }
     match o.unhealthy.as_slice() {
         [] => {}
-        [one] => parts.push(format!("{} is unhealthy", one.name)),
-        many => parts.push(format!(
-            "{} are unhealthy",
-            plural(many.len(), "container", "containers")
+        [one] => parts.push((format!("{} is unhealthy", one.label()), true)),
+        many => parts.push((
+            format!(
+                "{} are unhealthy",
+                plural(many.len(), "container", "containers")
+            ),
+            false,
+        )),
+    }
+    let silent: Vec<&MachineCard> = o.silent().collect();
+    match silent.as_slice() {
+        [] => {}
+        [one] => parts.push((format!("{} isn't answering", one.name), true)),
+        many => parts.push((
+            format!(
+                "{} aren't answering",
+                plural(many.len(), "machine", "machines")
+            ),
+            false,
         )),
     }
     match o.missing_secrets.len() {
         0 => {}
-        1 => parts.push(format!("secret {} isn't set", o.missing_secrets[0].name)),
-        n => parts.push(format!("{n} secrets aren't set")),
+        1 => parts.push((
+            format!("secret {} isn't set", o.missing_secrets[0].name),
+            false,
+        )),
+        n => parts.push((format!("{n} secrets aren't set"), false)),
     }
-    if o.health.linger_enabled == Some(false) {
-        parts.push("linger is off".to_string());
+    for m in o.machines.iter().filter(|m| m.linger_off()) {
+        parts.push((format!("linger is off{}", o.on(m)), false));
     }
     if o.sync.attention > 0 {
-        parts.push(format!(
-            "{} attention",
-            plural(
-                o.sync.attention,
-                "Git Sync repo needs",
-                "Git Sync repos need"
-            )
+        parts.push((
+            format!(
+                "{} attention",
+                plural(
+                    o.sync.attention,
+                    "Git Sync repo needs",
+                    "Git Sync repos need"
+                )
+            ),
+            false,
         ));
     }
-    let Some(last) = parts.pop() else {
-        return format!("Nothing needs you on {}.", o.machine.hostname);
+    let Some(starts_with_name) = parts.first().map(|(_, name)| *name) else {
+        return match o.machines.as_slice() {
+            [one] => format!("Nothing needs you on {}.", one.name),
+            _ => "Nothing needs you on any machine.".to_string(),
+        };
     };
+    let mut parts: Vec<String> = parts.into_iter().map(|(p, _)| p).collect();
+    let last = parts.pop().unwrap_or_default();
     let mut sentence = if parts.is_empty() {
         last
     } else {
         format!("{} and {last}", parts.join(", "))
     };
-    // Sentence case, without touching a unit name that starts it.
-    let starts_with_name = o.failed.len() == 1 || (o.failed.is_empty() && o.unhealthy.len() == 1);
+    // Sentence case, without touching a name that starts it.
     if !starts_with_name && let Some(first) = sentence.get(..1) {
         sentence = first.to_uppercase() + &sentence[1..];
     }
@@ -175,7 +283,7 @@ fn tile(label: &str, value: String, note: Markup, href: &str, alert: bool) -> Ma
 }
 
 fn tiles(o: &Overview) -> Markup {
-    let services = NavItem::Services.href();
+    let services = o.services_href.as_str();
     html! {
         div.stat-grid.overview-tiles {
             (tile("Running", o.stats.running.to_string(),
@@ -183,13 +291,18 @@ fn tiles(o: &Overview) -> Markup {
             (tile("Failed", o.stats.failed.to_string(), html! {
                 @match o.failed.as_slice() {
                     [] => "none",
-                    [one] => (one.name),
+                    [one] => (one.label()),
                     many => (plural(many.len(), "unit", "units")),
                 }
             }, services, o.stats.failed > 0))
-            (tile("Newer image tags", o.newer_tags.len().to_string(),
-                html! { (if o.newer_tags.len() == 1 { "pinned image" } else { "pinned images" }) },
-                NavItem::ImageTags.href(), false))
+            @match &o.newer_tags {
+                Some(tags) => (tile("Newer image tags", tags.len().to_string(),
+                    html! { (if tags.len() == 1 { "pinned image" } else { "pinned images" }) },
+                    NavItem::ImageTags.href(), false)),
+                None => (tile("Newer image tags", "–".to_string(),
+                    html! { "checked on this hub only" },
+                    NavItem::ImageTags.href(), false)),
+            }
             (tile("Git Sync", o.sync.repos.to_string(), html! {
                 (if o.sync.repos == 1 { "repo" } else { "repos" })
                 @if o.sync.attention > 0 { " · " (o.sync.attention) " " (if o.sync.attention == 1 { "needs" } else { "need" }) " attention" }
@@ -198,30 +311,49 @@ fn tiles(o: &Overview) -> Markup {
     }
 }
 
-fn machine_card(o: &Overview) -> Markup {
-    let m = &o.machine;
-    let stopped = o.stats.total - o.stats.running - o.stats.failed;
+fn machine_card(card: &MachineCard) -> Markup {
+    let answering = card.answering();
     html! {
-        section.card.machine-card {
+        section.card.machine-card.is-silent[!answering] {
             div.machine-head {
-                span.machine-avatar aria-hidden="true" { (m.initials()) }
+                span.machine-avatar aria-hidden="true" { (initials(&card.name)) }
                 div {
-                    a.machine-name href=(NavItem::Machine.href()) { (m.hostname) }
+                    a.machine-name href=(card.href) { (card.name) }
+                    @if !card.local {
+                        " " span.machine-dot.is-online[answering].is-offline[!answering] aria-hidden="true" {}
+                    }
                     div.machine-meta {
-                        (m.arch)
-                        @if let Some(os) = &m.os { " · " (os) }
+                        @match &card.info {
+                            Some(info) => {
+                                (info.arch)
+                                @if let Some(os) = &info.os { " · " (os) }
+                            }
+                            None => span.muted { "Not heard from yet" },
+                        }
                     }
                 }
             }
-            div.machine-counts {
-                span.count-ok { (o.stats.running) " up" }
-                @if o.stats.failed > 0 { " · " span.count-failed { (o.stats.failed) " failed" } }
-                @if stopped > 0 { " · " (stopped) " off" }
+            @if let Some(stats) = &card.stats {
+                @let stopped = stats.total - stats.running - stats.failed;
+                div.machine-counts {
+                    span.count-ok { (stats.running) " up" }
+                    @if stats.failed > 0 { " · " span.count-failed { (stats.failed) " failed" } }
+                    @if stopped > 0 { " · " (stopped) " off" }
+                }
             }
-            @if o.health.linger_enabled == Some(false) {
+            @match &card.answer {
+                Answer::Live => {},
+                Answer::Stale { ago, reason } => div.machine-warn {
+                    "Not answering (" (reason) "). Numbers from " (ago) "."
+                },
+                Answer::Unreachable { reason } => div.machine-warn {
+                    "Not answering (" (reason) ")."
+                },
+            }
+            @if card.linger_off() {
                 div.machine-warn {
                     "Linger is off: units stop at logout. "
-                    a href=(NavItem::Settings.href()) { "Fix" }
+                    @if card.local { a href=(NavItem::Settings.href()) { "Fix" } }
                 }
             }
         }
@@ -241,12 +373,14 @@ fn need(title: Markup, note: Markup, actions: Markup) -> Markup {
 }
 
 fn needs_you(o: &Overview) -> Markup {
+    let newer_tags = o.newer_tags();
     let any = !o.failed.is_empty()
         || !o.unhealthy.is_empty()
+        || o.silent().next().is_some()
         || !o.missing_secrets.is_empty()
-        || !o.newer_tags.is_empty()
+        || !newer_tags.is_empty()
         || o.sync.attention > 0
-        || !o.health.podman_generator_found;
+        || o.machines.iter().any(MachineCard::no_generator);
     html! {
         section.card.needs-you {
             h2.card-title { "Needs you" }
@@ -256,10 +390,13 @@ fn needs_you(o: &Overview) -> Markup {
                 ul.need-list {
                     @for f in &o.failed {
                         (need(
-                            html! { strong { (f.name) } " failed" },
+                            html! {
+                                strong { (f.name) } " failed"
+                                @if let Some(m) = &f.machine { " on " (m) }
+                            },
                             html! { (f.detail) },
                             html! {
-                                a.btn.btn-sm href={(f.href) "/logs"} { (icon(Icon::Logs)) span { "Logs" } }
+                                a.btn.btn-sm href=(f.logs) { (icon(Icon::Logs)) span { "Logs" } }
                                 a.btn.btn-sm href=(f.href) { "Open" }
                             },
                         ))
@@ -269,8 +406,21 @@ fn needs_you(o: &Overview) -> Markup {
                             html! { strong { (u.name) } " is unhealthy" },
                             html! { "Running, but its health check is failing" },
                             html! {
-                                a.btn.btn-sm href={(u.href) "#logs"} { (icon(Icon::Logs)) span { "Logs" } }
+                                a.btn.btn-sm href=(u.logs) { (icon(Icon::Logs)) span { "Logs" } }
                             },
+                        ))
+                    }
+                    @for m in o.silent() {
+                        (need(
+                            html! { strong { (m.name) } " isn't answering" },
+                            html! {
+                                @match &m.answer {
+                                    Answer::Stale { ago, reason } => { (reason) " · last answered " (ago) },
+                                    Answer::Unreachable { reason } => { (reason) },
+                                    Answer::Live => {},
+                                }
+                            },
+                            html! { a.btn.btn-sm href="/machines" { "Machines" } },
                         ))
                     }
                     @for s in &o.missing_secrets {
@@ -280,10 +430,10 @@ fn needs_you(o: &Overview) -> Markup {
                             html! { a.btn.btn-sm href=(NavItem::Secrets.href()) { "Set secret" } },
                         ))
                     }
-                    @if !o.newer_tags.is_empty() {
+                    @if !newer_tags.is_empty() {
                         (need(
-                            html! { (plural(o.newer_tags.len(), "pinned image has", "pinned images have")) " newer tags" },
-                            html! { (o.newer_tags.join(", ")) },
+                            html! { (plural(newer_tags.len(), "pinned image has", "pinned images have")) " newer tags" },
+                            html! { (newer_tags.join(", ")) },
                             html! { a.btn.btn-sm href=(NavItem::ImageTags.href()) { "Review tags" } },
                         ))
                     }
@@ -294,11 +444,15 @@ fn needs_you(o: &Overview) -> Markup {
                             html! { a.btn.btn-sm href=(NavItem::GitSync.href()) { "Open Git Sync" } },
                         ))
                     }
-                    @if !o.health.podman_generator_found {
+                    @for m in o.machines.iter().filter(|m| m.no_generator()) {
                         (need(
-                            html! { "Podman's quadlet generator wasn't found" },
+                            html! { "Podman's quadlet generator wasn't found" (o.on(m)) },
                             html! { "Units won't start until Podman is installed" },
-                            html! { a.btn.btn-sm href=(NavItem::Settings.href()) { "Open Settings" } },
+                            html! {
+                                @if m.local {
+                                    a.btn.btn-sm href=(NavItem::Settings.href()) { "Open Settings" }
+                                }
+                            },
                         ))
                     }
                 }
@@ -314,7 +468,9 @@ pub fn overview_body(o: &Overview) -> Markup {
         p.overview-summary { (summary(o)) }
         (tiles(o))
         div.overview-grid {
-            (machine_card(o))
+            div.machine-cards {
+                @for card in &o.machines { (machine_card(card)) }
+            }
             (needs_you(o))
         }
     }
@@ -368,25 +524,43 @@ fn activity_card(entries: &[Entry], now: u64) -> Markup {
     }
 }
 
-pub fn overview_page(o: &Overview, activity: &[Entry], now: u64) -> Markup {
+pub struct OverviewPage<'a> {
+    pub overview: &'a Overview,
+    pub activity: &'a [Entry],
+    /// Unix seconds.
+    pub now: u64,
+    /// The scope switcher, when the hub has other machines.
+    pub scopes: Option<Vec<ScopeChoice>>,
+    /// `/overview/body` in the page's scope.
+    pub body_route: &'a str,
+    /// What redraws the body.
+    pub refresh: &'a str,
+    /// Offer New unit: this hub's own machine is in scope.
+    pub creates: bool,
+    pub health: Health,
+}
+
+pub fn overview_page(p: &OverviewPage) -> Markup {
+    let o = p.overview;
     let body = html! {
         div.page-header.overview-header {
             h1 id="overview-headline" { (headline(&o.stats)) }
             div.actions {
-                a.btn.btn-sm.btn-primary href="/containers/new" { (icon(Icon::Plus)) span { "New unit" } }
+                @if p.creates {
+                    a.btn.btn-sm.btn-primary href="/containers/new" { (icon(Icon::Plus)) span { "New unit" } }
+                }
             }
         }
-        div id="overview-body" hx-get="/overview/body"
-            hx-trigger="sse:units-changed, sse:any-status delay:500ms, sse:image-tags-changed"
-            hx-swap="innerHTML" {
+        @if let Some(choices) = &p.scopes { (scope_switch(choices)) }
+        div id="overview-body" hx-get=(p.body_route) hx-trigger=(p.refresh) hx-swap="innerHTML" {
             (overview_body(o))
         }
-        (activity_card(activity, now))
+        (activity_card(p.activity, p.now))
     };
     shell(
         &headline(&o.stats),
         Some(NavItem::Overview),
-        Some(o.health),
+        Some(p.health),
         body,
     )
 }
@@ -395,13 +569,32 @@ pub fn overview_page(o: &Overview, activity: &[Entry], now: u64) -> Markup {
 mod tests {
     use super::*;
 
-    fn overview() -> Overview {
-        Overview {
-            machine: MachineInfo {
-                hostname: "nas01".into(),
+    fn card(name: &str, local: bool) -> MachineCard {
+        MachineCard {
+            name: name.into(),
+            href: "/machine".into(),
+            local,
+            info: Some(MachineInfo {
+                hostname: name.into(),
                 arch: "x86_64".into(),
                 os: Some("Fedora Linux 43".into()),
-            },
+            }),
+            stats: Some(Stats {
+                total: 14,
+                running: 12,
+                failed: 1,
+            }),
+            health: Some(Health {
+                podman_generator_found: true,
+                linger_enabled: Some(true),
+            }),
+            answer: Answer::Live,
+        }
+    }
+
+    fn overview() -> Overview {
+        Overview {
+            machines: vec![card("nas01", true)],
             stats: Stats {
                 total: 14,
                 running: 12,
@@ -410,16 +603,21 @@ mod tests {
             failed: vec![FailedUnit {
                 name: "radarr.container".into(),
                 href: "/containers/radarr.container".into(),
+                logs: "/containers/radarr.container/logs".into(),
                 detail: "exit 1 · 2h ago".into(),
+                machine: None,
             }],
             missing_secrets: vec![],
-            newer_tags: vec![],
+            newer_tags: Some(vec![]),
             sync: SyncSummary::default(),
             unhealthy: vec![],
-            health: Health {
-                podman_generator_found: true,
-                linger_enabled: Some(true),
-            },
+            services_href: "/services".into(),
+        }
+    }
+
+    fn set_linger(o: &mut Overview, on: bool) {
+        if let Some(h) = &mut o.machines[0].health {
+            h.linger_enabled = Some(on);
         }
     }
 
@@ -444,7 +642,7 @@ mod tests {
             name: "db-pass".into(),
             units: 2,
         });
-        o.health.linger_enabled = Some(false);
+        set_linger(&mut o, false);
         assert_eq!(
             summary(&o),
             "radarr.container failed, secret db-pass isn't set and linger is off."
@@ -453,14 +651,54 @@ mod tests {
         o.unhealthy.push(FailedUnit {
             name: "db.container".into(),
             href: String::new(),
+            logs: String::new(),
             detail: String::new(),
+            machine: None,
         });
         assert!(summary(&o).starts_with("db.container is unhealthy, secret"));
         o.unhealthy.clear();
         o.missing_secrets.clear();
         assert_eq!(summary(&o), "Linger is off.");
-        o.health.linger_enabled = Some(true);
+        set_linger(&mut o, true);
         assert_eq!(summary(&o), "Nothing needs you on nas01.");
+    }
+
+    #[test]
+    fn other_machines_are_named_in_the_summary_and_needs_you() {
+        let mut o = overview();
+        o.failed[0].machine = Some("Pi".into());
+        o.failed[0].logs = "/machines/pi/units/radarr.container#logs".into();
+        let mut pi = card("Pi", false);
+        pi.answer = Answer::Stale {
+            ago: "3m ago".into(),
+            reason: "no answer within 4 seconds".into(),
+        };
+        o.machines.push(pi);
+        assert_eq!(
+            summary(&o),
+            "radarr.container on Pi failed and Pi isn't answering."
+        );
+        let html = overview_body(&o).into_string();
+        assert!(html.contains("isn't answering"));
+        assert!(html.contains("last answered 3m ago"));
+        assert!(html.contains(r#"href="/machines/pi/units/radarr.container#logs""#));
+        assert!(html.contains("Numbers from 3m ago"));
+
+        o.failed.clear();
+        o.machines[1].answer = Answer::Live;
+        assert_eq!(summary(&o), "Nothing needs you on any machine.");
+        o.machines[1].health = Some(Health {
+            podman_generator_found: true,
+            linger_enabled: Some(false),
+        });
+        assert_eq!(summary(&o), "Linger is off on Pi.");
+    }
+
+    #[test]
+    fn newer_tags_say_when_they_werent_checked() {
+        let mut o = overview();
+        o.newer_tags = None;
+        assert!(tiles(&o).into_string().contains("checked on this hub only"));
     }
 
     #[test]

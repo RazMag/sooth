@@ -101,6 +101,23 @@ pub struct MachineEntry {
     pub added_at: u64,
 }
 
+impl MachineEntry {
+    /// The host its address names (no brackets around an IPv6 one) -- where
+    /// a browser would reach the services it publishes.
+    pub fn host(&self) -> Option<String> {
+        let host = if crate::link::ssh::is_ssh(&self.address) {
+            crate::link::ssh::SshTarget::parse(&self.address)?.host
+        } else {
+            reqwest::Url::parse(&self.address)
+                .ok()?
+                .host_str()?
+                .to_string()
+        };
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        (!host.is_empty()).then(|| host.to_string())
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct MachinesFile {
     #[serde(default, rename = "machine")]
@@ -647,6 +664,25 @@ fn no_answer() -> String {
 mod tests {
     use super::*;
     use crate::machine::remote::tests::{fake, spawn_agent};
+
+    #[test]
+    fn a_machines_host_comes_from_its_address() {
+        let entry = |address: &str| MachineEntry {
+            id: "pi".into(),
+            name: "Pi".into(),
+            address: address.into(),
+            agent_port: None,
+            fingerprint: Identity::generate().unwrap().fingerprint,
+            permission: Permission::Full,
+            added_at: 0,
+        };
+        let host = |a: &str| entry(a).host();
+        assert_eq!(host("https://10.0.0.5:8421").as_deref(), Some("10.0.0.5"));
+        assert_eq!(host("ssh://me@pi.lan:2222").as_deref(), Some("pi.lan"));
+        assert_eq!(host("me@pi.lan").as_deref(), Some("pi.lan"));
+        assert_eq!(host("ssh://me@[fd00::5]").as_deref(), Some("fd00::5"));
+        assert_eq!(host("https://[fd00::5]:8421").as_deref(), Some("fd00::5"));
+    }
 
     #[tokio::test]
     async fn a_machine_that_stops_answering_shows_its_last_units() {

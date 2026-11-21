@@ -340,17 +340,134 @@ pub fn conflicts_card(rows: &[PortRow]) -> Markup {
     }
 }
 
-pub fn ports_page(rows: &[PortRow], hosts: &[HostNet], csrf: &str, health: Health) -> Markup {
+/// One published port on another machine: what the table needs, already
+/// looked up.
+pub struct RemotePortRow {
+    pub mapping: PortMapping,
+    pub owner: String,
+    pub href: String,
+    pub status: UnitStatus,
+    /// Other units there whose host port overlaps this one.
+    pub conflicts: Vec<String>,
+}
+
+/// Another machine's share of the Ports page.
+pub struct RemotePorts {
+    pub id: String,
+    pub name: String,
+    /// Where a browser reaches what it publishes, for the port links.
+    pub host: Option<String>,
+    pub answering: bool,
+    /// Why the rows are old or missing, when it didn't answer.
+    pub note: Option<String>,
+    /// `None` when it has never listed its units.
+    pub rows: Option<Vec<RemotePortRow>>,
+}
+
+/// The heading over one machine's ports, on a page that shows several.
+fn machine_title(name: &str, answering: bool, this_hub: bool) -> Markup {
+    html! {
+        h2.ports-machine-title {
+            span.machine-dot.is-online[answering].is-offline[!answering] aria-hidden="true" {}
+            (name)
+            @if this_hub { span.chip.chip-muted { "this hub" } }
+        }
+    }
+}
+
+/// Every other machine's ports -- also `GET /ports/machines`, re-fetched
+/// while any is in scope since they don't push their changes yet.
+pub fn remote_ports(machines: &[RemotePorts]) -> Markup {
+    html! {
+        @for m in machines {
+            section.ports-machine data-machine=(m.id) {
+                (machine_title(&m.name, m.answering, false))
+                @if let Some(note) = &m.note { (banner(BannerKind::Warn, note)) }
+                @match &m.rows {
+                    None => {},
+                    Some(rows) if rows.is_empty() => p.empty { "No published ports declared." },
+                    Some(rows) => div.table-wrap {
+                        table.data-table {
+                            thead { tr {
+                                th { "Host Port" } th { "Protocol" } th { "Container Port" }
+                                th { "Container" } th { "Status" }
+                            } }
+                            tbody { @for row in rows { (remote_port_row(row, m.host.as_deref())) } }
+                        }
+                    },
+                }
+            }
+        }
+    }
+}
+
+fn remote_port_row(row: &RemotePortRow, host: Option<&str>) -> Markup {
+    html! {
+        tr class=[(!row.conflicts.is_empty()).then_some("row-collision")] {
+            td title=(row.mapping.raw) {
+                @match row.mapping.host_port {
+                    Some(r) if r.start == r.end => {
+                        @if row.status.is_active() && host.is_some() {
+                            span data-host-port=(r.start.to_string()) data-host=[host] { (r.start) }
+                        } @else {
+                            span.port-static title="Service not running" { (r.start) }
+                        }
+                    }
+                    Some(r) => { (format!("{}-{}", r.start, r.end)) }
+                    None => { span.muted { "dynamic" } }
+                }
+                @if !row.conflicts.is_empty() {
+                    div.cell-secondary { "conflicts with " (row.conflicts.join(", ")) }
+                }
+            }
+            td { (row.mapping.protocol.as_str()) }
+            td {
+                @if row.mapping.host_network {
+                    span.muted { "host network" }
+                } @else {
+                    (row.mapping.container_port)
+                }
+            }
+            td { a href=(row.href) { (row.owner) } }
+            td { (plain_status_badge(&row.status)) }
+        }
+    }
+}
+
+pub struct PortsPage<'a> {
+    /// This hub's own ports, when its machine is in scope.
+    pub local: Option<(&'a [PortRow<'a>], &'a [HostNet<'a>])>,
+    /// The hub's name, to head its ports when other machines are shown too.
+    pub hub_name: &'a str,
+    pub remotes: &'a [RemotePorts],
+    /// `/ports/machines` in the page's scope.
+    pub remotes_route: &'a str,
+    pub scopes: Option<Vec<super::scope::ScopeChoice>>,
+    pub csrf: &'a str,
+    pub health: Health,
+}
+
+pub fn ports_page(p: &PortsPage) -> Markup {
     let body = html! {
         (page_header("Ports", html! {}))
-        div #ports-conflicts hx-get="/ports/conflicts"
-            hx-trigger="sse:any-status delay:300ms, sse:units-changed delay:300ms"
-            hx-swap="innerHTML" {
-            (conflicts_card(rows))
+        @if let Some(choices) = &p.scopes { (super::scope::scope_switch(choices)) }
+        @if let Some((rows, hosts)) = p.local {
+            div #ports-conflicts hx-get="/ports/conflicts"
+                hx-trigger="sse:any-status delay:300ms, sse:units-changed delay:300ms"
+                hx-swap="innerHTML" {
+                (conflicts_card(rows))
+            }
+            @if !p.remotes.is_empty() { (machine_title(p.hub_name, true, true)) }
+            (ports_content(rows, hosts, p.csrf, None))
         }
-        (ports_content(rows, hosts, csrf, None))
+        @if !p.remotes.is_empty() {
+            div #ports-machines hx-get=(p.remotes_route)
+                hx-trigger="sse:machines-changed, every 30s" hx-swap="innerHTML" {
+                (remote_ports(p.remotes))
+            }
+        }
     };
-    shell("Ports", Some(NavItem::Ports), Some(health), body)
+    shell("Ports", Some(NavItem::Ports), Some(p.health), body)
 }
 
 /// Everything below the Ports screen's header -- also the response to
@@ -536,5 +653,58 @@ mod tests {
         assert!(html.contains("qbit.container holds it. paperless.container is stopped and would fail to bind when started."));
         assert!(html.contains(r#"href="/containers/paperless.container/edit""#));
         assert!(conflicts_card(&rows[..0]).into_string().is_empty());
+    }
+
+    #[test]
+    fn another_machines_ports_link_to_its_host_and_its_unit_pages() {
+        let mut up = UnitStatus::not_found();
+        up.active_state = "active".into();
+        let row = |f: &str, status: &UnitStatus, conflicts: Vec<String>| RemotePortRow {
+            mapping: mapping(f, "8080:8080"),
+            owner: f.into(),
+            href: format!("/machines/pi/units/{f}"),
+            status: status.clone(),
+            conflicts,
+        };
+        let html = remote_ports(&[RemotePorts {
+            id: "pi".into(),
+            name: "Pi".into(),
+            host: Some("10.0.0.5".into()),
+            answering: true,
+            note: None,
+            rows: Some(vec![
+                row("web.container", &up, vec!["old.container".into()]),
+                row(
+                    "old.container",
+                    &UnitStatus::not_found(),
+                    vec!["web.container".into()],
+                ),
+            ]),
+        }])
+        .into_string();
+        assert!(html.contains(r#"data-host-port="8080" data-host="10.0.0.5""#));
+        assert!(html.contains(r#"href="/machines/pi/units/web.container""#));
+        assert!(html.contains("conflicts with old.container"));
+        assert!(
+            !html.contains("sse-swap"),
+            "no live badges for another machine"
+        );
+        assert_eq!(
+            html.matches("data-host-port").count(),
+            1,
+            "only a running service links"
+        );
+
+        let silent = remote_ports(&[RemotePorts {
+            id: "pi".into(),
+            name: "Pi".into(),
+            host: None,
+            answering: false,
+            note: Some("Pi isn't answering (refused).".into()),
+            rows: None,
+        }])
+        .into_string();
+        assert!(silent.contains("Pi isn't answering (refused)."));
+        assert!(!silent.contains("<table"));
     }
 }
