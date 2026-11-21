@@ -1,16 +1,24 @@
 use axum::Form;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use serde::Deserialize;
 use tower_sessions::Session;
 
+use futures_util::future::join_all;
+
 use crate::config::AppState;
 use crate::error::{AppError, FragmentError, PageError};
+use crate::fleet::Listing;
 use crate::imageinfo;
 use crate::quadlet::ports;
 use crate::quadlet::{QuadletError, QuadletUnit, UnitKind, discovery, refs};
 use crate::web::core;
-use crate::web::templates::ports::{HostNet, PodTargets, PortRow, UnitRef};
+use crate::web::scope::{Scope, ScopeQuery};
+use crate::web::templates::list::remote_unit_url;
+use crate::web::templates::overview::MachineInfo;
+use crate::web::templates::ports::{
+    HostNet, PodTargets, PortRow, PortsPage, RemotePortRow, RemotePorts, UnitRef,
+};
 use crate::web::templates::{self};
 
 /// Builds every declared `PublishPort=` mapping across Containers and Pods
@@ -144,13 +152,108 @@ async fn csrf(session: &Session) -> String {
 pub async fn index(
     State(state): State<AppState>,
     session: Session,
+    Query(query): Query<ScopeQuery>,
 ) -> Result<impl IntoResponse, PageError> {
+    let scope = Scope::resolve(&state.fleet, query.m.as_deref())?;
     let health = state.health.get();
     let csrf = csrf(&session).await;
-    Ok(with_rows(&state, |rows, hosts| {
-        templates::ports::ports_page(rows, hosts, &csrf, health)
-    })
-    .await?)
+    let remotes = remote_ports(&state, &scope).await;
+    let remotes_route = scope.link("/ports/machines");
+    let hub_name = MachineInfo::detect().hostname;
+    if scope.includes_local() {
+        Ok(with_rows(&state, |rows, hosts| {
+            templates::ports::ports_page(&PortsPage {
+                local: Some((rows, hosts)),
+                hub_name: &hub_name,
+                remotes: &remotes,
+                remotes_route: &remotes_route,
+                scopes: scope.choices(&state.fleet, "/ports"),
+                csrf: &csrf,
+                health,
+            })
+        })
+        .await?)
+    } else {
+        Ok(templates::ports::ports_page(&PortsPage {
+            local: None,
+            hub_name: &hub_name,
+            remotes: &remotes,
+            remotes_route: &remotes_route,
+            scopes: scope.choices(&state.fleet, "/ports"),
+            csrf: &csrf,
+            health,
+        }))
+    }
+}
+
+/// Every other machine in scope's ports -- the `/ports/machines` fragment.
+pub async fn machines(
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<maud::Markup, FragmentError> {
+    let scope = Scope::resolve(&state.fleet, query.m.as_deref())?;
+    Ok(templates::ports::remote_ports(
+        &remote_ports(&state, &scope).await,
+    ))
+}
+
+/// The other machines' published ports, side by side, from what each
+/// answers now or last answered. Their pods' ports stay on the pod (which
+/// member serves one is read from images on that machine, later), and
+/// ports recorded for a host-network container there aren't shown yet.
+async fn remote_ports(state: &AppState, scope: &Scope) -> Vec<RemotePorts> {
+    const KINDS: &[UnitKind] = &[UnitKind::Container, UnitKind::Pod];
+    join_all(
+        scope
+            .remotes(&state.fleet)
+            .into_iter()
+            .map(|linked| async move {
+                let listing = state.fleet.listing(&linked, KINDS).await;
+                let entry = &linked.entry;
+                let note = match &listing {
+                    Listing::Live(_) => None,
+                    Listing::Stale { as_of, reason, .. } => Some(format!(
+                        "{} isn't answering ({reason}). These are the ports it reported {}.",
+                        entry.name,
+                        templates::selfupdate::ago(
+                            std::time::UNIX_EPOCH + std::time::Duration::from_secs(*as_of)
+                        ),
+                    )),
+                    Listing::Unreachable { reason } => Some(format!(
+                        "{} isn't answering ({reason}), and hasn't since this hub started.",
+                        entry.name
+                    )),
+                };
+                let rows = listing.units().map(|(units, _)| {
+                    let files: Vec<QuadletUnit> = units.iter().map(|(u, _)| u.clone()).collect();
+                    let mut mappings = ports::extract(&files);
+                    mappings.sort_by_key(|m| m.host_port.map(|r| r.start).unwrap_or(u16::MAX));
+                    mappings
+                        .iter()
+                        .filter_map(|m| {
+                            let (_, status) =
+                                units.iter().find(|(u, _)| u.file_name == m.file_name)?;
+                            Some(RemotePortRow {
+                                conflicts: ports::conflicts_with(m, &mappings),
+                                owner: m.file_name.clone(),
+                                href: remote_unit_url(&entry.id, &m.file_name),
+                                status: status.clone(),
+                                mapping: m.clone(),
+                            })
+                        })
+                        .collect()
+                });
+                RemotePorts {
+                    id: entry.id.clone(),
+                    name: entry.name.clone(),
+                    host: entry.host(),
+                    answering: listing.is_live(),
+                    note,
+                    rows,
+                }
+            }),
+    )
+    .await
 }
 
 /// The `<tbody>` rows only -- re-fetched by the Ports table on

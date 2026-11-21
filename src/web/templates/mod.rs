@@ -20,6 +20,7 @@ pub mod pods;
 pub mod ports;
 pub mod registries;
 pub mod remote_unit;
+pub mod scope;
 pub mod secrets;
 pub mod selfupdate;
 pub mod services;

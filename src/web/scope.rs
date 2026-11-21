@@ -4,10 +4,18 @@
 
 use crate::error::AppError;
 use crate::fleet::{Fleet, Linked};
+use crate::web::templates::overview::MachineInfo;
+use crate::web::templates::scope::ScopeChoice;
 
 /// The id this hub's own machine goes by in `?m=` (no paired machine can
 /// take it, see `Fleet::add`).
 pub const LOCAL: &str = "local";
+
+/// A page's query string when `?m=` is all it takes.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct ScopeQuery {
+    pub m: Option<String>,
+}
 
 pub enum Scope {
     All,
@@ -57,5 +65,39 @@ impl Scope {
             Self::Local => Vec::new(),
             Self::One(m) => vec![(**m).clone()],
         }
+    }
+
+    /// The switcher's chips for the page at `path`: every machine, this
+    /// hub, each paired one. `None` when the hub has no other machines.
+    pub fn choices(&self, fleet: &Fleet, path: &str) -> Option<Vec<ScopeChoice>> {
+        let machines = fleet.machines();
+        if machines.is_empty() {
+            return None;
+        }
+        let current = self.param();
+        let mut out = vec![
+            ScopeChoice {
+                href: path.to_string(),
+                label: "All machines".into(),
+                dot: None,
+                current: current.is_none(),
+            },
+            ScopeChoice {
+                href: format!("{path}?m={LOCAL}"),
+                label: MachineInfo::detect().hostname,
+                dot: Some(true),
+                current: current == Some(LOCAL),
+            },
+        ];
+        for m in machines {
+            let online = fleet.seen(&m.entry.id).map(|s| s.reach.is_online());
+            out.push(ScopeChoice {
+                current: current == Some(m.entry.id.as_str()),
+                href: format!("{path}?m={}", m.entry.id),
+                label: m.entry.name,
+                dot: online,
+            });
+        }
+        Some(out)
     }
 }

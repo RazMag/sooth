@@ -192,30 +192,6 @@ pub fn machine_row(h: &MachineHeader, colspan: usize, retry: &str) -> Markup {
     }
 }
 
-/// One choice in the scope switcher.
-pub struct ScopeChoice {
-    pub href: String,
-    pub label: String,
-    /// Online, offline, or not known yet; `None` for "All machines".
-    pub dot: Option<bool>,
-    pub current: bool,
-}
-
-fn scope_switch(choices: &[ScopeChoice]) -> Markup {
-    html! {
-        nav.scope-switch aria-label="Machines" {
-            @for c in choices {
-                a.chip href=(c.href) aria-current=[c.current.then_some("page")] {
-                    @if let Some(online) = c.dot {
-                        span.machine-dot.is-online[online].is-offline[!online] aria-hidden="true" {}
-                    }
-                    (c.label)
-                }
-            }
-        }
-    }
-}
-
 pub struct ServicesPage<'a> {
     pub stats: &'a Stats,
     pub csrf: &'a str,
@@ -224,7 +200,7 @@ pub struct ServicesPage<'a> {
     pub body: &'a TableBody<'a>,
     pub counts_route: &'a str,
     /// The scope switcher, when the hub has other machines.
-    pub scopes: Option<Vec<ScopeChoice>>,
+    pub scopes: Option<Vec<super::scope::ScopeChoice>>,
     /// Offer New container / pod: this hub's own machine is in scope (new
     /// units are made here; placing them on other machines comes later).
     pub creates: bool,
@@ -240,7 +216,7 @@ pub fn services_page(p: &ServicesPage) -> Markup {
     };
     let body = html! {
         (super::page_header("Services", html! {}))
-        @if let Some(choices) = &p.scopes { (scope_switch(choices)) }
+        @if let Some(choices) = &p.scopes { (super::scope::scope_switch(choices)) }
         div id="services-counts" hx-get=(p.counts_route)
             hx-trigger="sse:units-changed, sse:any-status delay:300ms, sse:machines-changed" hx-swap="innerHTML" {
             (stats_bar(p.stats))

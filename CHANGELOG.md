@@ -40,6 +40,13 @@ All notable changes to sooth are documented here. The format follows
   access; the bulk bar works across machines too. A machine that stops
   answering keeps showing what it last reported, marked offline, with its
   actions off and a Retry.
+- **Overview and Ports cover every machine (v2 work in progress).** The
+  Overview has a card per machine, counts every machine's services in its
+  headline and tiles, and lists failed units and machines that aren't
+  answering under "Needs you". Ports shows each paired machine's published
+  ports under its own heading, with conflicts checked per machine and port
+  links that open that machine's address. Both take `?m=` and the machine
+  chips, like Services.
 - **SSH links (v2 work in progress).** A machine can be added as
   `ssh://user@host` when the hub reaches it over SSH but not on the agent's
   port. The hub keeps an SSH tunnel to the agent's loopback port, with its

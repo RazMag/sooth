@@ -331,8 +331,11 @@ the address (`?m=local` for the hub's own), narrow it to one. Another
 machine's unit page shows its status, its quadlet and the end of its
 journal, with Start, Stop and Restart when the hub has full access. A
 machine that stops answering keeps showing what it last reported, marked
-offline, with its actions turned off and a Retry. Editing, moving and
-deleting units on other machines come in a later 2.0 update.
+offline, with its actions turned off and a Retry. The **Overview** has a
+card per machine and counts them all, and **Ports** lists each machine's
+published ports under its own heading; both take the same chips and
+`?m=`. Editing, moving and deleting units on other machines come in a
+later 2.0 update.
 
 **Over SSH.** For a machine the hub can reach over SSH but not on the
 agent's port, leave the agent on its default `127.0.0.1:8421` and enter
